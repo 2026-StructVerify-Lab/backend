@@ -39,6 +39,7 @@ class VerificationPipeline:
         logger.info(f"파이프라인 시작: {src.value}")
 
         # ── Step 1~2: 입력 → 전처리 → SIR Tree ──
+        # [TODO] 이수민 : 전처리 담당이 타는 구간 (원본 → Raw Text → SIR Tree)입니다. extract_text와 build_sir 함수 확인 
         raw_text = await extract_text(source, src)
         sir_doc = build_sir(raw_text, src,
                             source_uri=source if src == SourceType.URL else None)
