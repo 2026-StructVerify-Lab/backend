@@ -1,0 +1,40 @@
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# ── Environment ──
+.env**
+.env.local
+.env.*.local
+
+# Example 제외
+!.env.example
+
+# [TODO-all]
+# 본인 개인 개발 환경 env 를 추가했다면 여기 밑에 추가해주세요.
+
+
+# ── IDE ──
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+*.DS_Store
+
+
+
+# ── Logs ──
+*.log
+logs/
+
+# ── OS ──
+Thumbs.db
+
+# -- config 파일 --
+config/default.yaml
