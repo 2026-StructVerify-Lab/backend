@@ -10,6 +10,12 @@ v2.0에서 Graph Anchor, SIR Tree, Provenance, Feedback 스키마 추가.
   3단계 판정 체계 (SUPPORTS/REFUTES/NEI) → match/mismatch/unverifiable
 [참고] AutoSchemaKG (arXiv 2505.23628) — https://github.com/NousResearch/AutoSchemaKG
   LLM이 도메인 스키마를 자동 유도하는 Schema Induction 구조 참고
+  
+[DONE] 김예슬
+- 팀원 코드가 붙기 전에 입출력 계약부터 고정
+- SIR Tree 구조 + Claim/Graph/Evidence/VerificationResult 모델 설계
+- 검증 결과에 mismatch_type, explanation, provenance_summary 필드 추가
+- GraphNode/GraphEdge 모델 추가 (v2)
 """
 from __future__ import annotations
 from datetime import datetime
