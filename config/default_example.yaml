@@ -5,15 +5,24 @@ app:
   debug: true
 
 llm:
-  provider: "openai"            # "openai" | "hcx"
-  model: "gpt-4o"
+  provider: "hcx"               # "hcx" | "openai" 
+  models:
+    heavy: "HCX-003"            # 스키마 유도, 설명 생성 등 복잡한 태스크
+    light: "HCX-DASH-001"       # 도메인 분류, check-worthiness 등 간단한 태스크
+    reasoning: "HCX-RAG"        # RAG Reasoning 모델 (복합 근거 종합)
   temperature: 0.1
   max_tokens: 2048
-  api_key_env: "LLM_API_KEY"
+  api_key_env: "NCP_API_KEY"    # 클라비 제공 NCP API Key
 
-domain_llm:
-  enabled: false
-  fallback_to_base: true
+embedding:
+  provider: "hcx"
+  model: "HCX-EMB-V2"          # 임베딩 모델 v2
+  api_key_env: "NCP_API_KEY"
+
+reranker:
+  provider: "hcx"
+  model: "HCX-RERANKER"        # 리랭커 모델
+  api_key_env: "NCP_API_KEY"
 
 kosis:
   base_url: "https://kosis.kr/openapi"
