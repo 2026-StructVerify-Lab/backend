@@ -66,6 +66,12 @@ adaptation:
 verification:
   tolerance_percent: 1.0
   min_confidence: 0.7
+  
+candidate_detection:
+  enabled: true
+  threshold: 0.65
+  use_surface_signals: true
+  teacher_llm_fallback: true
 
 observability:
   langfuse_enabled: false
