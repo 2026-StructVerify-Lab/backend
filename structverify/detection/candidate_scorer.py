@@ -1,11 +1,21 @@
 """
 detection/candidate_scorer.py — 문장 단위 검증 후보 점수화
 
-설계 원칙
-- regex만으로 후보를 결정하지 않는다.
-- surface signal + teacher LLM + weak supervision 규칙을 결합할 수 있는 인터페이스를 제공한다.
-- 현재 버전은 "teacher LLM + heuristic fallback" 구조로 작성.
+[김예슬]
+- Teacher LLM 기반 0~1 점수화 로직 담당
+- heuristic fallback은 운영 안정성을 위한 보조 수단
+- 학습 데이터 충분 누적 후 소형 분류 모델(LoRA fine-tuned)로 교체 계획
+
+[설계 원칙]
+- regex/rule만으로 후보를 결정하지 않는다.
+- surface signal + teacher LLM + weak supervision 규칙을 결합할 수 있는 인터페이스 제공.
+- 현재 버전: "teacher LLM + heuristic fallback" 구조.
 - 이후 작은 classifier를 붙일 때 이 파일만 교체하면 된다.
+
+[LLM 학습 계획]
+  Phase 1: Teacher LLM (HCX-DASH-001)이 직접 판단 → 결과를 학습 샘플로 저장
+  Phase 2: Step 0 합성 데이터 + 운영 피드백 누적 → LoRA fine-tuning
+  Phase 3: 학습된 경량 모델로 교체 (비용 절감 + 속도 향상)
 
 출력
 - candidate_score: 0~1
@@ -23,6 +33,9 @@ from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# TODO [김예슬]: 프롬프트 튜닝 — domain-packs의 few-shot 예시 주입
+#   - 도메인별 positive/negative 예시 2~3개씩 추가
+#   - "공식 통계와 연결 가능" 기준을 예시로 명확히 제시
 CANDIDATE_PROMPT = """당신은 수치 기반 팩트체크 시스템의 1차 후보 탐지기입니다.
 아래 문장이 "공식 통계나 구조화된 데이터로 검증할 만한 후보 문장"인지 판단하세요.
 
@@ -47,6 +60,9 @@ JSON으로만 답하세요:
 }}
 """
 
+# ── heuristic fallback 패턴 (LLM 실패 시만 사용) ────────────────────────
+# 아래 패턴들은 LLM이 호출 불가능할 때만 사용하는 fallback입니다.
+# 운영 환경에서는 LLM 판단이 우선입니다.
 TIME_PATTERN = re.compile(r"\d{4}년|\d+월|\d+분기|전년|지난해|올해")
 COMPARISON_PATTERN = re.compile(r"증가|감소|상승|하락|올랐다|내렸다|대비|비율|점유율|이상|이하|안팎")
 POPULATION_PATTERN = re.compile(r"국내|전국|가구|가계|농가|학생|청년|고령자|근로자|기업|미국|일본|유럽|한국")
@@ -62,8 +78,21 @@ async def score_candidate(
     문장 후보 점수 계산.
 
     현재 로직
-    1) teacher LLM 시도
+    1) teacher LLM 시도 (HCX-DASH-001 경량 모델)
     2) 실패 시 heuristic fallback
+
+    TODO [김예슬]: 도메인 컨텍스트 활용
+      - context["domain"]을 프롬프트에 주입하여 도메인별 판단 기준 적용
+      - domain-packs/{domain}/prompts.yaml의 candidate 예시 주입
+
+    TODO [김예슬]: 학습 데이터 수집 로직 추가
+      - teacher LLM 판단 결과를 DB에 저장 (sample_builder.py 연동)
+      - 나중에 LoRA fine-tuning에 활용
+
+    TODO [김예슬]: 소형 분류 모델 교체 로직 (Phase 3)
+      - 학습된 adapter 경로 확인 → 있으면 PEFT 모델 추론
+      - adapter_path = config.get("adaptation", {}).get("adapter_path")
+      - if adapter_path: return _score_with_trained_model(sentence, adapter_path)
     """
     config = config or {}
     cd_cfg = config.get("candidate_detection", {})
@@ -85,6 +114,7 @@ async def score_candidate(
         except Exception as e:
             logger.warning(f"candidate LLM 판별 실패 — heuristic fallback 사용: {e}")
 
+    # fallback: LLM 실패 시만 사용
     return _score_candidate_heuristic(sentence, threshold=threshold)
 
 
@@ -94,7 +124,13 @@ def _score_candidate_heuristic(
 ) -> tuple[float, bool, str, dict[str, Any]]:
     """
     최소한의 fallback heuristic.
-    논문 실험에서 baseline으로도 사용 가능.
+
+    TODO [김예슬]: 논문 실험 baseline으로도 활용 가능
+      - 이 함수의 성능(F1, precision, recall)을 측정하고
+        teacher LLM 및 fine-tuned 모델과 비교
+
+    주의: 이 heuristic은 LLM 호출 실패 시만 사용합니다.
+    Rule 기반으로 검증 후보를 결정하는 용도로 사용하지 마세요.
     """
     has_quantity = bool(NUMBER_PATTERN.search(sentence))
     has_time_expr = bool(TIME_PATTERN.search(sentence))

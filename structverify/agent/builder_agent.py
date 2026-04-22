@@ -1,10 +1,22 @@
 """
 agent/builder_agent.py — Agent B: 도메인 적응 관리자
 
-변경 요약
-- 기존 사전학습 경로는 유지
-- synthetic_generator가 sentence_to_candidate 태스크를 함께 생성하도록 확장되었으므로
-  build_training_samples(mode="pretrain")만 호출하면 candidate detection 학습 데이터까지 같이 포함된다.
+[김예슬]
+- KOSIS 메타데이터 기반 Self-Instruct 합성 데이터 생성 및 LoRA 학습 루프 담당
+- 피드백 기반 추가 학습(_trigger_adaptation) 담당
+- synthetic_generator, sample_builder, adapter_trainer 연결 오케스트레이션
+
+[학습 파이프라인]
+  [경로 1] 사전학습 (pretrain_domain):
+    KOSIS 메타 → LLM Self-Instruct → positive/negative 쌍 생성
+    → 학습 포맷 변환 → LoRA Fine-tuning → 평가 → 배포
+
+  [경로 2] 피드백 학습 (_trigger_adaptation):
+    Human Review 수정 결과 → 추가 LoRA Fine-tuning → 평가 → 배포
+
+[변경 요약]
+- synthetic_generator가 sentence_to_candidate 태스크를 함께 생성하도록 확장
+- build_training_samples(mode="pretrain")만 호출하면 candidate detection 학습 데이터까지 포함
 """
 from __future__ import annotations
 
@@ -44,6 +56,19 @@ class BuilderAgent:
         2) synthetic positive/negative candidate + claim/schema 샘플 생성
         3) 학습 포맷 변환
         4) LoRA 학습 → 평가 → 배포
+
+        TODO [김예슬]: synthetic_generator.py 학습 샘플 생성 품질 검증
+          - positive 샘플: KOSIS 통계 수치를 정확히 인용한 문장
+          - negative 샘플: 수치를 변형/맥락을 바꾼 문장
+          - candidate detection 샘플: 검증 가능/불가능 문장 쌍
+
+        TODO [김예슬]: sample_builder.py pretrain 포맷 검증
+          - HuggingFace Dataset 형식으로 변환
+          - instruction/input/output 필드 구조 확인
+
+        TODO [김예슬]: adapter_trainer.py LoRA 학습 구현
+          - HuggingFace PEFT (LoRA) 라이브러리 사용
+          - MLflow로 실험 추적 (mlflow_tracking_uri 설정)
         """
         logger.info(f"[Agent B] === 사전학습 시작: {domain} ===")
 
@@ -53,6 +78,7 @@ class BuilderAgent:
             logger.error("[Agent B] 메타데이터 수집 실패 — 사전학습 중단")
             return None
 
+        # TODO [박재윤]: save_to_db가 실제 DB에 저장하는지 확인
         await save_to_db(catalog, self.config)
         logger.info(f"[Agent B] 메타데이터 {len(catalog)}건 수집 + DB 저장 완료")
 
@@ -70,10 +96,12 @@ class BuilderAgent:
         await save_synthetic_data(synthetic)
 
         logger.info("[Agent B] Step 0-3: 학습 포맷 변환")
+        # mode="pretrain": claim/schema + candidate detection 샘플 모두 포함
         samples = build_training_samples(synthetic=synthetic, mode="pretrain")
         logger.info(f"[Agent B] 학습 샘플 {len(samples)}건 생성")
 
         logger.info("[Agent B] Step 0-4: LoRA 학습")
+        # TODO [김예슬]: adapter_trainer.train() 실제 PEFT LoRA 학습 구현
         adapter_path = await self.trainer.train(domain, samples)
 
         if not adapter_path:
@@ -97,6 +125,9 @@ class BuilderAgent:
     async def log_feedback(self, event: FeedbackEvent) -> None:
         """
         Step 11: 피드백 저장
+
+        TODO [김예슬]: feedback_store.save() 실제 DB 저장 구현
+        TODO [박재윤]: FeedbackEvent → feedback_events 테이블 INSERT 확인
         """
         await self.feedback_store.save(event)
         logger.info(f"[Agent B] 피드백 기록: {event.feedback_type.value}")
@@ -108,6 +139,14 @@ class BuilderAgent:
     async def _trigger_adaptation(self) -> None:
         """
         Step 12: 피드백 기반 Adaptation
+
+        TODO [김예슬]: 피드백 데이터로 sample_builder.py (mode="finetune") 포맷 변환 검증
+          - Human Review 수정 결과: corrected_verdict, reviewer_note
+          - 학습 샘플: (claim_text, original_verdict) → corrected_verdict
+          - instruction tuning 형식으로 변환
+
+        TODO [김예슬]: 피드백 학습 후 기존 adapter와 merge 전략 결정
+          - 완전 교체 vs LoRA weight merge
         """
         logger.info("[Agent B] 피드백 Adaptation 트리거됨")
         events = await self.feedback_store.get_pending()
@@ -124,6 +163,10 @@ class BuilderAgent:
     async def generate_domain_pack(self, domain: str) -> DomainPack:
         """
         새 도메인용 Domain Pack 생성 placeholder
+
+        TODO [김예슬]: domain-packs/{domain}/prompts.yaml 자동 생성
+          - KOSIS 메타데이터 기반 few-shot 예시 자동 생성
+          - domain-packs 디렉토리 구조 생성
         """
         logger.info(f"[Agent B] Domain Pack 생성: {domain}")
         return DomainPack(pack_id=f"pack_{domain}_v1", domain=domain, version="1.0")

@@ -13,6 +13,7 @@ core/pipeline.py — v2.1 검증 파이프라인 (13단계)
   "문장 단위 candidate scoring + Claim Detection" 구조로 확장
 - has_numeric regex는 보조 surface signal로만 사용
 - 실제 검증 후보 여부는 candidate_score / candidate_label 기준으로 판단
+- 전체 파이프라인 흐름 및 Agent 간 연결 관리
 
 [참고] ReAct (Yao et al., ICLR 2023) — https://github.com/ysymyth/ReAct
   Thought→Action→Observation 순환 기반 오케스트레이션 패턴
@@ -52,8 +53,20 @@ class VerificationPipeline:
         self.config = config or {}
         self.runtime_agent = RuntimeAgent(config=self.config)
 
-        # TODO: BuilderAgent 초기화 (비동기 백그라운드)
-        # TODO: RawStorage, DBManager, DWHManager, GraphStore 초기화
+        # TODO [김예슬]: BuilderAgent 초기화 (비동기 백그라운드 학습 루프)
+        # self.builder_agent = BuilderAgent(config=self.config)
+
+        # TODO [박재윤]: RawStorage 초기화 (MinIO/S3 업로드)
+        # self.raw_storage = RawStorage(config=self.config.get("storage", {}))
+
+        # TODO [박재윤]: DBManager 초기화 (PostgreSQL async)
+        # self.db_manager = DBManager(config=self.config.get("database", {}))
+
+        # TODO [박재윤]: DWHManager 초기화 (Snowflake)
+        # self.dwh_manager = DWHManager(config=self.config.get("dwh", {}))
+
+        # TODO [박재윤]: GraphStore 초기화 (Neo4j)
+        # self.graph_store = GraphStore(config=self.config.get("graph", {}))
 
     async def run(self, source: str, source_type: str = "text") -> VerificationReport:
         """
@@ -72,10 +85,15 @@ class VerificationPipeline:
         # ─────────────────────────────────────────────
         # Step 1~2: 입력 → 전처리 → SIR Tree
         # ─────────────────────────────────────────────
-        # [TODO] 이수민 : 전처리 담당이 타는 구간
-        # 원본 입력 → Raw Text 추출 → SIR Tree 변환
-        # extract_text와 build_sir 함수 확인
+        # TODO [이수민]: extractor.py — URL/PDF/DOCX 실제 추출 로직 구현
+        #   - URL: trafilatura.extract() 호출
+        #   - PDF: PyMuPDF(fitz) 페이지별 텍스트 추출
+        #   - DOCX: python-docx 단락 추출
         raw_text = await extract_text(source, src)
+
+        # TODO [이수민]: sir_builder.py — SIR Tree 변환 검증
+        #   - block 분할 + 문장 분리 + 절대 offset 보정 확인
+        #   - entity_refs, event_refs 추출 (현재 regex placeholder → NER 교체 예정)
         sir_doc = build_sir(
             raw_text,
             src,
@@ -83,28 +101,49 @@ class VerificationPipeline:
         )
         logger.info(f"SIR Tree: {len(sir_doc.blocks)} blocks")
 
-        # TODO: Step 1.5 — 원본 → Raw Storage(S3) 저장
-        # TODO: Step 2.5 — SIR Tree → PostgreSQL 적재
+        # TODO [박재윤]: Step 1.5 — 원본 텍스트 → Raw Storage(S3/MinIO) 저장
+        #   await self.raw_storage.upload(source, raw_text, metadata={"source_type": src.value})
+
+        # TODO [박재윤]: Step 2.5 — SIR Document → PostgreSQL 저장
+        #   await self.db_manager.save_document(sir_doc)
 
         # ─────────────────────────────────────────────
         # Step 3~9: Runtime Agent 실행
         # ─────────────────────────────────────────────
-        # Step 3: Domain Classification
-        # Step 4: Sentence Candidate Detection + Claim Detection
-        #         - 문장 단위 candidate_score / candidate_label 계산
-        #         - 상위 후보 문장만 check-worthiness 판별
-        # Step 5: Schema Induction
-        # Step 6: Graph Construction
-        # Step 7: Retrieval + Evidence Subgraph Extraction
-        # Step 8: Verification (deterministic)
-        # Step 9: Explanation + Provenance
+        # [김예슬] RuntimeAgent.process() 내부 흐름:
+        #   Step 3: LLM 도메인 분류 (HCX-DASH-001)
+        #   Step 4: Teacher LLM candidate scoring → check-worthiness (HCX-003)
+        #           ※ Regex는 fallback 신호에 불과, LLM이 최종 판단
+        #   Step 5: LLM Schema Induction (HCX-003)
+        #   Step 6: Claim Graph 구성
+        #   Step 7: KOSIS API 호출 → Evidence 서브그래프
+        #   Step 8: Deterministic 수치 비교 (LLM 미개입)
+        #   Step 9: LLM 설명 생성 (HCX-003)
         claims, results, nodes, edges = await self.runtime_agent.process(sir_doc)
 
-        # TODO: Step 10 — Human Review 인터페이스 연동
-        # TODO: Step 11 — Feedback Logging (BuilderAgent.log_feedback)
-        # TODO: Step 12 — Adaptation Trigger (BuilderAgent._trigger_adaptation)
-        # TODO: Step 13 — Report 렌더링 (PDF/HTML)
-        # TODO: DWH 적재 (Snowflake/BigQuery)
+        # TODO [박재윤]: Claims → PostgreSQL 저장
+        #   await self.db_manager.save_claims(claims)
+
+        # TODO [박재윤]: Results → PostgreSQL 저장
+        #   await self.db_manager.save_results(results)
+
+        # TODO [박재윤]: Nodes/Edges → Neo4j 저장
+        #   await self.graph_store.merge_nodes(nodes)
+        #   await self.graph_store.merge_edges(edges)
+
+        # TODO [김예슬]: Step 10 — Human Review 인터페이스 연동
+        #   웹 UI → reviewer_verdict 필드 업데이트
+
+        # TODO [김예슬]: Step 11 — Feedback Logging
+        #   await self.builder_agent.log_feedback(feedback_event)
+
+        # TODO [김예슬]: Step 12 — Adaptation Trigger
+        #   피드백 누적 시 builder_agent._trigger_adaptation() 자동 호출
+
+        # TODO [김예슬]: Step 13 — Report 렌더링 (PDF/HTML 리포트 생성)
+
+        # TODO [박재윤]: DWH 적재 (검증 로그, 모델 성능, LLM 비용)
+        #   await self.dwh_manager.load_verification_logs([...])
 
         report = VerificationReport(
             document=sir_doc,
