@@ -1,3 +1,5 @@
+#  아래 스크립 트 파일 CreateTable, DbConnect,openapiyes/noSave.test.py 전부 베이스라인 코드에 침투예정.
+
 import psycopg2
 from dotenv import load_dotenv
 import os
