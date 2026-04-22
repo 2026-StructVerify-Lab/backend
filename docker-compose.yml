@@ -1,0 +1,30 @@
+# docker-compose up -d << Docker명령어로  DB 띄우기(docker 켜져 있어야함)
+
+version: "3.8"
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: factcheck-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 1234
+      POSTGRES_DB: factcheck
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  # 나중에 주석 해제
+  # backend:
+  #   build: .
+  #   container_name: factcheck-api
+  #   env_file:
+  #     - .env
+  #   ports:
+  #     - "8000:8000"
+  #   depends_on:
+  #     - db
+
+volumes:
+  pgdata:
