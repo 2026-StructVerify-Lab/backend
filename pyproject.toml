@@ -28,14 +28,24 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.2", "mypy>=1.8"]
 peft = ["peft>=0.8", "transformers>=4.38", "torch>=2.1"]
+# PDF 추출 파이프라인 (preprocessing.pdf) 선택 의존성
+#   docling/bs4/lxml : 구조화 추출 + HTML 파싱
+#   pillow           : OCR 입력 이미지 핸들링
+#   easyocr          : 한국어 OCR 기본 백엔드 (벤치에서 Tesseract 대비 우수)
+#   pytesseract      : 영문 위주 문서용 대체 백엔드
+pdf = [
+    "docling>=1.0",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "pillow>=10.0",
+    "easyocr>=1.7",
+    "pytesseract>=0.3.10",
+]
 
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.backends._legacy:_Backend"
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
 
-[tool.pytest.ini_options]
-asyncio_mode = "auto"          # @pytest.mark.asyncio 없이도 async def 테스트 자동 인식
-testpaths = ["tests"]
-
-[tool.ruff]
-line-length = 100
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["structverify*", "api*"]
