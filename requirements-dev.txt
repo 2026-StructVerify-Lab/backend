@@ -5,3 +5,4 @@ ruff>=0.2
 mypy>=1.8
 ipykernel>=6.29
 notebook>=7.0
+pymupdf
