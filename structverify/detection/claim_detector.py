@@ -16,7 +16,7 @@ detection/claim_detector.py — 검증 가능 주장 탐지 (Step 4)
   threshold 이상인 문장만 이 check-worthiness 단계로 전달됩니다.
 - 즉, Step 4를 다음 두 단계로 분리합니다:
   1) Sentence Candidate Detection (candidate_scorer.py — Teacher LLM)
-  2) Claim Detection / Check-Worthiness (이 파일 — LLM 중량 모델)
+  2) Claim Detection / Check-Worthiness (LLM 중량 모델)
 """
 from __future__ import annotations
 
