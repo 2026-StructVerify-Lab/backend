@@ -11,6 +11,7 @@ venv/
 .env**
 .env.local
 .env.*.local
+.env
 
 # Example 제외
 !.env.example
