@@ -115,8 +115,10 @@ class RuntimeAgent:
         # TODO [김예슬]: domain_classifier.py 프롬프트 설계 및 튜닝
         #   - few-shot 예시 추가 (domain-packs 활용)
         #   - 신뢰도 낮을 때 "general" 도메인으로 fallback
-        domain = await classify_domain(sir_doc, self.config)
-        logger.info(f"[Agent A] Action: classify_domain → Observation: {domain}")
+        # domain = await classify_domain(sir_doc, self.config)
+        domain, domain_desc = await classify_domain(sir_doc, self.config) #[김예슬] - 도메인 설명도 반환하도록 수정
+        self.config["detected_domain"] = domain  
+        logger.info(f"[Agent A] Action: classify_domain → Observation: {domain} ({domain_desc})")
 
         # ── Action: detect_claims (candidate scoring + check-worthiness) ──
         # TODO [김예슬]: candidate_scorer.py — Teacher LLM 점수화 로직 완성

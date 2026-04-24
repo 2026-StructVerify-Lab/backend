@@ -1,12 +1,13 @@
-"""
-core/config_loader.py — YAML 설정 로더
-"""
 from __future__ import annotations
 import os
 from pathlib import Path
 
 def load_config(path: str | None = None) -> dict:
-    """config/default.yaml을 로드한다."""
+    # .env 파일 자동 로드
+    from dotenv import load_dotenv
+    env_path = Path(__file__).parent.parent.parent.parent / ".env"
+    load_dotenv(env_path)
+
     import yaml
     if path is None:
         path = str(Path(__file__).parent.parent.parent / "config" / "default.yaml")
