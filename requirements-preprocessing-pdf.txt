@@ -1,0 +1,12 @@
+# PDF 추출 파이프라인 (structverify.preprocessing.pdf) 의존성
+#   docling/bs4/lxml : 구조화 추출 + HTML 파싱
+#   pillow           : OCR 입력 이미지 핸들링
+#   easyocr          : 한국어 OCR 기본 백엔드 (벤치에서 Tesseract 대비 우수)
+#   pytesseract      : 영문 위주 문서용 대체 백엔드 (별도 apt: tesseract-ocr[-kor])
+-r requirements.txt
+docling>=1.0
+beautifulsoup4>=4.12
+lxml>=5.0
+pillow>=10.0
+easyocr>=1.7
+pytesseract>=0.3.10
