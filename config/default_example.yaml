@@ -4,15 +4,19 @@ app:
   version: "0.2.0"
   debug: true
 
+# backend/config/default.yaml
+# llm 섹션을 아래로 교체
+
 llm:
-  provider: "hcx"               # "hcx" | "openai" 
+  provider: "hcx"                    # openai → hcx 로 변경
   models:
-    heavy: "HCX-003"            # 스키마 유도, 설명 생성 등 복잡한 태스크
-    light: "HCX-DASH-001"       # 도메인 분류, check-worthiness 등 간단한 태스크
-    reasoning: "HCX-RAG"        # RAG Reasoning 모델 (복합 근거 종합)
+    heavy:      "HCX-003"            # 복잡한 태스크 (check-worthiness, 설명 생성) — v1 API
+    light:      "HCX-DASH-002"       # 빠른 분류 (도메인, candidate scoring) — v3 API
+    structured: "HCX-007"            # JSON 구조화 추출 (schema_inductor 전용) — v3 Structured Outputs
+    reasoning:  "HCX-003"            # 복합 근거 종합
   temperature: 0.1
   max_tokens: 2048
-  api_key_env: "NCP_API_KEY"    # 클라비 제공 NCP API Key
+  api_key_env: "NCP_API_KEY" # .env에 세팅
 
 embedding:
   provider: "hcx"
