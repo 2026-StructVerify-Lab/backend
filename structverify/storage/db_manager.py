@@ -17,16 +17,19 @@ logger = get_logger(__name__)
 
 class DBManager:
     def __init__(self, config: dict | None = None):
-        self.config = config or {}
-
-        # TODO [박재윤]: SQLAlchemy async engine 초기화
-        #   from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-        #   from sqlalchemy.orm import sessionmaker
-        #   self.engine = create_async_engine(
-        #       self.config.get("url", "postgresql+asyncpg://user:pass@localhost:5432/structverify"),
-        #       echo=False,
-        #   )
-        #   self.AsyncSession = sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False)
+      self.config = config or {}
+      
+      import psycopg2
+      from dotenv import load_dotenv
+      load_dotenv()
+      
+      self.conn = psycopg2.connect(
+          host=os.getenv("POSTGRES_HOST"),
+          port=os.getenv("POSTGRES_PORT"),
+          dbname=os.getenv("POSTGRES_DB"),
+          user=os.getenv("POSTGRES_USER"),
+          password=os.getenv("POSTGRES_PASSWORD")
+      )
 
     async def save_document(self, doc: SIRDocument) -> None:
         """
@@ -45,15 +48,29 @@ class DBManager:
         logger.warning(f"DB 저장 stub: doc {doc.doc_id}")
 
     async def save_claims(self, claims: list[Claim]) -> None:
-        """
-        TODO [박재윤]: claims 테이블 배치 INSERT 구현
-          INSERT INTO claims (claim_id, doc_id, block_id, sent_id, claim_text,
-                              claim_type, check_worthy_score, schema_json)
-          VALUES ...
-          - executemany 또는 asyncpg copy_records_to_table 활용
-          - schema 필드는 JSONB로 저장
-        """
-        logger.warning(f"DB 저장 stub: {len(claims)} claims")
+      cur = self.conn.cursor()
+      
+      for claim in claims:
+          cur.execute("""
+              INSERT INTO claims (claim_id, request_id, field_name, field_value,
+                                unit, is_approximate, modifier, parent_path,
+                                time_reference, context)
+              VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+          """, (
+              str(claim.claim_id),
+              str(claim.doc_id),
+              claim.schema.indicator,
+              claim.schema.value,
+              claim.schema.unit,
+              False,
+              None,
+              None,
+              claim.schema.time_period,
+              claim.claim_text
+          ))
+      
+      self.conn.commit()
+      cur.close()
 
     async def save_results(self, results: list[VerificationResult]) -> None:
         """
