@@ -41,6 +41,6 @@ include = ["structverify*"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 env_files = [".env"] 
-
+    
 [tool.ruff]
 line-length = 100
