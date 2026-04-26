@@ -1,5 +1,13 @@
 #  아래 스크립 트 파일 CreateTable, DbConnect,openapiyes/noSave.test.py 전부 베이스라인 코드에 침투예정.
 
+"""
+# 수정자: 박재윤
+# 수정 날짜: 2026-04-26
+# 수정 내용: requests, claims, truths, results 테이블 생성 스크립트 구현
+
+# [DONE] CREATE TABLE 4개 구현
+# [DONE] pgvector extension 추가
+"""
 import psycopg2
 from dotenv import load_dotenv
 import os
