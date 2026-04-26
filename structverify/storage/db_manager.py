@@ -1,12 +1,13 @@
 """
-storage/db_manager.py — PostgreSQL OLTP 매니저
+# 수정자: 박재윤
+# 수정 날짜: 2026-04-26
+# 수정 내용: __init__ psycopg2 연결 구현, save_claims INSERT 구현
 
-SIR Tree, Claims, Verification Results, Artifacts를 JSONB로 저장한다.
-
-[박재윤]
-- SQLAlchemy async engine 초기화 및 CRUD 구현 담당
-- init_db.sql의 테이블 구조에 맞춰 INSERT/SELECT 구현
-- 배치 INSERT 최적화 (executemany 활용)
+# [DONE] __init__ DB 연결 초기화
+# [DONE] save_claims 배치 INSERT 구현
+# [TODO] save_document 구현
+# [TODO] save_results 구현
+# [TODO] save_feedback 구현
 """
 from __future__ import annotations
 from structverify.core.schemas import SIRDocument, Claim, VerificationResult
@@ -18,7 +19,7 @@ logger = get_logger(__name__)
 class DBManager:
     def __init__(self, config: dict | None = None):
       self.config = config or {}
-      
+       
       import psycopg2
       from dotenv import load_dotenv
       load_dotenv()
