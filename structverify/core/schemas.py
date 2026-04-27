@@ -1,7 +1,7 @@
 """
-core/schemas.py — v2.1 전체 파이프라인 데이터 모델
+core/schemas.py — v3 전체 파이프라인 데이터 모델
 
-v2.1 변경점
+v2 변경점
 - Sentence에 regex 중심 has_numeric 대신
   has_numeric_surface + candidate_score/candidate_label 추가
 - claim candidate detection을 독립 태스크로 다루기 위한 필드 추가
@@ -10,6 +10,14 @@ v2.1 변경점
 설계 의도
 - surface rule은 보조 신호로만 사용
 - 실제 검증 후보 여부는 candidate_score / candidate_label이 담당
+
+v3 변경점 [김예슬]
+- GraphEdgeType에 4개 추가
+- COMPARE 엣지: indicator가 같은 Claim 쌍을 전부 연결
+"쉬었음인구"를 indicator로 가진 C1과 C2가 COMPARE로 연결되면,
+"2.6배" 검증 시 MetricNode 2-hop으로 C1+C2를 함께 KOSIS에 조회해서 비율 계산이 가능
+- 문맥 엣지: sir_doc이 넘어오면 extract_context_edges()를 호출해서 NEXT_SENT/IN_BLOCK/IN_DOC를 GraphEdge로 변환해 반환값에 포함
+
 """
 from __future__ import annotations
 
@@ -83,6 +91,12 @@ class GraphEdgeType(str, Enum):
     SOURCED_FROM = "sourced_from"
     CONTRADICTS = "contradicts"
     SUPPORTS = "supports"
+    # GraphRAG 문맥 엣지 (sir_builder.extract_context_edges → graph_builder)
+    NEXT_SENT = "next_sent"    # 문장 → 다음 문장 (문맥 흐름)
+    IN_BLOCK  = "in_block"     # 문장 → 소속 문단
+    IN_DOC    = "in_doc"       # 문단 → 소속 문서
+    # 복합 주장 검증용 (같은 지표를 공유하는 Claim 간)
+    COMPARE   = "compare"      # C1 ↔ C2 (2.6배 같은 파생 주장 검증)
 
 
 # ── SIR Tree ─────────────────────────────────────────────────
