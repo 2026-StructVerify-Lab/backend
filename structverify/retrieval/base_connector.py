@@ -6,6 +6,9 @@ v2: to_graph_nodes(), tag_provenance() 메서드 추가
 [참고] RAG (Lewis et al., NeurIPS 2020) — https://github.com/huggingface/transformers
   검색 → LLM context 주입 패턴. 커넥터의 search→fetch→context 흐름에 참고.
 """
+# 수정자: 신준수
+# 수정 날짜: 2026-04-27
+# 수정 내용: StatData에 official_value·unit·time_period(증거 정규화; 출처 API 키는 커넥터가 채움)
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -34,6 +37,10 @@ class StatData:
     stat_id: str; stat_name: str
     values: dict[str, Any] = field(default_factory=dict)
     raw_response: dict[str, Any] = field(default_factory=dict)
+    # Evidence/검증용 정규화(커넥터가 출처 API에서 채움; subgraph는 values 키를 직접 보지 않음)
+    official_value: float | None = None
+    unit: str | None = None
+    time_period: str | None = None
 
 
 class BaseConnector(ABC):

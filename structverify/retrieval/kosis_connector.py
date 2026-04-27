@@ -15,6 +15,9 @@ retrieval/kosis_connector.py — KOSIS Open API 커넥터 (과제 핵심)
 # 수정자: 신준수
 # 수정 날짜: 2026-04-26
 # 수정 내용: Param/statisticsParameterData.do?method=getList (통계표선택) fetch 구현
+# 수정자: 신준수
+# 수정 날짜: 2026-04-27
+# 수정 내용: fetch → StatData.official_value / unit / time_period (Param 셀 → 공용 필드)
 
 # [DONE] KOSIS API search() 구현
 # [DONE] getMeta(PRD/CMMT) 보강
@@ -65,6 +68,14 @@ def _kosis_text_to_json(text: str) -> Any | None:
             return json5.loads(t)
         except (ValueError, TypeError):
             return None
+
+
+# 역할: KOSIS 셀 문자열 → StatData unit/time_period
+def _kosis_cell_str(v: Any) -> str | None:
+    if v is None:
+        return None
+    s = str(v).strip()
+    return s or None
 
 
 # 역할: getMeta/Param JSON 본문(dict)에서 row[] 꺼내기 (에러-only dict면 [])
@@ -583,11 +594,18 @@ class KOSISConnector(BaseConnector):
                 if val is not None:
                     vmap["ratio"] = val
                 vmap = {k: v for k, v in vmap.items() if v is not None}
+                u = _kosis_cell_str(cell0.get("UNIT_NM"))
+                tp = _kosis_cell_str(cell0.get("PRD_DE"))
+                if not tp and cq and (cq.time_period or "").strip():
+                    tp = _kosis_cell_str(cq.time_period)
                 return StatData(
                     stat_id=stat_id,
                     stat_name=str(tnm2).strip() or stat_id,
                     values=vmap,
                     raw_response=raw_out,
+                    official_value=val,
+                    unit=u,
+                    time_period=tp,
                 )
         except httpx.HTTPError as e:
             logger.error("KOSIS Param fetch HTTP: %s", e)
