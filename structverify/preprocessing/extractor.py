@@ -56,6 +56,7 @@ from __future__ import annotations
 from structverify.core.schemas import SourceType
 from structverify.preprocessing.pdf import extract_pdf_to_markdown
 from structverify.utils.logger import get_logger
+import trafilatura, json
 
 logger = get_logger(__name__)
 

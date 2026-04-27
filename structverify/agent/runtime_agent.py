@@ -121,7 +121,7 @@ class RuntimeAgent:
         # Thought: "ClaimSchema → Knowledge Graph 노드/엣지를 구성해야 한다"
         # Observation: GraphNode[], GraphEdge[]
         # TODO [신준수]: graph_builder.py 노드/엣지 타입 완성
-        all_nodes, all_edges = build_claim_graph(claims)
+        all_nodes, all_edges = build_claim_graph(claims, sir_doc=sir_doc) # 호출부 로직 변경 [pipeline v3] 김예슬
         logger.info(f"[Agent A] Step 6 build_claim_graph → {len(all_nodes)} nodes")
 
         # ── 각 주장별 Step 7~9 ──────────────────────────────────────

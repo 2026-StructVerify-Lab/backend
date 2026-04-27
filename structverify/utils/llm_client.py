@@ -74,7 +74,7 @@ class LLMClient:
         self.max_tokens = int(self.config.get("max_tokens", 2048))
 
         # HCX API 키 — _direct_api_key로 테스트 시 직접 주입 가능
-        api_key_env = self.config.get("api_key_env", "CLOVASTUDIO_API_KEY")
+        api_key_env = self.config.get("api_key_env", "NCP_API_KEY")
         if self.config.get("_direct_api_key"):
             self.api_key = self.config["_direct_api_key"]
         else:

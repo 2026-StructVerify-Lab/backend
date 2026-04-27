@@ -185,13 +185,15 @@ class ClaimSchema(BaseModel):
     graph_schema_candidates: list[dict[str, str]] = Field(default_factory=list)
 
 
+
 class Claim(BaseModel):
     claim_id: UUID = Field(default_factory=uuid4)
     doc_id: UUID
     block_id: str
     sent_id: str
     claim_text: str
-    claim_type: ClaimType | None = None
+    claim_type: str | None = None          # 자유 문자열
+    canonical_type: ClaimType | None = None
     schema: ClaimSchema | None = None
     source_offset: SourceOffset = Field(default_factory=SourceOffset)
     check_worthy_score: float = 0.0

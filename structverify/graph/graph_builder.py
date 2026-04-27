@@ -41,92 +41,117 @@ graph/graph_builder.py — Claim/Evidence Graph 조립 (Step 6)
       - claim → BELONGS_TO  → metric
       - claim → BELONGS_TO  → entity
     → GraphNode[], GraphEdge[] 반환 (Neo4j 저장은 별도)
+  
+  [pipeline 수정 - 담당 : 김예슬]
+  - build_claim_graph() 시그니처 변경: sir_doc 파라미터 추가
+  · sir_doc이 있으면 extract_context_edges() 호출 → NEXT_SENT/IN_BLOCK/IN_DOC 추가
+  · GraphRAG 2-hop 탐색의 핵심 — 같은 문단 내 연관 수치 자동 발견
+ 
+- COMPARE 엣지 추가 (핵심 변경):
+  · 같은 MetricNode(indicator)를 공유하는 Claim 쌍에 COMPARE 엣지 생성
+  · 예: C1("21만7천") ↔ C2("8만4천") → 둘 다 indicator="쉬었음인구"
+  · → C3("2.6배") 같은 파생 주장 검증 시 C1+C2를 함께 KOSIS 조회 가능
+  · 같은 지표 여러 시점: C7(12.77개월/2024) ↔ C8(10.71개월/2004)
+    → "첫취업소요기간이 2.06개월 늘었다"는 주장도 C7+C8 동시 검증
+ 
+- 문맥 엣지를 GraphEdge 객체로 변환하여 반환값에 포함
+  · graph_store.py(박재윤)에서 Neo4j MERGE 시 일괄 처리 가능
+ 
 """
-
 from __future__ import annotations
-from uuid import uuid4
+ 
+from collections import defaultdict
+from typing import Any
+ 
 from structverify.core.schemas import (
-    Claim, GraphNode, GraphEdge, GraphNodeType, GraphEdgeType)
+    Claim, GraphEdge, GraphEdgeType, GraphNode, GraphNodeType, SIRDocument,ClaimType
+)
 from structverify.utils.logger import get_logger
-
+ 
 logger = get_logger(__name__)
-
-
-def build_claim_graph(claims: list[Claim]) -> tuple[list[GraphNode], list[GraphEdge]]:
+ 
+# 문맥 엣지 타입 문자열 → GraphEdgeType 매핑
+_CONTEXT_EDGE_MAP = {
+    "NEXT_SENT": GraphEdgeType.NEXT_SENT,
+    "IN_BLOCK":  GraphEdgeType.IN_BLOCK,
+    "IN_DOC":    GraphEdgeType.IN_DOC,
+}
+ 
+ 
+def build_claim_graph(
+    claims: list[Claim],
+    sir_doc: SIRDocument | None = None,
+) -> tuple[list[GraphNode], list[GraphEdge]]:
     """
-    클레임 리스트 → Claim Graph (노드 + 엣지) 조립
-
-    각 클레임의 schema(ClaimSchema)를 기반으로:
-    1) Claim Node 생성 (claim_id, claim_text)
-    2) Metric Node 생성 (schema.indicator)
-    3) Time Node 생성   (schema.time_period)
-    4) Entity Node 생성 (schema.population)
-    5) Relation 엣지 생성
-        - claim --MEASURED_AT--> time
-        - claim --BELONGS_TO --> metric
-        - claim --BELONGS_TO --> entity
-
-    Returns:
-        tuple[nodes, edges]
+    Claim 리스트 → Knowledge Graph (노드 + 엣지) 조립.
+ 
+    Args:
+        claims:  Claim 객체 리스트 (schema 포함)
+        sir_doc: SIRDocument (있으면 NEXT_SENT/IN_BLOCK/IN_DOC 문맥 엣지 추가)
+ 
+    생성되는 노드/엣지:
+      ClaimNode  → BELONGS_TO → MetricNode (indicator)
+      ClaimNode  → MEASURED_AT → TimeNode  (time_period)
+      ClaimNode  → BELONGS_TO → EntityNode (population)
+      ClaimNode  ↔ COMPARE ↔  ClaimNode   (같은 indicator 공유 시)
+      SentNode   → NEXT_SENT → SentNode   (문맥 순서)
+      SentNode   → IN_BLOCK  → BlockNode  (문단 소속)
+      BlockNode  → IN_DOC    → DocNode    (문서 소속)
     """
-    # 전체 그래프 누적 컨테이너
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
-
-    # 동일 indicator/time_period/population이 여러 claim에 반복 등장할 수 있으므로
-    # 노드 중복 생성을 막기 위해 이미 추가된 node_id를 추적한다.
     seen_node_ids: set[str] = set()
-
+ 
     def _add_node(node: GraphNode) -> None:
-        """중복 방지하면서 노드를 nodes 리스트에 추가하는 헬퍼"""
         if node.node_id not in seen_node_ids:
             nodes.append(node)
             seen_node_ids.add(node.node_id)
-
-    # ── 클레임 단위로 그래프 조립 ─────────────────────────────────
+ 
+    # ── 1) 기본 Claim 노드/엣지 (기존 로직) ───────────────────────────
+    # indicator별 claim_id 추적 (COMPARE 엣지 생성용)
+    metric_to_claims: dict[str, list[str]] = defaultdict(list)
+ 
     for claim in claims:
-        # (1) ClaimNode 생성
-        # claim_id의 hex 앞 8자리를 사용해 짧고 안정적인 node_id를 만든다.
-        # label에는 가독성을 위해 claim_text 앞부분만 잘라 표기한다.
         claim_node_id = f"claim:{claim.claim_id.hex[:8]}"
         _add_node(GraphNode(
             node_id=claim_node_id,
             node_type=GraphNodeType.CLAIM,
             label=claim.claim_text[:60],
             properties={
-                # 검증 단계에서 활용할 수 있도록 핵심 속성을 properties에 보관
                 "claim_text": claim.claim_text,
                 "value": claim.schema.value if claim.schema else None,
-                "claim_type": claim.claim_type.value if claim.claim_type else None,
+                "claim_type": claim.claim_type,
+                "canonical_type": (
+                    claim.canonical_type.value
+                    if isinstance(claim.canonical_type, ClaimType)
+                    else claim.canonical_type
+                ),
             },
         ))
-
-        # ClaimSchema가 없으면 Metric/Time/Entity를 만들 근거가 없으므로 스킵한다.
-        # (이 경우 ClaimNode만 그래프에 남는다.)
+ 
         if not claim.schema:
             continue
-
+ 
         schema = claim.schema
-
-        # (2) MetricNode 생성 + claim --BELONGS_TO--> metric
-        # indicator(지표명, 예: "실업률")가 있을 때만 노드/엣지를 생성한다.
+ 
+        # MetricNode + BELONGS_TO
         if schema.indicator:
             metric_node_id = f"metric:{schema.indicator}"
             _add_node(GraphNode(
                 node_id=metric_node_id,
                 node_type=GraphNodeType.METRIC,
                 label=schema.indicator,
-                properties={"unit": schema.unit},  # 단위가 있으면 함께 보관
+                properties={"unit": schema.unit},
             ))
-            # claim이 어떤 지표에 속하는지를 BELONGS_TO 관계로 표현
             edges.append(GraphEdge(
                 from_node=claim_node_id,
                 to_node=metric_node_id,
                 edge_type=GraphEdgeType.BELONGS_TO,
             ))
-
-        # (3) TimeNode 생성 + claim --MEASURED_AT--> time
-        # time_period(예: "2024Q1", "2023년")가 있을 때만 노드/엣지를 생성한다.
+            # COMPARE 엣지 대상 추적
+            metric_to_claims[schema.indicator].append(claim_node_id)
+ 
+        # TimeNode + MEASURED_AT
         if schema.time_period:
             time_node_id = f"time:{schema.time_period}"
             _add_node(GraphNode(
@@ -134,15 +159,13 @@ def build_claim_graph(claims: list[Claim]) -> tuple[list[GraphNode], list[GraphE
                 node_type=GraphNodeType.TIME,
                 label=schema.time_period,
             ))
-            # 측정 시점을 표현하는 MEASURED_AT 관계
             edges.append(GraphEdge(
                 from_node=claim_node_id,
                 to_node=time_node_id,
                 edge_type=GraphEdgeType.MEASURED_AT,
             ))
-
-        # (4) EntityNode 생성 + claim --BELONGS_TO--> entity
-        # population(대상 집단, 예: "청년층", "전국")이 있을 때만 노드/엣지 생성.
+ 
+        # EntityNode + BELONGS_TO
         if schema.population:
             entity_node_id = f"entity:{schema.population}"
             _add_node(GraphNode(
@@ -150,99 +173,85 @@ def build_claim_graph(claims: list[Claim]) -> tuple[list[GraphNode], list[GraphE
                 node_type=GraphNodeType.ENTITY,
                 label=schema.population,
             ))
-            # 대상 집단(엔티티)에 대한 소속 관계도 BELONGS_TO로 표현
             edges.append(GraphEdge(
                 from_node=claim_node_id,
                 to_node=entity_node_id,
                 edge_type=GraphEdgeType.BELONGS_TO,
             ))
-
-    logger.info(f"Graph 조립: {len(nodes)} nodes, {len(edges)} edges")
+ 
+    # ── 2) COMPARE 엣지 — 같은 indicator 공유 Claim 쌍 ────────────────
+    #
+    # 왜 필요한가:
+    #   "쉬었음 청년이 20년 새 2.6배 늘었다" → 이건 C1(21만7천)+C2(8만4천) 비율
+    #   두 Claim이 indicator="쉬었음인구"를 공유 → COMPARE 엣지로 연결
+    #   검증 시 MetricNode 2-hop으로 C1+C2를 함께 KOSIS 조회 → 비율 계산
+    #
+    compare_added: set[tuple[str, str]] = set()
+    for indicator, claim_ids in metric_to_claims.items():
+        if len(claim_ids) < 2:
+            continue
+        for i in range(len(claim_ids)):
+            for j in range(i + 1, len(claim_ids)):
+                pair = (claim_ids[i], claim_ids[j])
+                if pair not in compare_added:
+                    edges.append(GraphEdge(
+                        from_node=claim_ids[i],
+                        to_node=claim_ids[j],
+                        edge_type=GraphEdgeType.COMPARE,
+                        properties={"shared_indicator": indicator},
+                    ))
+                    compare_added.add(pair)
+ 
+    # ── 3) 문맥 엣지 — NEXT_SENT / IN_BLOCK / IN_DOC ──────────────────
+    #
+    # sir_doc이 있으면 extract_context_edges()로 문장-문단-문서 관계를 추가.
+    # 이 엣지들이 없으면:
+    #   - 같은 문단에 있는 수치들이 서로 연결되지 않음
+    #   - "이 기사에서 취업 관련 수치 모두 검증" 쿼리 시
+    #     Block B3 → IN_BLOCK → C7+C8+C9 탐색 불가
+    #   - C1 다음 문장이 C2, 그 다음이 C3(2.6배) 관계를 모름
+    #     → 파생 주장 자동 탐지 불가
+    #
+    if sir_doc is not None:
+        from structverify.preprocessing.sir_builder import extract_context_edges
+        context_edges = extract_context_edges(sir_doc)
+ 
+        for ce in context_edges:
+            edge_type = _CONTEXT_EDGE_MAP.get(ce["edge_type"])
+            if edge_type is None:
+                continue
+            edges.append(GraphEdge(
+                from_node=ce["from_node"],
+                to_node=ce["to_node"],
+                edge_type=edge_type,
+            ))
+ 
+        # 문맥 엣지에 등장하는 노드(블록/문장)도 등록
+        # (Claim이 아닌 SentNode, BlockNode, DocNode)
+        context_node_ids = set()
+        for ce in context_edges:
+            context_node_ids.add(ce["from_node"])
+            context_node_ids.add(ce["to_node"])
+        for nid in context_node_ids:
+            if nid not in seen_node_ids:
+                # node_type은 node_id prefix로 구분
+                if nid.startswith("node:doc:"):
+                    ntype = GraphNodeType.SOURCE
+                elif nid.startswith("node:b"):
+                    ntype = GraphNodeType.SOURCE  # Block → SOURCE로 임시 매핑
+                else:
+                    ntype = GraphNodeType.ENTITY
+                _add_node(GraphNode(
+                    node_id=nid,
+                    node_type=ntype,
+                    label=nid,
+                ))
+ 
+        logger.info(
+            f"Graph 조립: {len(nodes)} nodes, {len(edges)} edges "
+            f"(COMPARE: {len(compare_added)}쌍, 문맥엣지: {len(context_edges)}개)"
+        )
+    else:
+        logger.info(f"Graph 조립: {len(nodes)} nodes, {len(edges)} edges (문맥엣지 없음 — sir_doc 미전달)")
+ 
     return nodes, edges
-
-
-# ──────────────────────────────────────────────────────────────
-# [기존 코드: graph_schema_candidates 기반 동적 노드/엣지 생성]
-# Step 6 스펙(고정 필드 indicator/time_period/population)을 우선 적용하기 위해
-# 아래 LLM 후보 기반 로직은 주석 처리한다. 추후 LLM-유도 스키마 확장이 필요할 때
-# 다시 활성화하거나 build_claim_graph와 병행하도록 변경할 수 있다.
-# ──────────────────────────────────────────────────────────────
-#
-# def build_claim_graph(claims: list[Claim]) -> tuple[list[GraphNode], list[GraphEdge]]:
-#     """
-#     클레임 리스트 → Claim Graph (노드 + 엣지) 조립
-#
-#     각 클레임의 schema.graph_schema_candidates를 기반으로:
-#     1) Claim Node 생성
-#     2) Entity/Metric/Time 노드 생성 (LLM이 유도한 후보 기반)
-#     3) Relation 엣지 생성
-#
-#     Returns:
-#         tuple[nodes, edges]
-#     """
-#     nodes: list[GraphNode] = []
-#     edges: list[GraphEdge] = []
-#
-#     for claim in claims:
-#         claim_node_id = f"claim:{claim.claim_id.hex[:8]}"
-#         nodes.append(GraphNode(
-#             node_id=claim_node_id, node_type=GraphNodeType.CLAIM,
-#             label=claim.claim_text[:60],
-#             properties={"value": claim.schema.value if claim.schema else None,
-#                         "claim_type": claim.claim_type.value if claim.claim_type else None},
-#         ))
-#
-#         if not claim.schema or not claim.schema.graph_schema_candidates:
-#             # Schema 없으면 기본 노드만 생성
-#             _build_default_nodes(claim, claim_node_id, nodes, edges)
-#             continue
-#
-#         # LLM이 유도한 graph_schema_candidates로 노드/엣지 생성
-#         for candidate in claim.schema.graph_schema_candidates:
-#             if "node_type" in candidate:
-#                 node_id = f"{candidate.get('node_type', 'entity')}:{candidate.get('label', 'unknown')}"
-#                 ntype = _map_node_type(candidate.get("node_type", "entity"))
-#                 nodes.append(GraphNode(
-#                     node_id=node_id, node_type=ntype,
-#                     label=candidate.get("label", ""),
-#                 ))
-#             elif "edge_type" in candidate:
-#                 etype = _map_edge_type(candidate.get("edge_type", "belongs_to"))
-#                 edges.append(GraphEdge(
-#                     from_node=f"metric:{candidate.get('from', '')}",
-#                     to_node=f"time:{candidate.get('to', '')}",
-#                     edge_type=etype,
-#                 ))
-#
-#         # Claim → 각 Entity 연결
-#         for n in nodes:
-#             if n.node_id != claim_node_id and n.node_type != GraphNodeType.CLAIM:
-#                 edges.append(GraphEdge(
-#                     from_node=claim_node_id, to_node=n.node_id,
-#                     edge_type=GraphEdgeType.BELONGS_TO))
-#
-#     logger.info(f"Graph 조립: {len(nodes)} nodes, {len(edges)} edges")
-#     return nodes, edges
-
-
-# def _build_default_nodes(claim, claim_node_id, nodes, edges):
-#     """Schema 없을 때 기본 노드 생성"""
-#     if claim.schema and claim.schema.indicator:
-#         mid = f"metric:{claim.schema.indicator}"
-#         nodes.append(GraphNode(node_id=mid, node_type=GraphNodeType.METRIC,
-#                                label=claim.schema.indicator))
-#         edges.append(GraphEdge(from_node=claim_node_id, to_node=mid,
-#                                edge_type=GraphEdgeType.BELONGS_TO))
-
-
-# def _map_node_type(t: str) -> GraphNodeType:
-#     mapping = {"entity": GraphNodeType.ENTITY, "metric": GraphNodeType.METRIC,
-#                "time": GraphNodeType.TIME, "evidence": GraphNodeType.EVIDENCE}
-#     return mapping.get(t, GraphNodeType.ENTITY)
-
-
-# def _map_edge_type(t: str) -> GraphEdgeType:
-#     mapping = {"measured_at": GraphEdgeType.MEASURED_AT,
-#                "belongs_to": GraphEdgeType.BELONGS_TO,
-#                "sourced_from": GraphEdgeType.SOURCED_FROM}
-#     return mapping.get(t, GraphEdgeType.BELONGS_TO)
