@@ -6,6 +6,9 @@ retrieval/evidence_subgraph.py — Evidence 서브그래프 조립 (Step 7)
 [참고] GraphRAG (arXiv 2501.00309)
   Evidence를 그래프 구조로 조립하여 다중 hop 추론을 지원하는 패턴
 """
+# 수정자: 신준수
+# 수정 날짜: 2026-04-27
+# 수정 내용: Evidence 필드는 StatData 정규화 필드만 사용( values 키 직접 접근 제거)
 from __future__ import annotations
 from structverify.core.schemas import (
     Evidence, GraphNode, GraphEdge, GraphNodeType, GraphEdgeType, ProvenanceRecord)
@@ -38,7 +41,9 @@ async def build_evidence_subgraph(
 
     evidence = Evidence(
         source_name=data.stat_name, stat_table_id=data.stat_id,
-        official_value=data.values.get("ratio") or data.values.get("value"),
+        official_value=data.official_value,
+        unit=data.unit,
+        time_period=data.time_period,
         raw_response=data.raw_response,
         graph_nodes=graph_nodes, provenance=provenance,
     )
