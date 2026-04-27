@@ -1,4 +1,17 @@
 """
+# 수정자: 박재윤
+# 수정 날짜: 2026-04-27
+# 수정 내용: KOSIS 전체 통계표 메타데이터 수집 및 pgvector INSERT 구현
+
+# [DONE] _fetch_category KOSIS API 실제 호출 구현
+# [DONE] save_to_db pgvector 임베딩 INSERT 구현
+# [DONE] 주제별 통계(MT_ZTITLE) 카테고리 전체 확장
+# [DONE] save_to_db 배치 임베딩으로 최적화 (100건 단위)
+# [TODO] NCP 임베딩 모델로 교체 (현재 OpenAI text-embedding-3-small 임시 사용)
+# [TODO] asyncpg로 마이그레이션 (현재 psycopg2 임시 사용)
+# [TODO] 기관별 통계(MT_OTITLE) 수집 추가 (별도 배치 스크립트)
+
+
 adaptation/kosis_crawler.py — KOSIS 통계표 메타데이터 전량 수집 (Step 0-1)
 
 서비스 시작 전 1회 실행하여 KOSIS의 모든 통계표 메타데이터를 수집한다.
@@ -25,19 +38,55 @@ from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# KOSIS 통계표 상위 분류 코드 (주요 분야만 선별)
-# 전량 수집 시에는 이 리스트를 확장하거나, 트리 탐색으로 전체 순회
+# [기존] - 박재윤: 기존 카테고리 (ID 오류)
+# KOSIS_TOP_CATEGORIES = [
+#     {"vw_cd": "MT_ZTITLE", "parent_id": "A"},   # 인구/가구
+#     {"vw_cd": "MT_ZTITLE", "parent_id": "B"},   # 고용/노동/임금
+#     {"vw_cd": "MT_ZTITLE", "parent_id": "F"},   # 농림수산식품
+#     {"vw_cd": "MT_ZTITLE", "parent_id": "H"},   # 물가/가계
+#     {"vw_cd": "MT_ZTITLE", "parent_id": "I"},   # 경기/기업경영
+#     {"vw_cd": "MT_ZTITLE", "parent_id": "N"},   # 국민계정/재정/금융
+# ]
+
+# [v1] - 박재윤: 실제 KOSIS API 확인 후 전체 카테고리로 확장
 KOSIS_TOP_CATEGORIES = [
-    {"vw_cd": "MT_ZTITLE", "parent_id": "A"},   # 인구/가구
-    {"vw_cd": "MT_ZTITLE", "parent_id": "B"},   # 고용/노동/임금
-    {"vw_cd": "MT_ZTITLE", "parent_id": "F"},   # 농림수산식품
-    {"vw_cd": "MT_ZTITLE", "parent_id": "H"},   # 물가/가계
-    {"vw_cd": "MT_ZTITLE", "parent_id": "I"},   # 경기/기업경영
-    {"vw_cd": "MT_ZTITLE", "parent_id": "N"},   # 국민계정/재정/금융
+    {"vw_cd": "MT_ZTITLE", "parent_id": "A"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "B"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "C"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "D"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "E"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "F"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "G"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "H1"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "H2"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "I1"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "I2"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "J1"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "J2"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "K1"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "K2"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "L"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "M1"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "M2"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "N1"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "N2"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "O"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "P1"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "P2"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "Q"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "R"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "S1"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "S2"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "T"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "U"},
+    {"vw_cd": "MT_ZTITLE", "parent_id": "V"},
+    # {"vw_cd": "MT_OTITLE", "parent_id": ""},   # 기관별 전체
 ]
 
 
 async def crawl_kosis_catalog(config: dict | None = None) -> list[dict[str, Any]]:
+    from dotenv import load_dotenv
+    load_dotenv()
     """
     KOSIS API를 호출하여 통계표 메타데이터를 전량 수집한다.
 
@@ -92,42 +141,54 @@ async def crawl_kosis_catalog(config: dict | None = None) -> list[dict[str, Any]
     return result
 
 
-async def _fetch_category(
-    base_url: str,
-    api_key: str,
-    category: dict,
-    timeout: int,
-) -> list[dict[str, Any]]:
-    """
-    단일 카테고리의 통계표 목록을 조회한다.
-
-    TODO: httpx 실제 API 호출 구현
-      GET {base_url}/Param/statisticsParameterData.do
-      params:
-        - apiKey: api_key
-        - format: json
-        - jsonList: Y
-        - vwCd: category["vw_cd"]
-        - parentListId: category["parent_id"]
-    """
-    # import httpx
-    # async with httpx.AsyncClient(timeout=timeout) as client:
-    #     response = await client.get(
-    #         f"{base_url}/Param/statisticsParameterData.do",
-    #         params={
-    #             "apiKey": api_key,
-    #             "format": "json",
-    #             "jsonList": "Y",
-    #             "vwCd": category["vw_cd"],
-    #             "parentListId": category["parent_id"],
-    #         },
-    #     )
-    #     response.raise_for_status()
-    #     data = response.json()
-    #     return _parse_list_response(data, category["parent_id"])
-
-    logger.warning(f"KOSIS 카테고리 조회 stub: {category['parent_id']}")
-    return []
+async def _fetch_category(base_url, api_key, category, timeout):
+    import httpx, re, json
+    
+    results = []
+    
+    async with httpx.AsyncClient(timeout=timeout) as client:  # ← 밖으로 뺌
+        async def fetch_recursive(parent_id, path_history, depth=0):
+            if depth > 7:  # ← 깊이 제한
+                return
+                
+            url = (
+                f"https://kosis.kr/openapi/statisticsList.do?method=getList"
+                f"&apiKey={api_key}&vwCd={category['vw_cd']}"
+                f"&parentListId={parent_id}&format=json"
+            )
+            response = await client.get(url)
+            text = response.text.strip()
+            try:
+                data = response.json()
+            except Exception:
+                fixed = re.sub(r'([{,])\s*([A-Za-z_][A-Za-z0-9_]*)\s*:', r'\1"\2":', text)
+                try:
+                    data = json.loads(fixed)
+                except Exception:
+                    return
+            
+            if not isinstance(data, list):
+                return
+                
+            for item in data:
+                if 'TBL_ID' in item:
+                    results.append({
+                        "stat_id": item['TBL_ID'],
+                        "stat_name": item.get('TBL_NM', ''),
+                        "org_id": item.get('ORG_ID', ''),
+                        "org_name": item.get('ORG_NM', ''),
+                        "category_path": path_history,
+                        "keywords": _extract_keywords(item.get('TBL_NM', '')),
+                        "available_periods": [],
+                        "description": item.get('TBL_NM', ''),
+                    })
+                elif 'LIST_ID' in item:
+                    current_path = f"{path_history} > {item.get('LIST_NM', '')}"
+                    await fetch_recursive(item['LIST_ID'], current_path, depth+1)
+        
+        await fetch_recursive(category['parent_id'], category['vw_cd'])
+    
+    return results
 
 
 def _parse_list_response(
@@ -172,34 +233,58 @@ def _extract_keywords(stat_name: str) -> list[str]:
 
 
 async def save_to_db(catalog: list[dict], config: dict | None = None) -> int:
-    """
-    수집된 메타데이터를 kosis_stat_catalog 테이블에 저장한다.
-    임베딩도 함께 생성하여 embedding 컬럼에 저장 (RAG 겸용).
+    import psycopg2
+    from openai import OpenAI
+    from dotenv import load_dotenv
+    load_dotenv()
 
-    TODO: asyncpg로 실제 INSERT 구현
-    TODO: embedding_client.py로 임베딩 생성 → embedding 컬럼 저장
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    conn = psycopg2.connect(
+        host=os.getenv("POSTGRES_HOST"),
+        port=os.getenv("POSTGRES_PORT"),
+        dbname=os.getenv("POSTGRES_DB"),
+        user=os.getenv("POSTGRES_USER"),
+        password=os.getenv("POSTGRES_PASSWORD")
+    )
+    cur = conn.cursor()
 
-    Returns:
-        int: 저장된 건수
-    """
-    # import asyncpg
-    # conn = await asyncpg.connect(config["database"]["url"])
-    # for item in catalog:
-    #     embedding = await embedding_client.embed(item["stat_name"] + " " + item["description"])
-    #     await conn.execute("""
-    #         INSERT INTO kosis_stat_catalog
-    #           (stat_id, stat_name, org_id, org_name, category_path,
-    #            keywords, embedding, raw_meta_json)
-    #         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
-    #         ON CONFLICT (stat_id) DO UPDATE
-    #         SET stat_name=EXCLUDED.stat_name, embedding=EXCLUDED.embedding,
-    #             fetched_at=NOW()
-    #     """, item["stat_id"], item["stat_name"], item["org_id"],
-    #          item["org_name"], item["category_path"],
-    #          item["keywords"], embedding, json.dumps(item))
-    # await conn.close()
+    BATCH_SIZE = 100
+    for i in range(0, len(catalog), BATCH_SIZE):
+        batch = catalog[i:i+BATCH_SIZE]
+        
+        # 배치 임베딩
+        texts = [f"{item['category_path']} {item['stat_name']}" for item in batch]
+        embeddings = client.embeddings.create(
+            input=texts,
+            model="text-embedding-3-small"
+        ).data
+        
+        for item, emb in zip(batch, embeddings):
+            cur.execute("""
+                INSERT INTO kosis_stat_catalog
+                    (stat_id, stat_name, org_id, org_name, category_path,
+                     keywords, embedding, raw_meta_json)
+                VALUES (%s, %s, %s, %s, %s, %s, %s::vector, %s::jsonb)
+                ON CONFLICT (stat_id) DO UPDATE
+                SET stat_name=EXCLUDED.stat_name,
+                    embedding=EXCLUDED.embedding,
+                    fetched_at=NOW()
+            """, (
+                item["stat_id"],
+                item["stat_name"],
+                item["org_id"],
+                item["org_name"],
+                item["category_path"],
+                item["keywords"],
+                str(emb.embedding),
+                json.dumps(item)
+            ))
+        
+        conn.commit()
+        print(f"✅ {i+len(batch)}/{len(catalog)}건 저장 완료")  # 진행상황 확인용
 
-    logger.warning(f"DB 저장 stub: {len(catalog)}건")
+    cur.close()
+    conn.close()
     return len(catalog)
 
 
@@ -210,6 +295,11 @@ if __name__ == "__main__":
     async def main():
         logger.info("=== KOSIS 메타데이터 수집 시작 ===")
         catalog = await crawl_kosis_catalog()
+
+        # 저장 전에 먼저 확인
+        for item in catalog[:3]:  # 5개만
+            print(item)
+
         count = await save_to_db(catalog)
         logger.info(f"=== 완료: {count}건 저장 ===")
 
