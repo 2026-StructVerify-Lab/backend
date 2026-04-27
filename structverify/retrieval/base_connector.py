@@ -23,9 +23,11 @@ class ConnectorQuery:
 
 @dataclass
 class StatRecord:
-    stat_id: str; stat_name: str; org_name: str | None = None
+    stat_id: str; stat_name: str; org_name: str; org_id: str | None = None
     available_periods: list[str] = field(default_factory=list)
     relevance_score: float = 0.0
+    # 출처별 search 응답 한 행 전체; 커넥터·API별 추가 키는 여기로.
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 @dataclass
 class StatData:
@@ -60,5 +62,12 @@ class BaseConnector(ABC):
         if not records:
             return None
         best = max(records, key=lambda r: r.relevance_score)
-        return await self.fetch(best.stat_id,
-                                {"time_period": query.time_period, "population": query.population})
+        return await self.fetch(
+            best.stat_id,
+            {
+                "time_period": query.time_period,
+                "population": query.population,
+                "query": query,
+                "stat_record": best,
+            },
+        )
