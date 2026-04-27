@@ -1,16 +1,14 @@
 """
-adaptation/sample_builder.py — 학습 샘플 자동 생성
+adaptation/sample_builder.py — 학습 샘플 포맷 변환
 
-두 가지 모드를 지원한다:
-  - mode="pretrain"  : 합성 데이터(synthetic_generator) → LoRA 사전학습 포맷
-  - mode="finetune"  : 운영 피드백(feedback_store) → LoRA 추가학습 포맷
+[김예슬 - 2026-04-24]
+- candidate_detection 태스크 샘플 포맷 추가
+  · instruction/input/output 필드 구조로 통일
+  · HuggingFace Dataset 호환 + NCP Tuning API JSONL 호환
+- 태스크별 샘플 수 로깅 추가
 
 [참고] Self-Instruct (Wang et al., ACL 2023)
-  - https://github.com/yizhongw/self-instruct
-  - 합성 데이터를 instruction-tuning 포맷으로 변환
-
 [참고] KnowLA (NAACL 2024)
-  - KG 정보를 PEFT adapter에 반영하는 학습 데이터 구성 전략
 """
 from __future__ import annotations
 
@@ -29,97 +27,123 @@ def build_training_samples(
     mode: str = "finetune",
 ) -> list[dict[str, Any]]:
     """
-    학습 데이터를 LoRA 학습 포맷으로 변환한다.
+    학습 데이터 → LoRA 학습 포맷 변환.
 
     Args:
-        events: 피드백 이벤트 리스트 (mode="finetune"일 때)
-        synthetic: 합성 데이터 리스트 (mode="pretrain"일 때)
+        events: 피드백 이벤트 (mode="finetune")
+        synthetic: 합성 데이터 (mode="pretrain")
         mode: "pretrain" | "finetune"
 
     Returns:
-        LoRA 학습 가능한 (input, output) 쌍 리스트
+        [{"task": ..., "instruction": ..., "input": ..., "output": ...}, ...]
     """
     if mode == "pretrain":
         return _build_pretrain_samples(synthetic or [])
     elif mode == "finetune":
         return _build_finetune_samples(events or [])
-    else:
-        raise ValueError(f"미지원 모드: {mode}")
+    raise ValueError(f"미지원 모드: {mode}")
 
 
-# ═══════════════════════════════════════
-# 사전학습 (합성 데이터 → 학습 포맷)
-# ═══════════════════════════════════════
-
-def _build_pretrain_samples(
-    synthetic: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
+def _build_pretrain_samples(synthetic: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
-    합성 데이터 → LoRA 학습 포맷 변환. 3가지 태스크 동시 생성:
-      1) claim_to_stat: 주장 → 관련 통계표 매핑
-      2) claim_to_schema: 주장 → 구조화 스키마 추출
-      3) stat_to_claim: 통계표 → 검증 가능 주장 판별
+    합성 데이터 → instruction-tuning 포맷 변환.
+
+    생성 태스크:
+      1) claim_to_stat      : 주장 → 관련 통계표
+      2) claim_to_schema    : 주장 → 구조화 스키마
+      3) stat_to_claim      : 통계표 → 주장 판별 (역방향)
+      4) candidate_detection: 검증 후보/비후보 분류
     """
     samples: list[dict[str, Any]] = []
+    task_counts: dict[str, int] = {}
 
     for item in synthetic:
-        claim = item.get("claim", "")
-        stat_id = item.get("stat_id", "")
+        task = item.get("task", "")
+
+        # ── candidate detection 샘플 ──────────────────────────────────
+        if task == "candidate_detection":
+            sentence = item.get("sentence", "")
+            label    = item.get("candidate_label", False)
+
+            sample = {
+                "task": "candidate_detection",
+                "instruction": (
+                    "아래 문장이 공식 통계로 검증 가능한 수치 기반 주장인지 판단하세요.\n"
+                    'JSON으로만 답하세요: {"candidate_label": true 또는 false}'
+                ),
+                "input":  sentence,
+                "output": json.dumps({"candidate_label": label}, ensure_ascii=False),
+            }
+            samples.append(sample)
+            task_counts["candidate_detection"] = task_counts.get("candidate_detection", 0) + 1
+            continue
+
+        # ── claim/schema 샘플 ─────────────────────────────────────────
+        claim     = item.get("claim", "")
+        stat_id   = item.get("stat_id", "")
         stat_name = item.get("stat_name", "")
         indicator = item.get("indicator", "")
-        schema = item.get("schema", {})
+        schema    = item.get("schema", {})
 
         if not claim or not stat_id:
             continue
 
-        # 태스크 1: 주장 → 통계표 매핑
+        # 태스크 1: claim_to_stat
         samples.append({
             "task": "claim_to_stat",
-            "input": f"아래 주장을 검증하기 위해 필요한 KOSIS 통계표를 찾으세요.\n주장: {claim}",
+            "instruction": "아래 주장을 검증하기 위해 필요한 KOSIS 통계표를 찾으세요.",
+            "input":  claim,
             "output": json.dumps(
                 {"stat_id": stat_id, "stat_name": stat_name, "indicator": indicator},
-                ensure_ascii=False),
+                ensure_ascii=False,
+            ),
         })
+        task_counts["claim_to_stat"] = task_counts.get("claim_to_stat", 0) + 1
 
-        # 태스크 2: 주장 → 스키마 추출
-        if schema:
+        # 태스크 2: claim_to_schema
+        if schema and isinstance(schema, dict) and "raw" not in schema:
             samples.append({
                 "task": "claim_to_schema",
-                "input": f"아래 주장에서 검증에 필요한 핵심 정보를 추출하세요.\n주장: {claim}",
+                "instruction": "아래 주장에서 검증에 필요한 핵심 정보를 추출하세요.",
+                "input":  claim,
                 "output": json.dumps(schema, ensure_ascii=False),
             })
+            task_counts["claim_to_schema"] = task_counts.get("claim_to_schema", 0) + 1
 
-        # 태스크 3: 통계표 → 주장 판별 (역방향)
+        # 태스크 3: stat_to_claim (역방향)
         samples.append({
             "task": "stat_to_claim",
-            "input": f'통계표 "{stat_name}"({stat_id})로 아래 주장을 검증할 수 있습니까?\n주장: {claim}',
-            "output": '{"verifiable": true}',
+            "instruction": (
+                f'통계표 "{stat_name}"({stat_id})로 아래 주장을 검증할 수 있습니까?\n'
+                'JSON으로만 답하세요: {"verifiable": true 또는 false}'
+            ),
+            "input":  claim,
+            "output": json.dumps({"verifiable": True}, ensure_ascii=False),
         })
+        task_counts["stat_to_claim"] = task_counts.get("stat_to_claim", 0) + 1
 
-    logger.info(f"사전학습 샘플: {len(samples)}건 (원본 {len(synthetic)}건)")
+    logger.info(f"사전학습 샘플: 총 {len(samples)}건")
+    logger.info(f"태스크별 분포: {task_counts}")
     return samples
 
 
-# ═══════════════════════════════════════
-# 피드백 기반 학습 (기존)
-# ═══════════════════════════════════════
-
-def _build_finetune_samples(
-    events: list[FeedbackEvent],
-) -> list[dict[str, Any]]:
-    """
-    피드백 이벤트 → 학습용 (input, label) 쌍 생성 (기존 로직)
-
-    TODO: Claim Detection, Schema Induction, Explanation 태스크 추가
-    """
+def _build_finetune_samples(events: list[FeedbackEvent]) -> list[dict[str, Any]]:
+    """피드백 이벤트 → 추가 학습 포맷 변환"""
     samples: list[dict[str, Any]] = []
     for ev in events:
+        if not ev.corrected_verdict:
+            continue
         samples.append({
             "task": "verdict_correction",
-            "input": str(ev.claim_id),
-            "original": ev.original_verdict.value if ev.original_verdict else None,
-            "corrected": ev.corrected_verdict.value if ev.corrected_verdict else None,
-            "note": ev.reviewer_note,
+            "instruction": "아래 주장에 대한 검증 결과를 판정하세요.",
+            "input":  str(ev.claim_id),
+            "output": json.dumps(
+                {"verdict": ev.corrected_verdict.value},
+                ensure_ascii=False,
+            ),
+            "original_verdict": ev.original_verdict.value if ev.original_verdict else None,
+            "reviewer_note":    ev.reviewer_note,
         })
+
     logger.info(f"피드백 샘플: {len(samples)}건 (원본 {len(events)}건)")
     return samples

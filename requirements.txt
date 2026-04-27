@@ -19,3 +19,4 @@ snowflake-connector-python>=3.6
 mlflow>=2.10
 pymupdf
 python-dotenv
+json5>=0.9.0

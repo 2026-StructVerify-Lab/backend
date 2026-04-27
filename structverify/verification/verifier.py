@@ -15,8 +15,13 @@ verification/verifier.py — Deterministic Verification Engine (Step 8)
 [참고] FEVER (Thorne et al., NAACL 2018)
   SUPPORTS/REFUTES/NEI 3단계 판정 → match/mismatch/unverifiable 매핑
 """
+# 수정자: 신준수
+# 수정 날짜: 2026-04-27
+# 수정 내용: _classify_mismatch 우선순위 분기 및 헬퍼(연도·집단·과장 임계) 구현
 from __future__ import annotations
-import math
+
+import re
+
 from structverify.core.schemas import (
     Claim, Evidence, VerificationResult, VerdictType, MismatchType)
 from structverify.utils.logger import get_logger
@@ -51,7 +56,8 @@ def verify_claim(claim: Claim, evidence: Evidence | None,
         verdict, mtype, conf = VerdictType.MATCH, None, min(0.95, 1.0 - diff_pct / 100)
     else:
         verdict, conf = VerdictType.MISMATCH, min(0.9, diff_pct / 100)
-        mtype = _classify_mismatch(claim, evidence)
+        # 목적: 상대 오차·config 기반으로 불일치 세부 유형 분류
+        mtype = _classify_mismatch(claim, evidence, diff_pct, config)
 
     result = VerificationResult(
         claim_id=claim.claim_id, verdict=verdict, confidence=conf,
@@ -60,44 +66,101 @@ def verify_claim(claim: Claim, evidence: Evidence | None,
     return result
 
 
-def _classify_mismatch(claim: Claim, evidence: Evidence) -> MismatchType:
+def _primary_year_from_period(text: str | None) -> str | None:
     """
-    불일치 유형 세분화 분류기.
-
-    TODO [신준수]: 불일치 유형별 판별 로직 구현
-      현재: 모두 VALUE로 반환 (placeholder)
-
-      개선 계획:
-
-      [TIME_PERIOD] 시점 불일치
-        - claim.schema.time_period != evidence.time_period 이고
-          수치 자체는 다른 연도에 맞는 값인 경우
-        - 예: 기사는 "2023년 64.2%"인데 공식통계는 2022년 값 62.1%
-
-      [POPULATION] 대상 집단 불일치
-        - claim.schema.population과 evidence의 대상이 다른 경우
-        - 예: 기사는 "과수 농가"인데 조회된 통계는 "전체 농가"
-
-      [EXAGGERATION] 과장/축소
-        - diff_pct가 매우 크거나 (>20%), 방향이 반대인 경우
-        - 예: 실제 증가율 3%인데 기사는 "30% 급증" 주장
-
-      구현 예시:
-        if claim.schema and evidence:
-            # 시점 불일치 체크
-            if (claim.schema.time_period and evidence.time_period and
-                    claim.schema.time_period != evidence.time_period):
-                return MismatchType.TIME_PERIOD
-            # 대상 불일치 체크
-            if (claim.schema.population and
-                    claim.schema.population not in (evidence.raw_response.get("population", "") or "")):
-                return MismatchType.POPULATION
-            # 과장 체크
-            if claim.schema.value and evidence.official_value:
-                diff = abs(claim.schema.value - evidence.official_value)
-                if diff / max(abs(evidence.official_value), 1e-9) > 0.2:
-                    return MismatchType.EXAGGERATION
-        return MismatchType.VALUE
+    시점 문자열에서 대표 연도(4자리) 하나만 추출.
+    둘 다 추출 가능할 때만 TIME_PERIOD 비교에 사용한다.
     """
-    # TODO [신준수]: 위 로직 구현
+    if not text or not str(text).strip():
+        return None
+    m = re.search(r"(?:19|20)\d{2}", str(text))
+    return m.group(0) if m else None
+
+
+def _norm_token(s: str | None) -> str:
+    """집단 문자열 비교용: 공백 정리 + 소문자."""
+    if not s:
+        return ""
+    return " ".join(str(s).split()).lower()
+
+
+def _population_incompatible(claim_pop: str | None, ev_pop: str | None) -> bool:
+    """
+    기사 집단 vs 증거 집단 설명이 서로 포함 관계가 아니면 '집단 불일치' 후보.
+    한쪽만 비어 있으면 판단 보류(False).
+    """
+    c = _norm_token(claim_pop)
+    e = _norm_token(ev_pop)
+    if not c or not e:
+        return False
+    if c in e or e in c:
+        return False
+    return True
+
+
+def _classify_mismatch(
+  
+    claim: Claim, evidence: Evidence, diff_pct: float, config: dict,
+) -> MismatchType:
+    # v0
+    # """
+    #    구현 예시:
+    #     if claim.schema and evidence:
+    #         # 시점 불일치 체크
+    #         if (claim.schema.time_period and evidence.time_period and
+    #                 claim.schema.time_period != evidence.time_period):
+    #             return MismatchType.TIME_PERIOD
+    #         # 대상 불일치 체크
+    #         if (claim.schema.population and
+    #                 claim.schema.population not in (evidence.raw_response.get("population", "") or "")):
+    #             return MismatchType.POPULATION
+    #         # 과장 체크
+    #         if claim.schema.value and evidence.official_value:
+    #             diff = abs(claim.schema.value - evidence.official_value)
+    #             if diff / max(abs(evidence.official_value), 1e-9) > 0.2:
+    #                 return MismatchType.EXAGGERATION
+    #     return MismatchType.VALUE
+    # """
+    # # TODO [신준수]: 위 로직 구현
+    """
+    MISMATCH일 때 세부 유형 분류 (LLM 미사용).
+
+    우선순위:
+      1) TIME_PERIOD — 양쪽 시점에서 연도를 뽑을 수 있고 서로 다름
+      2) POPULATION — raw_response['population'] 등으로 증거 집단을 알 수 있고
+                      기사 집단과 포함 관계가 아님
+      3) EXAGGERATION — 상대 오차가 exaggeration_diff_percent(기본 20%) 초과
+      4) VALUE — 위에 해당 없으면 단순 수치 오차
+    """
+
+    vconf = config.get("verification", {}) if config else {}
+    exaggeration_pct = float(vconf.get("exaggeration_diff_percent", 20.0))
+
+    schema = claim.schema
+    if schema is None:
+        return (
+            MismatchType.EXAGGERATION if diff_pct > exaggeration_pct
+            else MismatchType.VALUE
+        )
+
+    # --- 1) 시점: 연도를 양쪽에서 확보했을 때만 비교 (한쪽만 있으면 스킵) ---
+    cy = _primary_year_from_period(schema.time_period)
+    ey = _primary_year_from_period(evidence.time_period)
+    if cy and ey and cy != ey:
+        return MismatchType.TIME_PERIOD
+
+    # --- 2) 집단: Step 7에서 raw_response 등에 실어준 문자열만 신뢰 ---
+    raw = evidence.raw_response if isinstance(evidence.raw_response, dict) else {}
+    ev_pop = raw.get("population")
+    if ev_pop is None:
+        ev_pop = raw.get("population_label")
+    if isinstance(ev_pop, (list, tuple)):
+        ev_pop = " ".join(str(x) for x in ev_pop)
+    if schema.population and _population_incompatible(schema.population, ev_pop):
+        return MismatchType.POPULATION
+
+    # --- 3) 과장/축소: 수치 괴리가 매우 큰 경우 ---
+    if diff_pct > exaggeration_pct:
+        return MismatchType.EXAGGERATION
+
     return MismatchType.VALUE
