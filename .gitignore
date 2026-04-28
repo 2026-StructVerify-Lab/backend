@@ -40,3 +40,5 @@ Thumbs.db
 
 # -- config 파일 --
 config/default.yaml
+
+kosis_catalog_cache.json

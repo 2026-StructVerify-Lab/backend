@@ -80,7 +80,7 @@ cur.execute("""
         org_name VARCHAR,
         category_path VARCHAR,
         keywords TEXT[],
-        embedding vector(1536),
+        embedding vector(1024),
         raw_meta_json JSONB,
         fetched_at TIMESTAMP DEFAULT NOW()
     );
