@@ -7,7 +7,7 @@
 # [DONE] save_to_db pgvector 임베딩 INSERT 구현
 # [DONE] 주제별 통계(MT_ZTITLE) 카테고리 전체 확장
 # [DONE] save_to_db 배치 임베딩으로 최적화 (100건 단위)
-# [TODO] NCP 임베딩 모델로 교체 (현재 OpenAI text-embedding-3-small 임시 사용)
+# [DONE] NCP 임베딩 모델로 교체 (HCX 임베딩 v2, 1024차원)
 # [TODO] asyncpg로 마이그레이션 (현재 psycopg2 임시 사용)
 # [TODO] 기관별 통계(MT_OTITLE) 수집 추가 (별도 배치 스크립트)
 
@@ -170,11 +170,17 @@ def _extract_keywords(stat_name: str) -> list[str]:
 
 async def save_to_db(catalog: list[dict], config: dict | None = None) -> int:
     import psycopg2
-    from openai import OpenAI
+    import httpx as hx
     from dotenv import load_dotenv
     load_dotenv()
 
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    # [v1] - 박재윤: OpenAI 임베딩 (API 키 문제로 교체)
+    # from openai import OpenAI
+    # client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+    # [v2] - 박재윤: HCX 임베딩 v2로 교체 (1024차원)
+    hcx_api_key = os.environ.get("CLOVASTUDIO_API_KEY", "")
+
     conn = psycopg2.connect(
         host=os.getenv("POSTGRES_HOST"),
         port=os.getenv("POSTGRES_PORT"),
@@ -188,13 +194,22 @@ async def save_to_db(catalog: list[dict], config: dict | None = None) -> int:
     for i in range(0, len(catalog), BATCH_SIZE):
         batch = catalog[i:i+BATCH_SIZE]
 
-        texts = [f"{item['category_path']} {item['stat_name']}" for item in batch]
-        embeddings = client.embeddings.create(
-            input=texts,
-            model="text-embedding-3-small"
-        ).data
+        # [v2] - 박재윤: HCX는 건별 호출 (배치 미지원)
+        embeddings_list = []
+        for item in batch:
+            text = f"{item['category_path']} {item['stat_name']}"
+            resp = hx.post(
+                "https://clovastudio.stream.ntruss.com/v1/api-tools/embedding/v2",
+                headers={
+                    "Authorization": f"Bearer {hcx_api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={"text": text},
+                timeout=30
+            )
+            embeddings_list.append(resp.json()["result"]["embedding"])
 
-        for item, emb in zip(batch, embeddings):
+        for item, embedding in zip(batch, embeddings_list):
             cur.execute("""
                 INSERT INTO kosis_stat_catalog
                     (stat_id, stat_name, org_id, org_name, category_path,
@@ -211,7 +226,7 @@ async def save_to_db(catalog: list[dict], config: dict | None = None) -> int:
                 item["org_name"],
                 item["category_path"],
                 item["keywords"],
-                str(emb.embedding),
+                str(embedding),
                 json.dumps(item)
             ))
 
@@ -228,12 +243,23 @@ if __name__ == "__main__":
 
     async def main():
         logger.info("=== KOSIS 메타데이터 수집 시작 ===")
-        catalog = await crawl_kosis_catalog()
+        
+        CACHE_FILE = "kosis_catalog_cache.json"
+        
+        if os.path.exists(CACHE_FILE):
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                catalog = json.load(f)
+            logger.info(f"캐시에서 로드: {len(catalog)}건")
+        else:
+            catalog = await crawl_kosis_catalog()
+            with open(CACHE_FILE, "w", encoding="utf-8") as f:
+                json.dump(catalog, f, ensure_ascii=False)
+            logger.info("캐시 저장 완료")
 
         for item in catalog[:3]:
             print(item)
 
-        count = await save_to_db(catalog)
-        logger.info(f"=== 완료: {count}건 저장 ===")
+        # count = await save_to_db(catalog)
+        # logger.info(f"=== 완료: {count}건 저장 ===")
 
     asyncio.run(main())
