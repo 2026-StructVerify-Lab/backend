@@ -48,7 +48,8 @@ async def test_url_step1_to_6(llm_config):
     from structverify.detection.claim_detector import detect_claims
     from structverify.detection.schema_inductor import induce_schemas
     from structverify.graph.graph_builder import build_claim_graph
-
+    from structverify.retrieval.evidence_subgraph import build_evidence_subgraph
+    from structverify.verification.verifier import verify_claim
     config = {
         "llm": llm_config,
         "domain_registry_path": f"{tempfile.mkdtemp()}/registry.yaml",
@@ -187,3 +188,131 @@ PROPERTIES: {edge.properties}
     net.write_html(str(html_path))
 
     print(f"[Graph HTML] {html_path.resolve()}")
+    
+    
+    
+    print("\n[Step 7] Evidence Retrieval + Subgraph")
+
+    evidence, ev_nodes, ev_edges = await build_evidence_subgraph(
+        self.kosis, query, claim_nid
+    )
+
+    assert isinstance(evidence_nodes, list)
+    assert isinstance(evidence_edges, list)
+
+    nodes.extend(evidence_nodes)
+    edges.extend(evidence_edges)
+
+    print(f"[Step 7] evidence_nodes={len(evidence_nodes)}, evidence_edges={len(evidence_edges)}")
+    print(f"[Step 7] total_nodes={len(nodes)}, total_edges={len(edges)}")
+
+
+    print("\n[Step 8] Verification")
+
+    from structverify.verification.verifier import verify_claims
+
+    result = verify_claim(claim, evidence, config)
+
+    assert isinstance(verification_results, list)
+
+    for r in verification_results:
+        print({
+            "claim_id": getattr(r, "claim_id", None),
+            "verdict": getattr(r, "verdict", None),
+            "confidence": getattr(r, "confidence", None),
+        })
+
+
+    print("\n[Step 9] Explanation + Provenance")
+
+    from structverify.explanation.explainer import generate_explanations
+
+    explanations = await generate_explanations(
+        claims=claims,
+        verification_results=verification_results,
+        graph_nodes=nodes,
+        graph_edges=edges,
+        config=config,
+    )
+
+    assert isinstance(explanations, list)
+
+    for e in explanations:
+        print({
+            "claim_id": getattr(e, "claim_id", None),
+            "summary": getattr(e, "summary", None),
+            "provenance": getattr(e, "provenance", None),
+        })
+        
+        
+    print("\n[Step 9-1] Full Pipeline JSON Export")
+
+    import json
+    from pathlib import Path
+
+    out_dir = Path("test_outputs")
+    out_dir.mkdir(exist_ok=True)
+
+    json_path = out_dir / "step1_9_pipeline_result.json"
+
+    result_json = {
+        "summary": {
+            "domain": domain,
+            "description": description,
+            "claim_count": len(claims),
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+            "verification_count": len(verification_results),
+            "explanation_count": len(explanations),
+        },
+        "claims": [
+            {
+                "claim_id": str(claim.claim_id),
+                "block_id": claim.block_id,
+                "sent_id": claim.sent_id,
+                "claim_text": claim.claim_text,
+                "claim_type": claim.claim_type,
+                "canonical_type": (
+                    claim.canonical_type.value
+                    if hasattr(claim.canonical_type, "value")
+                    else claim.canonical_type
+                ),
+                "score": claim.check_worthy_score,
+                "schema": claim.schema.model_dump() if claim.schema else None,
+            }
+            for claim in claims
+        ],
+        "graph": {
+            "nodes": [
+                {
+                    "node_id": node.node_id,
+                    "node_type": getattr(node.node_type, "value", str(node.node_type)),
+                    "label": node.label,
+                    "properties": node.properties or {},
+                }
+                for node in nodes
+            ],
+            "edges": [
+                {
+                    "from_node": edge.from_node,
+                    "to_node": edge.to_node,
+                    "edge_type": getattr(edge.edge_type, "value", str(edge.edge_type)),
+                    "properties": edge.properties or {},
+                }
+                for edge in edges
+            ],
+        },
+        "verification_results": [
+            r.model_dump() if hasattr(r, "model_dump") else str(r)
+            for r in verification_results
+        ],
+        "explanations": [
+            e.model_dump() if hasattr(e, "model_dump") else str(e)
+            for e in explanations
+        ],
+    }
+
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(result_json, f, ensure_ascii=False, indent=2)
+
+    print(f"[Full Pipeline JSON] {json_path.resolve()}")

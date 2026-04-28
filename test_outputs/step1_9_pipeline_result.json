@@ -1,0 +1,1015 @@
+{
+  "summary": {
+    "url": "https://www.yna.co.kr/view/AKR20260421087100003",
+    "domain": "policy",
+    "description": "정책/행정 (예산, 법률, 복지, 지원금, 정부)",
+    "claim_count": 7,
+    "node_count": 46,
+    "edge_count": 59,
+    "evidence_count": 7,
+    "verification_count": 7,
+    "explanation_count": 7
+  },
+  "claims": [
+    {
+      "claim_id": "4c96c955-f457-44bd-8697-885db4001e48",
+      "block_id": "b0001",
+      "sent_id": "b0001_s0000",
+      "claim_text": "산업부 브리핑…한국 경윳값 25% 오를 때 일본 9.4% 상승 그쳐\n(서울=연합뉴스) 김동규 기자 = 정부가 석유 최고가격제로 휘발유·경윳값을 지나치게 눌러 수요 억제가 되지 않고 있다는 일각의 지적에 일본과 유럽 등 사례를 들어 반박했다.",
+      "claim_type": "comparison",
+      "canonical_type": null,
+      "score": 0.8,
+      "schema": {
+        "indicator": "경윳값 상승률",
+        "time_period": null,
+        "unit": "%",
+        "population": "한국 및 일본",
+        "value": 25.0,
+        "comparison_type": null,
+        "source_reference": "연합뉴스",
+        "graph_schema_candidates": []
+      }
+    },
+    {
+      "claim_id": "53ee91ca-c400-4593-8fe0-6cca111893da",
+      "block_id": "b0001",
+      "sent_id": "b0001_s0006",
+      "claim_text": "산업부에 따르면 이날 한국의 석유제품 가격은 중동전쟁 발발 직전인 2월 27일과 비교해 휘발유는 18.4%, 경유는 25.0% 각각 올랐다.",
+      "claim_type": "price increase",
+      "canonical_type": null,
+      "score": 0.8,
+      "schema": {
+        "indicator": "석유제품 가격 변동률",
+        "time_period": "중동전쟁 발발 직전(2월 27일)",
+        "unit": "%",
+        "population": "한국의 휘발유 및 경유",
+        "value": 18.4,
+        "comparison_type": null,
+        "source_reference": "산업부",
+        "graph_schema_candidates": []
+      }
+    },
+    {
+      "claim_id": "4667ec85-e050-4023-b19d-10c07f2ac789",
+      "block_id": "b0001",
+      "sent_id": "b0001_s0007",
+      "claim_text": "이는 미국이 같은 기간 휘발유는 35.6%, 경유는 47.1% 오른 것과 비교하면 낮은 상승률이지만, 일본의 휘발윳값이 같은 기간 7.28%, 경윳값이 9.40% 오른 것에 비해서는 상승률이 크게 높은 것이다.",
+      "claim_type": "comparative",
+      "canonical_type": null,
+      "score": 0.8,
+      "schema": {
+        "indicator": "휘발유 및 경유 가격 상승률",
+        "time_period": "같은 기간",
+        "unit": "%",
+        "population": "미국, 일본",
+        "value": 35.6,
+        "comparison_type": null,
+        "source_reference": null,
+        "graph_schema_candidates": [
+          {
+            "node_type": "country",
+            "label": "미국",
+            "edge_type": "비교",
+            "from": "미국 휘발유 가격 상승률",
+            "to": "일본 휘발유 가격 상승률"
+          },
+          {
+            "node_type": "country",
+            "label": "일본",
+            "edge_type": "비교",
+            "from": "일본 휘발유 가격 상승률",
+            "to": "미국 휘발유 가격 상승률"
+          },
+          {
+            "node_type": "fuel",
+            "label": "휘발유",
+            "edge_type": "가격 상승률",
+            "from": "미국",
+            "to": "일본"
+          },
+          {
+            "node_type": "fuel",
+            "label": "경유",
+            "edge_type": "가격 상승률",
+            "from": "미국",
+            "to": "일본"
+          }
+        ]
+      }
+    },
+    {
+      "claim_id": "a2b0eef9-90f3-4177-9d57-832de343ba33",
+      "block_id": "b0001",
+      "sent_id": "b0001_s0008",
+      "claim_text": "일본 정부 역시 물가 안정을 위해 정유사 등 도매단계에서 보조금을 지급하는 방식으로 휘발유·경유 등 가격 인상을 억제하고 있다.",
+      "claim_type": "policy",
+      "canonical_type": null,
+      "score": 0.8,
+      "schema": {
+        "indicator": "휘발유 및 경유 가격 인상 억제 정도",
+        "time_period": null,
+        "unit": null,
+        "population": "일본 내 정유사 및 관련 도매 단계",
+        "value": 0.0,
+        "comparison_type": null,
+        "source_reference": "일본 정부",
+        "graph_schema_candidates": []
+      }
+    },
+    {
+      "claim_id": "af2edd2d-e38e-4aca-8f0c-0b0d9388e374",
+      "block_id": "b0001",
+      "sent_id": "b0001_s0009",
+      "claim_text": "영국, 프랑스, 독일 등 유럽 국가의 경우 같은 기간 휘발윳값은 17% 안팎으로 상승해 한국과 비슷한 상승 폭을 보였다.",
+      "claim_type": "comparative",
+      "canonical_type": null,
+      "score": 0.8,
+      "schema": {
+        "indicator": "휘발유 가격 상승률",
+        "time_period": "같은 기간",
+        "unit": "%",
+        "population": "영국, 프랑스, 독일 등 유럽 국가 및 한국",
+        "value": 17.0,
+        "comparison_type": null,
+        "source_reference": null,
+        "graph_schema_candidates": []
+      }
+    },
+    {
+      "claim_id": "9840b1a7-b3cc-41f4-9d53-233835af35a2",
+      "block_id": "b0001",
+      "sent_id": "b0001_s0010",
+      "claim_text": "경윳값은 30% 이상 상승해 한국보다 5%포인트 내외로 상승 폭이 컸다.",
+      "claim_type": "comparison",
+      "canonical_type": null,
+      "score": 0.8,
+      "schema": {
+        "indicator": "경윳값 상승률",
+        "time_period": null,
+        "unit": "%",
+        "population": "한국 및 비교 대상 국가들",
+        "value": 30.0,
+        "comparison_type": null,
+        "source_reference": "정책 관련 보고서",
+        "graph_schema_candidates": []
+      }
+    },
+    {
+      "claim_id": "9d701d64-d8a7-48f9-9ee7-693b85c3fd01",
+      "block_id": "b0001",
+      "sent_id": "b0001_s0012",
+      "claim_text": "산업부는 현재 국내 4대 정유사의 비축유 스와프(SWAP·교환) 신청 물량이 약 3천200만배럴로 집계됐다고 밝혔다.",
+      "claim_type": "statistic",
+      "canonical_type": null,
+      "score": 0.8,
+      "schema": {
+        "indicator": "비축유 스와프 신청 물량",
+        "time_period": "현재",
+        "unit": "배럴",
+        "population": "국내 4대 정유사",
+        "value": 3200000.0,
+        "comparison_type": null,
+        "source_reference": "산업부",
+        "graph_schema_candidates": []
+      }
+    }
+  ],
+  "evidence": [
+    {
+      "claim_id": "4c96c955-f457-44bd-8697-885db4001e48",
+      "claim_text": "산업부 브리핑…한국 경윳값 25% 오를 때 일본 9.4% 상승 그쳐\n(서울=연합뉴스) 김동규 기자 = 정부가 석유 최고가격제로 휘발유·경윳값을 지나치게 눌러 수요 억제가 되지 않고 있다는 일각의 지적에 일본과 유럽 등 사례를 들어 반박했다.",
+      "evidence": null
+    },
+    {
+      "claim_id": "53ee91ca-c400-4593-8fe0-6cca111893da",
+      "claim_text": "산업부에 따르면 이날 한국의 석유제품 가격은 중동전쟁 발발 직전인 2월 27일과 비교해 휘발유는 18.4%, 경유는 25.0% 각각 올랐다.",
+      "evidence": null
+    },
+    {
+      "claim_id": "4667ec85-e050-4023-b19d-10c07f2ac789",
+      "claim_text": "이는 미국이 같은 기간 휘발유는 35.6%, 경유는 47.1% 오른 것과 비교하면 낮은 상승률이지만, 일본의 휘발윳값이 같은 기간 7.28%, 경윳값이 9.40% 오른 것에 비해서는 상승률이 크게 높은 것이다.",
+      "evidence": null
+    },
+    {
+      "claim_id": "a2b0eef9-90f3-4177-9d57-832de343ba33",
+      "claim_text": "일본 정부 역시 물가 안정을 위해 정유사 등 도매단계에서 보조금을 지급하는 방식으로 휘발유·경유 등 가격 인상을 억제하고 있다.",
+      "evidence": null
+    },
+    {
+      "claim_id": "af2edd2d-e38e-4aca-8f0c-0b0d9388e374",
+      "claim_text": "영국, 프랑스, 독일 등 유럽 국가의 경우 같은 기간 휘발윳값은 17% 안팎으로 상승해 한국과 비슷한 상승 폭을 보였다.",
+      "evidence": null
+    },
+    {
+      "claim_id": "9840b1a7-b3cc-41f4-9d53-233835af35a2",
+      "claim_text": "경윳값은 30% 이상 상승해 한국보다 5%포인트 내외로 상승 폭이 컸다.",
+      "evidence": null
+    },
+    {
+      "claim_id": "9d701d64-d8a7-48f9-9ee7-693b85c3fd01",
+      "claim_text": "산업부는 현재 국내 4대 정유사의 비축유 스와프(SWAP·교환) 신청 물량이 약 3천200만배럴로 집계됐다고 밝혔다.",
+      "evidence": null
+    }
+  ],
+  "verification_results": [
+    {
+      "result_id": "f74cec75-9a2e-496e-bdb0-0356fd4c698d",
+      "claim_id": "4c96c955-f457-44bd-8697-885db4001e48",
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "evidence": null,
+      "mismatch_type": null,
+      "explanation": "해당 주장이 사실인지 여부를 판단하기 위해 '경윳값 상승률 한국 및 일본'이라는 검색어로 국가통계포털(KOSIS)에서 자료를 찾아보았으나, 해당 정보를 찾을 수 없었습니다. 따라서 이 주장은 현재 시점에서는 검증이 불가능합니다. \n\n독자 여러분께서는 필요하시다면 직접 국가통계포털(https://kosis.kr/) 에서 관련 키워드를 검색하여 원하는 정보를 찾아보시기 바랍니다.",
+      "provenance_summary": null,
+      "reviewer_verdict": null,
+      "created_at": "2026-04-27 08:07:19.647985"
+    },
+    {
+      "result_id": "ed6326e8-afea-479d-8932-d2c0f10fe266",
+      "claim_id": "53ee91ca-c400-4593-8fe0-6cca111893da",
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "evidence": null,
+      "mismatch_type": null,
+      "explanation": "해당 주장이 사실인지 확인하기 위해 국가통계포털(KOSIS)에서 '석유제품 가격 변동률'과 '한국의 휘발유 및 경유', '중동전쟁 발발 직전(2월 27일)'이라는 검색어를 조합하여 찾아보았으나, 관련 통계를 찾을 수 없었습니다. 따라서 이 주장은 현재로서는 검증이 불가능합니다. \n\n국가통계포털에서는 국내 다양한 분야의 통계 자료를 제공하고 있으니, 관심 있는 주제가 있다면 직접 검색하여 확인해 보시기 바랍니다.",
+      "provenance_summary": null,
+      "reviewer_verdict": null,
+      "created_at": "2026-04-27 08:07:19.648132"
+    },
+    {
+      "result_id": "9cc57555-4ef0-452a-80f3-f9650d22d59d",
+      "claim_id": "4667ec85-e050-4023-b19d-10c07f2ac789",
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "evidence": null,
+      "mismatch_type": null,
+      "explanation": "해당 주장을 검증하고자 국가통계포털(KOSIS)에서 '휘발유 및 경유 가격 상승률 미국, 일본 같은 기간'을 검색하였으나 해당 자료를 찾을 수 없었습니다. 따라서 이 주장은 현재 시점에서는 검증이 불가능합니다. \n\n국가통계포털에는 국내뿐 아니라 세계 여러 나라의 다양한 통계 정보가 있으므로, 관심 있는 주제와 관련된 키워드를 입력하여 필요한 정보를 찾아보시기 바랍니다.",
+      "provenance_summary": null,
+      "reviewer_verdict": null,
+      "created_at": "2026-04-27 08:07:19.648187"
+    },
+    {
+      "result_id": "18b62e7d-4cf4-481e-a8c3-f37b17de9e55",
+      "claim_id": "a2b0eef9-90f3-4177-9d57-832de343ba33",
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "evidence": null,
+      "mismatch_type": null,
+      "explanation": "해당 주장에 대한 검증 결과, '휘발유 및 경유 가격 인상 억제 정도 일본 내 정유사 및 관련 도매 단계'와 관련된 공식 통계를 찾을 수 없어 검증이 불가했습니다. 이는 해당 정보가 공개되어 있지 않거나, 다른 기관에서 관리되고 있을 가능성이 있습니다. \n\n독자는 국가통계포털(KOSIS)에서 직접 검색하거나, 관련 기관에 문의하여 해당 정보를 확인해 볼 수 있습니다. 또한, 다양한 언론 매체나 연구기관에서도 유사한 주제에 대해 다루고 있을 수 있으므로 참고하시기 바랍니다.",
+      "provenance_summary": null,
+      "reviewer_verdict": null,
+      "created_at": "2026-04-27 08:07:19.648233"
+    },
+    {
+      "result_id": "bbec39b7-f6f3-42ce-aaf7-7c6e2284373e",
+      "claim_id": "af2edd2d-e38e-4aca-8f0c-0b0d9388e374",
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "evidence": null,
+      "mismatch_type": null,
+      "explanation": "해당 주장에 대한 검증 결과는 '검증 불가'입니다. 이는 국내 통계 포털인 KOSIS에서 해당 주제와 관련된 통계표를 찾을 수 없었기 때문입니다. 따라서 위 주장이 사실인지 여부를 판단할 수 없습니다. \n\n독자는 KOSIS(https://kosis.kr/) 에서 직접 시도한 검색어('휘발유 가격 상승률 영국, 프랑스, 독일 등 유럽 국가 및 한국 같은 기간')를 입력하여 관련 정보를 찾아볼 수 있습니다. 다만, 현재 시점에서는 해당 정보를 제공하지 않고 있음을 알려드립니다.",
+      "provenance_summary": null,
+      "reviewer_verdict": null,
+      "created_at": "2026-04-27 08:07:19.648275"
+    },
+    {
+      "result_id": "9146c6d4-b0a4-4e71-90b7-92dbec97864a",
+      "claim_id": "9840b1a7-b3cc-41f4-9d53-233835af35a2",
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "evidence": null,
+      "mismatch_type": null,
+      "explanation": "해당 주장에 대한 객관적인 근거를 찾기 위해 KOSIS(국가통계포털)에서 '경윳값 상승률 한국 및 비교 대상 국가들'이라는 검색어로 자료를 찾아보았지만, 해당 정보를 찾을 수 없었습니다. 따라서 이 주장은 현재로서는 검증이 불가능합니다. \n\n추가적인 사실 확인을 위해서는 다른 신뢰할 만한 기관이나 뉴스 매체 보도를 참고하거나, 필요하다면 국제기구 또는 각국 정부 발표자료를 통해 교차 검증해야 할 것입니다. 또한, 보다 정확한 조사를 위해서는 추가적인 연구나 분석이 필요할 수도 있습니다.",
+      "provenance_summary": null,
+      "reviewer_verdict": null,
+      "created_at": "2026-04-27 08:07:19.648316"
+    },
+    {
+      "result_id": "3dcf61d7-cc28-4994-969c-6228fa1a7ba5",
+      "claim_id": "9d701d64-d8a7-48f9-9ee7-693b85c3fd01",
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "evidence": null,
+      "mismatch_type": null,
+      "explanation": "해당 주장에 대한 공식 통계를 찾을 수 없었습니다. 이는 해당 정보가 공개되지 않았거나, 다른 기관에서 관리되고 있을 가능성이 있습니다. \n\n독자는 국가통계포털(KOSIS)에서 '비축유 스와프 신청 물량' 또는 '국내 4대 정유사'와 같은 검색어를 활용하여 관련 자료를 찾아볼 수 있습니다. 다만, 본 검증에서는 해당 정보를 발견하지 못했습니다.",
+      "provenance_summary": null,
+      "reviewer_verdict": null,
+      "created_at": "2026-04-27 08:07:19.648354"
+    }
+  ],
+  "explanations": [
+    {
+      "claim_id": "4c96c955-f457-44bd-8697-885db4001e48",
+      "explanation": "해당 주장이 사실인지 여부를 판단하기 위해 '경윳값 상승률 한국 및 일본'이라는 검색어로 국가통계포털(KOSIS)에서 자료를 찾아보았으나, 해당 정보를 찾을 수 없었습니다. 따라서 이 주장은 현재 시점에서는 검증이 불가능합니다. \n\n독자 여러분께서는 필요하시다면 직접 국가통계포털(https://kosis.kr/) 에서 관련 키워드를 검색하여 원하는 정보를 찾아보시기 바랍니다."
+    },
+    {
+      "claim_id": "53ee91ca-c400-4593-8fe0-6cca111893da",
+      "explanation": "해당 주장이 사실인지 확인하기 위해 국가통계포털(KOSIS)에서 '석유제품 가격 변동률'과 '한국의 휘발유 및 경유', '중동전쟁 발발 직전(2월 27일)'이라는 검색어를 조합하여 찾아보았으나, 관련 통계를 찾을 수 없었습니다. 따라서 이 주장은 현재로서는 검증이 불가능합니다. \n\n국가통계포털에서는 국내 다양한 분야의 통계 자료를 제공하고 있으니, 관심 있는 주제가 있다면 직접 검색하여 확인해 보시기 바랍니다."
+    },
+    {
+      "claim_id": "4667ec85-e050-4023-b19d-10c07f2ac789",
+      "explanation": "해당 주장을 검증하고자 국가통계포털(KOSIS)에서 '휘발유 및 경유 가격 상승률 미국, 일본 같은 기간'을 검색하였으나 해당 자료를 찾을 수 없었습니다. 따라서 이 주장은 현재 시점에서는 검증이 불가능합니다. \n\n국가통계포털에는 국내뿐 아니라 세계 여러 나라의 다양한 통계 정보가 있으므로, 관심 있는 주제와 관련된 키워드를 입력하여 필요한 정보를 찾아보시기 바랍니다."
+    },
+    {
+      "claim_id": "a2b0eef9-90f3-4177-9d57-832de343ba33",
+      "explanation": "해당 주장에 대한 검증 결과, '휘발유 및 경유 가격 인상 억제 정도 일본 내 정유사 및 관련 도매 단계'와 관련된 공식 통계를 찾을 수 없어 검증이 불가했습니다. 이는 해당 정보가 공개되어 있지 않거나, 다른 기관에서 관리되고 있을 가능성이 있습니다. \n\n독자는 국가통계포털(KOSIS)에서 직접 검색하거나, 관련 기관에 문의하여 해당 정보를 확인해 볼 수 있습니다. 또한, 다양한 언론 매체나 연구기관에서도 유사한 주제에 대해 다루고 있을 수 있으므로 참고하시기 바랍니다."
+    },
+    {
+      "claim_id": "af2edd2d-e38e-4aca-8f0c-0b0d9388e374",
+      "explanation": "해당 주장에 대한 검증 결과는 '검증 불가'입니다. 이는 국내 통계 포털인 KOSIS에서 해당 주제와 관련된 통계표를 찾을 수 없었기 때문입니다. 따라서 위 주장이 사실인지 여부를 판단할 수 없습니다. \n\n독자는 KOSIS(https://kosis.kr/) 에서 직접 시도한 검색어('휘발유 가격 상승률 영국, 프랑스, 독일 등 유럽 국가 및 한국 같은 기간')를 입력하여 관련 정보를 찾아볼 수 있습니다. 다만, 현재 시점에서는 해당 정보를 제공하지 않고 있음을 알려드립니다."
+    },
+    {
+      "claim_id": "9840b1a7-b3cc-41f4-9d53-233835af35a2",
+      "explanation": "해당 주장에 대한 객관적인 근거를 찾기 위해 KOSIS(국가통계포털)에서 '경윳값 상승률 한국 및 비교 대상 국가들'이라는 검색어로 자료를 찾아보았지만, 해당 정보를 찾을 수 없었습니다. 따라서 이 주장은 현재로서는 검증이 불가능합니다. \n\n추가적인 사실 확인을 위해서는 다른 신뢰할 만한 기관이나 뉴스 매체 보도를 참고하거나, 필요하다면 국제기구 또는 각국 정부 발표자료를 통해 교차 검증해야 할 것입니다. 또한, 보다 정확한 조사를 위해서는 추가적인 연구나 분석이 필요할 수도 있습니다."
+    },
+    {
+      "claim_id": "9d701d64-d8a7-48f9-9ee7-693b85c3fd01",
+      "explanation": "해당 주장에 대한 공식 통계를 찾을 수 없었습니다. 이는 해당 정보가 공개되지 않았거나, 다른 기관에서 관리되고 있을 가능성이 있습니다. \n\n독자는 국가통계포털(KOSIS)에서 '비축유 스와프 신청 물량' 또는 '국내 4대 정유사'와 같은 검색어를 활용하여 관련 자료를 찾아볼 수 있습니다. 다만, 본 검증에서는 해당 정보를 발견하지 못했습니다."
+    }
+  ],
+  "graph": {
+    "nodes": [
+      {
+        "node_id": "claim:4c96c955",
+        "node_type": "claim",
+        "label": "산업부 브리핑…한국 경윳값 25% 오를 때 일본 9.4% 상승 그쳐\n(서울=연합뉴스) 김동규 기자 = 정부가",
+        "properties": {
+          "claim_text": "산업부 브리핑…한국 경윳값 25% 오를 때 일본 9.4% 상승 그쳐\n(서울=연합뉴스) 김동규 기자 = 정부가 석유 최고가격제로 휘발유·경윳값을 지나치게 눌러 수요 억제가 되지 않고 있다는 일각의 지적에 일본과 유럽 등 사례를 들어 반박했다.",
+          "value": 25.0,
+          "claim_type": "comparison",
+          "canonical_type": null
+        }
+      },
+      {
+        "node_id": "metric:경윳값 상승률",
+        "node_type": "metric",
+        "label": "경윳값 상승률",
+        "properties": {
+          "unit": "%"
+        }
+      },
+      {
+        "node_id": "entity:한국 및 일본",
+        "node_type": "entity",
+        "label": "한국 및 일본",
+        "properties": {}
+      },
+      {
+        "node_id": "claim:53ee91ca",
+        "node_type": "claim",
+        "label": "산업부에 따르면 이날 한국의 석유제품 가격은 중동전쟁 발발 직전인 2월 27일과 비교해 휘발유는 18.4%,",
+        "properties": {
+          "claim_text": "산업부에 따르면 이날 한국의 석유제품 가격은 중동전쟁 발발 직전인 2월 27일과 비교해 휘발유는 18.4%, 경유는 25.0% 각각 올랐다.",
+          "value": 18.4,
+          "claim_type": "price increase",
+          "canonical_type": null
+        }
+      },
+      {
+        "node_id": "metric:석유제품 가격 변동률",
+        "node_type": "metric",
+        "label": "석유제품 가격 변동률",
+        "properties": {
+          "unit": "%"
+        }
+      },
+      {
+        "node_id": "time:중동전쟁 발발 직전(2월 27일)",
+        "node_type": "time",
+        "label": "중동전쟁 발발 직전(2월 27일)",
+        "properties": {}
+      },
+      {
+        "node_id": "entity:한국의 휘발유 및 경유",
+        "node_type": "entity",
+        "label": "한국의 휘발유 및 경유",
+        "properties": {}
+      },
+      {
+        "node_id": "claim:4667ec85",
+        "node_type": "claim",
+        "label": "이는 미국이 같은 기간 휘발유는 35.6%, 경유는 47.1% 오른 것과 비교하면 낮은 상승률이지만, 일본의",
+        "properties": {
+          "claim_text": "이는 미국이 같은 기간 휘발유는 35.6%, 경유는 47.1% 오른 것과 비교하면 낮은 상승률이지만, 일본의 휘발윳값이 같은 기간 7.28%, 경윳값이 9.40% 오른 것에 비해서는 상승률이 크게 높은 것이다.",
+          "value": 35.6,
+          "claim_type": "comparative",
+          "canonical_type": null
+        }
+      },
+      {
+        "node_id": "metric:휘발유 및 경유 가격 상승률",
+        "node_type": "metric",
+        "label": "휘발유 및 경유 가격 상승률",
+        "properties": {
+          "unit": "%"
+        }
+      },
+      {
+        "node_id": "time:같은 기간",
+        "node_type": "time",
+        "label": "같은 기간",
+        "properties": {}
+      },
+      {
+        "node_id": "entity:미국, 일본",
+        "node_type": "entity",
+        "label": "미국, 일본",
+        "properties": {}
+      },
+      {
+        "node_id": "claim:a2b0eef9",
+        "node_type": "claim",
+        "label": "일본 정부 역시 물가 안정을 위해 정유사 등 도매단계에서 보조금을 지급하는 방식으로 휘발유·경유 등 가격 인",
+        "properties": {
+          "claim_text": "일본 정부 역시 물가 안정을 위해 정유사 등 도매단계에서 보조금을 지급하는 방식으로 휘발유·경유 등 가격 인상을 억제하고 있다.",
+          "value": 0.0,
+          "claim_type": "policy",
+          "canonical_type": null
+        }
+      },
+      {
+        "node_id": "metric:휘발유 및 경유 가격 인상 억제 정도",
+        "node_type": "metric",
+        "label": "휘발유 및 경유 가격 인상 억제 정도",
+        "properties": {
+          "unit": null
+        }
+      },
+      {
+        "node_id": "entity:일본 내 정유사 및 관련 도매 단계",
+        "node_type": "entity",
+        "label": "일본 내 정유사 및 관련 도매 단계",
+        "properties": {}
+      },
+      {
+        "node_id": "claim:af2edd2d",
+        "node_type": "claim",
+        "label": "영국, 프랑스, 독일 등 유럽 국가의 경우 같은 기간 휘발윳값은 17% 안팎으로 상승해 한국과 비슷한 상승 ",
+        "properties": {
+          "claim_text": "영국, 프랑스, 독일 등 유럽 국가의 경우 같은 기간 휘발윳값은 17% 안팎으로 상승해 한국과 비슷한 상승 폭을 보였다.",
+          "value": 17.0,
+          "claim_type": "comparative",
+          "canonical_type": null
+        }
+      },
+      {
+        "node_id": "metric:휘발유 가격 상승률",
+        "node_type": "metric",
+        "label": "휘발유 가격 상승률",
+        "properties": {
+          "unit": "%"
+        }
+      },
+      {
+        "node_id": "entity:영국, 프랑스, 독일 등 유럽 국가 및 한국",
+        "node_type": "entity",
+        "label": "영국, 프랑스, 독일 등 유럽 국가 및 한국",
+        "properties": {}
+      },
+      {
+        "node_id": "claim:9840b1a7",
+        "node_type": "claim",
+        "label": "경윳값은 30% 이상 상승해 한국보다 5%포인트 내외로 상승 폭이 컸다.",
+        "properties": {
+          "claim_text": "경윳값은 30% 이상 상승해 한국보다 5%포인트 내외로 상승 폭이 컸다.",
+          "value": 30.0,
+          "claim_type": "comparison",
+          "canonical_type": null
+        }
+      },
+      {
+        "node_id": "entity:한국 및 비교 대상 국가들",
+        "node_type": "entity",
+        "label": "한국 및 비교 대상 국가들",
+        "properties": {}
+      },
+      {
+        "node_id": "claim:9d701d64",
+        "node_type": "claim",
+        "label": "산업부는 현재 국내 4대 정유사의 비축유 스와프(SWAP·교환) 신청 물량이 약 3천200만배럴로 집계됐다고",
+        "properties": {
+          "claim_text": "산업부는 현재 국내 4대 정유사의 비축유 스와프(SWAP·교환) 신청 물량이 약 3천200만배럴로 집계됐다고 밝혔다.",
+          "value": 3200000.0,
+          "claim_type": "statistic",
+          "canonical_type": null
+        }
+      },
+      {
+        "node_id": "metric:비축유 스와프 신청 물량",
+        "node_type": "metric",
+        "label": "비축유 스와프 신청 물량",
+        "properties": {
+          "unit": "배럴"
+        }
+      },
+      {
+        "node_id": "time:현재",
+        "node_type": "time",
+        "label": "현재",
+        "properties": {}
+      },
+      {
+        "node_id": "entity:국내 4대 정유사",
+        "node_type": "entity",
+        "label": "국내 4대 정유사",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0001_s0013",
+        "node_type": "source",
+        "label": "node:b0001_s0013",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0000",
+        "node_type": "source",
+        "label": "node:b0000",
+        "properties": {}
+      },
+      {
+        "node_id": "node:doc:84a36cfc",
+        "node_type": "source",
+        "label": "node:doc:84a36cfc",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0001_s0001",
+        "node_type": "source",
+        "label": "node:b0001_s0001",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0001_s0018",
+        "node_type": "source",
+        "label": "node:b0001_s0018",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0001_s0003",
+        "node_type": "source",
+        "label": "node:b0001_s0003",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0001_s0011",
+        "node_type": "source",
+        "label": "node:b0001_s0011",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0001_s0014",
+        "node_type": "source",
+        "label": "node:b0001_s0014",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0001_s0002",
+        "node_type": "source",
+        "label": "node:b0001_s0002",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0001_s0016",
+        "node_type": "source",
+        "label": "node:b0001_s0016",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0001_s0000",
+        "node_type": "source",
+        "label": "node:b0001_s0000",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0001_s0008",
+        "node_type": "source",
+        "label": "node:b0001_s0008",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0001_s0017",
+        "node_type": "source",
+        "label": "node:b0001_s0017",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0000_s0000",
+        "node_type": "source",
+        "label": "node:b0000_s0000",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0001",
+        "node_type": "source",
+        "label": "node:b0001",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0001_s0007",
+        "node_type": "source",
+        "label": "node:b0001_s0007",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0001_s0004",
+        "node_type": "source",
+        "label": "node:b0001_s0004",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0001_s0006",
+        "node_type": "source",
+        "label": "node:b0001_s0006",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0001_s0015",
+        "node_type": "source",
+        "label": "node:b0001_s0015",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0001_s0010",
+        "node_type": "source",
+        "label": "node:b0001_s0010",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0001_s0012",
+        "node_type": "source",
+        "label": "node:b0001_s0012",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0001_s0005",
+        "node_type": "source",
+        "label": "node:b0001_s0005",
+        "properties": {}
+      },
+      {
+        "node_id": "node:b0001_s0009",
+        "node_type": "source",
+        "label": "node:b0001_s0009",
+        "properties": {}
+      }
+    ],
+    "edges": [
+      {
+        "from_node": "claim:4c96c955",
+        "to_node": "metric:경윳값 상승률",
+        "edge_type": "belongs_to",
+        "properties": {}
+      },
+      {
+        "from_node": "claim:4c96c955",
+        "to_node": "entity:한국 및 일본",
+        "edge_type": "belongs_to",
+        "properties": {}
+      },
+      {
+        "from_node": "claim:53ee91ca",
+        "to_node": "metric:석유제품 가격 변동률",
+        "edge_type": "belongs_to",
+        "properties": {}
+      },
+      {
+        "from_node": "claim:53ee91ca",
+        "to_node": "time:중동전쟁 발발 직전(2월 27일)",
+        "edge_type": "measured_at",
+        "properties": {}
+      },
+      {
+        "from_node": "claim:53ee91ca",
+        "to_node": "entity:한국의 휘발유 및 경유",
+        "edge_type": "belongs_to",
+        "properties": {}
+      },
+      {
+        "from_node": "claim:4667ec85",
+        "to_node": "metric:휘발유 및 경유 가격 상승률",
+        "edge_type": "belongs_to",
+        "properties": {}
+      },
+      {
+        "from_node": "claim:4667ec85",
+        "to_node": "time:같은 기간",
+        "edge_type": "measured_at",
+        "properties": {}
+      },
+      {
+        "from_node": "claim:4667ec85",
+        "to_node": "entity:미국, 일본",
+        "edge_type": "belongs_to",
+        "properties": {}
+      },
+      {
+        "from_node": "claim:a2b0eef9",
+        "to_node": "metric:휘발유 및 경유 가격 인상 억제 정도",
+        "edge_type": "belongs_to",
+        "properties": {}
+      },
+      {
+        "from_node": "claim:a2b0eef9",
+        "to_node": "entity:일본 내 정유사 및 관련 도매 단계",
+        "edge_type": "belongs_to",
+        "properties": {}
+      },
+      {
+        "from_node": "claim:af2edd2d",
+        "to_node": "metric:휘발유 가격 상승률",
+        "edge_type": "belongs_to",
+        "properties": {}
+      },
+      {
+        "from_node": "claim:af2edd2d",
+        "to_node": "time:같은 기간",
+        "edge_type": "measured_at",
+        "properties": {}
+      },
+      {
+        "from_node": "claim:af2edd2d",
+        "to_node": "entity:영국, 프랑스, 독일 등 유럽 국가 및 한국",
+        "edge_type": "belongs_to",
+        "properties": {}
+      },
+      {
+        "from_node": "claim:9840b1a7",
+        "to_node": "metric:경윳값 상승률",
+        "edge_type": "belongs_to",
+        "properties": {}
+      },
+      {
+        "from_node": "claim:9840b1a7",
+        "to_node": "entity:한국 및 비교 대상 국가들",
+        "edge_type": "belongs_to",
+        "properties": {}
+      },
+      {
+        "from_node": "claim:9d701d64",
+        "to_node": "metric:비축유 스와프 신청 물량",
+        "edge_type": "belongs_to",
+        "properties": {}
+      },
+      {
+        "from_node": "claim:9d701d64",
+        "to_node": "time:현재",
+        "edge_type": "measured_at",
+        "properties": {}
+      },
+      {
+        "from_node": "claim:9d701d64",
+        "to_node": "entity:국내 4대 정유사",
+        "edge_type": "belongs_to",
+        "properties": {}
+      },
+      {
+        "from_node": "claim:4c96c955",
+        "to_node": "claim:9840b1a7",
+        "edge_type": "compare",
+        "properties": {
+          "shared_indicator": "경윳값 상승률"
+        }
+      },
+      {
+        "from_node": "node:b0000",
+        "to_node": "node:doc:84a36cfc",
+        "edge_type": "in_doc",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0000_s0000",
+        "to_node": "node:b0000",
+        "edge_type": "in_block",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001",
+        "to_node": "node:doc:84a36cfc",
+        "edge_type": "in_doc",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0000",
+        "to_node": "node:b0001",
+        "edge_type": "in_block",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0000",
+        "to_node": "node:b0001_s0001",
+        "edge_type": "next_sent",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0001",
+        "to_node": "node:b0001",
+        "edge_type": "in_block",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0001",
+        "to_node": "node:b0001_s0002",
+        "edge_type": "next_sent",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0002",
+        "to_node": "node:b0001",
+        "edge_type": "in_block",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0002",
+        "to_node": "node:b0001_s0003",
+        "edge_type": "next_sent",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0003",
+        "to_node": "node:b0001",
+        "edge_type": "in_block",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0003",
+        "to_node": "node:b0001_s0004",
+        "edge_type": "next_sent",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0004",
+        "to_node": "node:b0001",
+        "edge_type": "in_block",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0004",
+        "to_node": "node:b0001_s0005",
+        "edge_type": "next_sent",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0005",
+        "to_node": "node:b0001",
+        "edge_type": "in_block",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0005",
+        "to_node": "node:b0001_s0006",
+        "edge_type": "next_sent",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0006",
+        "to_node": "node:b0001",
+        "edge_type": "in_block",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0006",
+        "to_node": "node:b0001_s0007",
+        "edge_type": "next_sent",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0007",
+        "to_node": "node:b0001",
+        "edge_type": "in_block",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0007",
+        "to_node": "node:b0001_s0008",
+        "edge_type": "next_sent",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0008",
+        "to_node": "node:b0001",
+        "edge_type": "in_block",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0008",
+        "to_node": "node:b0001_s0009",
+        "edge_type": "next_sent",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0009",
+        "to_node": "node:b0001",
+        "edge_type": "in_block",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0009",
+        "to_node": "node:b0001_s0010",
+        "edge_type": "next_sent",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0010",
+        "to_node": "node:b0001",
+        "edge_type": "in_block",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0010",
+        "to_node": "node:b0001_s0011",
+        "edge_type": "next_sent",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0011",
+        "to_node": "node:b0001",
+        "edge_type": "in_block",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0011",
+        "to_node": "node:b0001_s0012",
+        "edge_type": "next_sent",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0012",
+        "to_node": "node:b0001",
+        "edge_type": "in_block",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0012",
+        "to_node": "node:b0001_s0013",
+        "edge_type": "next_sent",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0013",
+        "to_node": "node:b0001",
+        "edge_type": "in_block",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0013",
+        "to_node": "node:b0001_s0014",
+        "edge_type": "next_sent",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0014",
+        "to_node": "node:b0001",
+        "edge_type": "in_block",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0014",
+        "to_node": "node:b0001_s0015",
+        "edge_type": "next_sent",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0015",
+        "to_node": "node:b0001",
+        "edge_type": "in_block",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0015",
+        "to_node": "node:b0001_s0016",
+        "edge_type": "next_sent",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0016",
+        "to_node": "node:b0001",
+        "edge_type": "in_block",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0016",
+        "to_node": "node:b0001_s0017",
+        "edge_type": "next_sent",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0017",
+        "to_node": "node:b0001",
+        "edge_type": "in_block",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0017",
+        "to_node": "node:b0001_s0018",
+        "edge_type": "next_sent",
+        "properties": {}
+      },
+      {
+        "from_node": "node:b0001_s0018",
+        "to_node": "node:b0001",
+        "edge_type": "in_block",
+        "properties": {}
+      }
+    ]
+  }
+}
