@@ -1,4 +1,16 @@
 """
+# 수정자: 박재윤
+# 수정 날짜: 2026-04-29
+# 수정 내용: DBManager 초기화 및 save_claims, save_results 연동 구현
+
+# [DONE] DBManager 초기화 연동
+# [DONE] save_claims 파이프라인 연결
+# [DONE] save_results 파이프라인 연결
+# [TODO] RawStorage 초기화 (MinIO/S3 업로드)
+# [TODO] DWHManager 초기화 (Snowflake)
+# [TODO] GraphStore 초기화 (Neo4j)
+# [TODO] save_document 구현 (db_manager.py)
+
 core/pipeline.py — v2.1 검증 파이프라인 (13단계)
 
   ① 입력 → ② 전처리+SIR Tree → ③ 도메인 판별
@@ -28,6 +40,7 @@ from structverify.core.schemas import (
 from structverify.preprocessing.extractor import extract_text
 from structverify.preprocessing.sir_builder import build_sir
 from structverify.agent.runtime_agent import RuntimeAgent
+from structverify.storage.db_manager import DBManager
 from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -53,14 +66,14 @@ class VerificationPipeline:
         self.config = config or {}
         self.runtime_agent = RuntimeAgent(config=self.config)
 
+        # [v1] - 박재윤: DBManager 초기화 연동
+        self.db_manager = DBManager(config=self.config.get("database", {}))
+
         # TODO [김예슬]: BuilderAgent 초기화 (비동기 백그라운드 학습 루프)
         # self.builder_agent = BuilderAgent(config=self.config)
 
         # TODO [박재윤]: RawStorage 초기화 (MinIO/S3 업로드)
         # self.raw_storage = RawStorage(config=self.config.get("storage", {}))
-
-        # TODO [박재윤]: DBManager 초기화 (PostgreSQL async)
-        # self.db_manager = DBManager(config=self.config.get("database", {}))
 
         # TODO [박재윤]: DWHManager 초기화 (Snowflake)
         # self.dwh_manager = DWHManager(config=self.config.get("dwh", {}))
@@ -102,48 +115,35 @@ class VerificationPipeline:
         logger.info(f"SIR Tree: {len(sir_doc.blocks)} blocks")
 
         # TODO [박재윤]: Step 1.5 — 원본 텍스트 → Raw Storage(S3/MinIO) 저장
-        #   await self.raw_storage.upload(source, raw_text, metadata={"source_type": src.value})
+        # await self.raw_storage.upload(source, raw_text, metadata={"source_type": src.value})
 
         # TODO [박재윤]: Step 2.5 — SIR Document → PostgreSQL 저장
-        #   await self.db_manager.save_document(sir_doc)
+        # await self.db_manager.save_document(sir_doc)
 
-        # ─────────────────────────────────────────────
         # Step 3~9: Runtime Agent 실행
-        # ─────────────────────────────────────────────
-        # [김예슬] RuntimeAgent.process() 내부 흐름:
-        #   Step 3: LLM 도메인 분류 (HCX-DASH-001)
-        #   Step 4: Teacher LLM candidate scoring → check-worthiness (HCX-003)
-        #           ※ Regex는 fallback 신호에 불과, LLM이 최종 판단
-        #   Step 5: LLM Schema Induction (HCX-003)
-        #   Step 6: Claim Graph 구성
-        #   Step 7: KOSIS API 호출 → Evidence 서브그래프
-        #   Step 8: Deterministic 수치 비교 (LLM 미개입)
-        #   Step 9: LLM 설명 생성 (HCX-003)
         claims, results, nodes, edges = await self.runtime_agent.process(sir_doc)
 
-        # TODO [박재윤]: Claims → PostgreSQL 저장
-        #   await self.db_manager.save_claims(claims)
+        # [v1] - 박재윤: Claims → PostgreSQL 저장
+        if claims:
+            await self.db_manager.save_claims(claims)
+            logger.info(f"Claims 저장 완료: {len(claims)}건")
 
-        # TODO [박재윤]: Results → PostgreSQL 저장
-        #   await self.db_manager.save_results(results)
+        # [v1] - 박재윤: Results → PostgreSQL 저장
+        if results:
+            await self.db_manager.save_results(results)
+            logger.info(f"Results 저장 완료: {len(results)}건")
 
         # TODO [박재윤]: Nodes/Edges → Neo4j 저장
-        #   await self.graph_store.merge_nodes(nodes)
-        #   await self.graph_store.merge_edges(edges)
+        # await self.graph_store.merge_nodes(nodes)
+        # await self.graph_store.merge_edges(edges)
 
         # TODO [김예슬]: Step 10 — Human Review 인터페이스 연동
-        #   웹 UI → reviewer_verdict 필드 업데이트
-
         # TODO [김예슬]: Step 11 — Feedback Logging
-        #   await self.builder_agent.log_feedback(feedback_event)
-
         # TODO [김예슬]: Step 12 — Adaptation Trigger
-        #   피드백 누적 시 builder_agent._trigger_adaptation() 자동 호출
-
-        # TODO [김예슬]: Step 13 — Report 렌더링 (PDF/HTML 리포트 생성)
+        # TODO [김예슬]: Step 13 — Report 렌더링
 
         # TODO [박재윤]: DWH 적재 (검증 로그, 모델 성능, LLM 비용)
-        #   await self.dwh_manager.load_verification_logs([...])
+        # await self.dwh_manager.load_verification_logs([...])
 
         report = VerificationReport(
             document=sir_doc,
