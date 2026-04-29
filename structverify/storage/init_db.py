@@ -7,6 +7,7 @@
 
 # [DONE] CREATE TABLE 4개 구현
 # [DONE] pgvector extension 추가
+# [DONE] kosis_stat_catalog 테이블 추가
 """
 import psycopg2
 from dotenv import load_dotenv
@@ -71,10 +72,22 @@ cur.execute("""
         explanation TEXT,
         judged_at TIMESTAMP DEFAULT NOW()
     );
+            
+    CREATE TABLE IF NOT EXISTS kosis_stat_catalog (
+        stat_id VARCHAR PRIMARY KEY,
+        stat_name VARCHAR,
+        org_id VARCHAR,
+        org_name VARCHAR,
+        category_path VARCHAR,
+        keywords TEXT[],
+        embedding vector(1024),
+        raw_meta_json JSONB,
+        fetched_at TIMESTAMP DEFAULT NOW()
+    );
 """)
 
 conn.commit()
 cur.close()
 conn.close()
 
-print("테이블 4개 생성 완료")
+print("테이블 5개 생성 완료")
