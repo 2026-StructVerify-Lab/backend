@@ -8,6 +8,7 @@
 # [DONE] 주제별 통계(MT_ZTITLE) 카테고리 전체 확장
 # [DONE] save_to_db 배치 임베딩으로 최적화 (100건 단위)
 # [DONE] NCP 임베딩 모델로 교체 (HCX 임베딩 v2, 1024차원)
+# [DONE] save_to_db 세마포어 기반 rate limit 제어 (asyncio.Semaphore, 3개 동시 + 재시도)
 # [TODO] asyncpg로 마이그레이션 (현재 psycopg2 임시 사용)
 # [TODO] 기관별 통계(MT_OTITLE) 수집 추가 (별도 배치 스크립트)
 
@@ -168,9 +169,11 @@ def _extract_keywords(stat_name: str) -> list[str]:
     return [t for t in tokens if len(t) >= 2 and t not in stopwords]
 
 
+
 async def save_to_db(catalog: list[dict], config: dict | None = None) -> int:
     import psycopg2
-    import httpx as hx
+    import httpx
+    import asyncio
     from dotenv import load_dotenv
     load_dotenv()
 
@@ -178,8 +181,33 @@ async def save_to_db(catalog: list[dict], config: dict | None = None) -> int:
     # from openai import OpenAI
     # client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-    # [v2] - 박재윤: HCX 임베딩 v2로 교체 (1024차원)
+    # [v2] - 박재윤: HCX 임베딩 v2 건별 호출 (배치 미지원)
+    # for item in batch:
+    #     resp = hx.post(...)
+    #     embeddings_list.append(resp.json()["result"]["embedding"])
+
+    # [v3] - 박재윤: asyncio.gather + 세마포어로 rate limit 제어 (3개 동시)
     hcx_api_key = os.environ.get("CLOVASTUDIO_API_KEY", "")
+    semaphore = asyncio.Semaphore(3)
+
+    async def get_embedding_safe(client, text):
+        async with semaphore:
+            for retry in range(5):
+                resp = await client.post(
+                    "https://clovastudio.stream.ntruss.com/v1/api-tools/embedding/v2",
+                    headers={
+                        "Authorization": f"Bearer {hcx_api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={"text": text},
+                    timeout=30
+                )
+                data = resp.json()
+                if data.get("result") is not None:
+                    return data["result"]["embedding"]
+                if resp.status_code == 429:
+                    await asyncio.sleep(2 ** retry)
+            return [0.0] * 1024
 
     conn = psycopg2.connect(
         host=os.getenv("POSTGRES_HOST"),
@@ -191,47 +219,38 @@ async def save_to_db(catalog: list[dict], config: dict | None = None) -> int:
     cur = conn.cursor()
 
     BATCH_SIZE = 100
-    for i in range(0, len(catalog), BATCH_SIZE):
-        batch = catalog[i:i+BATCH_SIZE]
+    async with httpx.AsyncClient(timeout=60) as client:
+        for i in range(0, len(catalog), BATCH_SIZE):
+            batch = catalog[i:i+BATCH_SIZE]
+            texts = [f"{item['category_path']} {item['stat_name']}" for item in batch]
 
-        # [v2] - 박재윤: HCX는 건별 호출 (배치 미지원)
-        embeddings_list = []
-        for item in batch:
-            text = f"{item['category_path']} {item['stat_name']}"
-            resp = hx.post(
-                "https://clovastudio.stream.ntruss.com/v1/api-tools/embedding/v2",
-                headers={
-                    "Authorization": f"Bearer {hcx_api_key}",
-                    "Content-Type": "application/json"
-                },
-                json={"text": text},
-                timeout=30
-            )
-            embeddings_list.append(resp.json()["result"]["embedding"])
+            embeddings_list = await asyncio.gather(*[
+                get_embedding_safe(client, text) for text in texts
+            ])
 
-        for item, embedding in zip(batch, embeddings_list):
-            cur.execute("""
-                INSERT INTO kosis_stat_catalog
-                    (stat_id, stat_name, org_id, org_name, category_path,
-                     keywords, embedding, raw_meta_json)
-                VALUES (%s, %s, %s, %s, %s, %s, %s::vector, %s::jsonb)
-                ON CONFLICT (stat_id) DO UPDATE
-                SET stat_name=EXCLUDED.stat_name,
-                    embedding=EXCLUDED.embedding,
-                    fetched_at=NOW()
-            """, (
-                item["stat_id"],
-                item["stat_name"],
-                item["org_id"],
-                item["org_name"],
-                item["category_path"],
-                item["keywords"],
-                str(embedding),
-                json.dumps(item)
-            ))
+            for item, embedding in zip(batch, embeddings_list):
+                cur.execute("""
+                    INSERT INTO kosis_stat_catalog
+                        (stat_id, stat_name, org_id, org_name, category_path,
+                         keywords, embedding, raw_meta_json)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s::vector, %s::jsonb)
+                    ON CONFLICT (stat_id) DO UPDATE
+                    SET stat_name=EXCLUDED.stat_name,
+                        embedding=EXCLUDED.embedding,
+                        fetched_at=NOW()
+                """, (
+                    item["stat_id"],
+                    item["stat_name"],
+                    item["org_id"],
+                    item["org_name"],
+                    item["category_path"],
+                    item["keywords"],
+                    str(embedding),
+                    json.dumps(item)
+                ))
 
-        conn.commit()
-        print(f"✅ {i+len(batch)}/{len(catalog)}건 저장 완료")
+            conn.commit()
+            print(f"✅ {i+len(batch)}/{len(catalog)}건 저장 완료")
 
     cur.close()
     conn.close()
@@ -259,7 +278,7 @@ if __name__ == "__main__":
         for item in catalog[:3]:
             print(item)
 
-        count = await save_to_db(catalog)
+        count = await save_to_db(catalog[120000:])
         logger.info(f"=== 완료: {count}건 저장 ===")
 
     asyncio.run(main())
