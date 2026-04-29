@@ -80,3 +80,7 @@ candidate_detection:
 observability:
   langfuse_enabled: false
   log_level: "INFO"
+
+preprocessing:
+  sandbox_backend: "docker"      # "exec" | "docker" | "e2b"
+  use_llm_clean: true

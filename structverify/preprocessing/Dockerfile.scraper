@@ -1,0 +1,27 @@
+# Dockerfile.scraper — LLM 스크래핑 코드 실행용 격리 컨테이너
+#
+# [김예슬 - 2026-04-28]
+# - python:3.13-slim 기반
+# - httpx, beautifulsoup4만 설치 (최소 의존성)
+# - 비root 사용자(scraper)로 실행 (보안)
+# - 네트워크: docker run 시 --network=bridge 로 외부 인터넷만 허용
+# - 파일시스템: 스크립트 파일만 read-only 마운트
+#
+# 빌드:
+#   docker build -f Dockerfile.scraper -t structverify-scraper .
+#
+# 수동 테스트:
+#   docker run --rm --memory=256m --cpus=0.5 \
+#     -v /tmp/test.py:/app/scraper.py:ro \
+#     structverify-scraper python scraper.py
+
+FROM python:3.13-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir httpx beautifulsoup4==4.12.3
+
+RUN useradd -m -u 1000 scraper
+USER scraper
+
+CMD ["python", "scraper.py"]

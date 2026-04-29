@@ -45,3 +45,11 @@ env_files = [".env"]
     
 [tool.ruff]
 line-length = 100
+
+[tool.setuptools.package-data]
+structverify = [
+    "preprocessing/Dockerfile.scraper",  # LLM 스크래퍼 Docker 이미지 빌드용
+    "config/*.yaml",                      # 기본 설정 파일
+    "domain-packs/**/*",                  # 도메인 팩 (few-shot 예시 등)
+]
+ 
