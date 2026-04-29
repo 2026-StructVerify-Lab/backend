@@ -259,7 +259,7 @@ if __name__ == "__main__":
         for item in catalog[:3]:
             print(item)
 
-        # count = await save_to_db(catalog)
-        # logger.info(f"=== 완료: {count}건 저장 ===")
+        count = await save_to_db(catalog)
+        logger.info(f"=== 완료: {count}건 저장 ===")
 
     asyncio.run(main())
