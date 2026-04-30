@@ -28,6 +28,7 @@ import tempfile
 import pytest
 from collections import Counter
 from pathlib import Path
+import asyncpg
 
 pytestmark = pytest.mark.asyncio
 
@@ -170,6 +171,56 @@ async def test_url_step1_to_9(config):
     assert "next_sent" in edge_dist, "NEXT_SENT 엣지 없음"
     assert "in_block"  in edge_dist, "IN_BLOCK 엣지 없음"
     assert "in_doc"    in edge_dist, "IN_DOC 엣지 없음"
+
+    # ── Step 7-0: KOSIS 메타데이터 pgvector 준비 확인 ─────────────────────
+    print("\n[Step 7-0] KOSIS Metadata Vector Store Check")
+
+    pg_dsn = os.environ.get(
+        "PGVECTOR_DSN",
+        "postgresql://structverify:svpass123@localhost:5432/structverify",
+    )
+
+    try:
+        conn = await asyncpg.connect(pg_dsn)
+
+        # pgvector extension 확인
+        vector_ext = await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')"
+        )
+        assert vector_ext is True, "pgvector extension이 설치되어 있지 않음"
+
+        # kosis_stat_catalog 테이블 확인
+        table_exists = await conn.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_name = 'kosis_stat_catalog'
+            )
+            """
+        )
+        assert table_exists is True, "kosis_stat_catalog 테이블이 없음"
+
+        # 적재 데이터 확인
+        catalog_count = await conn.fetchval("SELECT COUNT(*) FROM kosis_stat_catalog")
+        print(f"[Step 7-0] kosis_stat_catalog rows={catalog_count}")
+
+        assert catalog_count > 0, "kosis_stat_catalog에 적재된 KOSIS 메타데이터가 없음"
+
+        # embedding 컬럼 데이터 확인
+        embedding_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM kosis_stat_catalog WHERE embedding IS NOT NULL"
+        )
+        print(f"[Step 7-0] embedding rows={embedding_count}")
+
+        assert embedding_count > 0, "embedding이 채워진 KOSIS 메타데이터가 없음"
+
+        await conn.close()
+
+    except Exception as e:
+        pytest.fail(f"Step 7-0 pgvector 준비 확인 실패: {e}")
+        
+
 
     # ── Step 7: KOSIS Evidence 조회 ──────────────────────────────────────
     print("\n[Step 7] Evidence Retrieval")

@@ -22,11 +22,19 @@ conn = psycopg2.connect(
     user=os.getenv("POSTGRES_USER"),
     password=os.getenv("POSTGRES_PASSWORD")
 )
+print("PostgreSQL 연결 확인")
+print(f"Host: {os.getenv('POSTGRES_HOST')}, Port: {os.getenv('POSTGRES_PORT')}, DB: {os.getenv('POSTGRES_DB')}, User: {os.getenv('POSTGRES_USER')}")
+
 
 cur = conn.cursor()
 
+cur.execute("SELECT inet_server_addr(), inet_server_port();")
+print("SERVER:", cur.fetchone())
+
+cur.execute("SELECT extname FROM pg_extension;")
+print("EXTENSIONS:", cur.fetchall())
+
 cur.execute("""
-    CREATE EXTENSION IF NOT EXISTS vector;
 
     CREATE TABLE IF NOT EXISTS requests (
         request_id VARCHAR PRIMARY KEY,
