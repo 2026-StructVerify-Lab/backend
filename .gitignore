@@ -42,3 +42,4 @@ Thumbs.db
 config/default.yaml
 
 kosis_catalog_cache.json
+/*.csv
