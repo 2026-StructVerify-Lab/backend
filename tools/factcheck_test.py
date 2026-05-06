@@ -19,6 +19,12 @@
 # [DONE] KOSIS 통합검색 vwCd=MT_ZTITLE 필터 (국가통계만, 지역통계 제외)
 # [DONE] HCX 키워드 추출 연도 제거 regex 개선 (4자리 숫자만 제거)
 # [DONE] is_relevant_table LLM 제거 → pgvector 유사도 점수로 대체
+# [DONE] is_relevant_table 키워드 겹침 방식으로 교체 (LLM 제거, 도메인 무관)
+# [DONE] claim 임베딩 텍스트 KOSIS 포맷 맞춤 (v6)
+# [DONE] fetch_kosis_data objL2=ALL 기본 추가 (필수 파라미터 누락 방지)
+# [DONE] LLM 재판정 제거 - numeric_check 30% 구간 판단불가 처리 (환각 일치 방지)
+# [DONE] normalize_value 천명개월 예외 처리 (KOSIS 단위명 오류 대응)
+# [DONE] LLM 재판정 복원 + is_relevant_table 체크 추가 (가짜 일치 방지)
 # [TODO] asyncpg 마이그레이션 (현재 psycopg2)
 # [TODO] 빈 벡터(임베딩 실패) 재시도 로직
 
@@ -220,7 +226,11 @@ def find_candidate_tables(claim: dict, top_k: int = 5) -> list[dict]:
 
     candidates = search_kosis_api(search_keyword, max_results=top_k)
 
-    combined_keyword = f"{claim['field_name']} {search_keyword}"
+    # [v5] - 박재윤: 기존 포맷
+    # combined_keyword = f"{claim['field_name']} {search_keyword}"
+
+    # [v6] - 박재윤: KOSIS 임베딩 포맷에 맞춰 claim 임베딩 텍스트 보강
+    combined_keyword = f"{' '.join(category_keywords)} > {claim['field_name']} | 항목: {claim['field_name']} | 분류: {search_keyword} | 단위: {claim['unit']}"
     embedding = get_embedding(combined_keyword)
 
     if category_keywords or field_terms:
@@ -248,9 +258,9 @@ def fetch_kosis_data(org_id: str, tbl_id: str, time_reference: str):
     year = year_match.group(1) if year_match else "2024"
 
     period_strategies = [
-        {"prdSe": "Y",  "startPrdDe": year,         "endPrdDe": year,         "label": "연간"},
-        {"prdSe": "M",  "startPrdDe": f"{year}01",  "endPrdDe": f"{year}12",  "label": "월간"},
-        {"prdSe": "Q",  "startPrdDe": f"{year}01",  "endPrdDe": f"{year}04",  "label": "분기"},
+        {"prdSe": "Y",  "startPrdDe": year,         "endPrdDe": year},
+        {"prdSe": "M",  "startPrdDe": f"{year}01",  "endPrdDe": f"{year}12"},
+        {"prdSe": "Q",  "startPrdDe": f"{year}01",  "endPrdDe": f"{year}04"},
     ]
 
     for strategy in period_strategies:
@@ -258,12 +268,14 @@ def fetch_kosis_data(org_id: str, tbl_id: str, time_reference: str):
             "method": "getList", "apiKey": KOSIS_API_KEY,
             "format": "json", "jsonVD": "Y",
             "orgId": org_id, "tblId": tbl_id,
-            "itmId": "ALL", "objL1": "ALL",
+            "itmId": "ALL", "objL1": "ALL", "objL2": "ALL",
             "prdSe": strategy["prdSe"],
             "startPrdDe": strategy["startPrdDe"],
             "endPrdDe": strategy["endPrdDe"],
         }
         data = _try_with_objL_escalation(base_params)
+        if tbl_id == "DT_1DE9058S":
+            print(f"  [DEBUG] prdSe={strategy['prdSe']} startPrdDe={strategy['startPrdDe']} → {type(data).__name__} {str(data)[:80]}")
         if data is not None:
             return data
 
@@ -272,10 +284,12 @@ def fetch_kosis_data(org_id: str, tbl_id: str, time_reference: str):
             "method": "getList", "apiKey": KOSIS_API_KEY,
             "format": "json", "jsonVD": "Y",
             "orgId": org_id, "tblId": tbl_id,
-            "itmId": "ALL", "objL1": "ALL",
+            "itmId": "ALL", "objL1": "ALL", "objL2": "ALL",
             "prdSe": prd, "newEstPrdCnt": 3,
         }
         data = _try_with_objL_escalation(fallback_params)
+        if tbl_id == "DT_1DE9058S":
+            print(f"  [DEBUG] fallback prdSe={prd} newEstPrdCnt=3 → {type(data).__name__} {str(data)[:80]}")
         if data is not None:
             return data
 
@@ -372,7 +386,10 @@ def extract_numeric_values(kosis_data: list) -> list[dict]:
 
 def normalize_value(value: float, kosis_unit: str) -> float:
     kosis_unit = kosis_unit.lower()
-    if "천" in kosis_unit:
+    # [v7] - 박재윤: 천명개월은 실제로 개월 단위 값 (KOSIS 단위명 오류), 변환 안 함
+    if "천명개월" in kosis_unit:
+        return value
+    elif "천" in kosis_unit:
         return value * 1000
     elif "백만" in kosis_unit or "million" in kosis_unit:
         return value * 1000000
@@ -384,8 +401,11 @@ def is_same_unit_type(claim_unit: str, kosis_unit: str) -> bool:
     claim_unit = claim_unit.lower().strip()
     kosis_unit = kosis_unit.lower().strip()
 
-    # 둘 다 비어있으면 통과
     if not claim_unit or not kosis_unit:
+        return True
+
+    # [v7] - 박재윤: 천명개월은 개월 단위로 처리 (KOSIS 단위명 오류 대응)
+    if "천명개월" in kosis_unit:
         return True
 
     people_keywords = ["명", "person", "인구", "가구", "세대"]
@@ -407,7 +427,6 @@ def is_same_unit_type(claim_unit: str, kosis_unit: str) -> bool:
     claim_type = get_type(claim_unit)
     kosis_type = get_type(kosis_unit)
 
-    # 둘 다 unknown이면 통과 (판단 불가)
     if claim_type == "unknown" or kosis_type == "unknown":
         return True
 
@@ -459,6 +478,7 @@ def numeric_check(claim: dict, kosis_data: list) -> dict:
     if best_error <= 0.1:
         return {"verdict": "일치", "reason": f"KOSIS {best_match['normalized']:,.0f}{unit} vs 뉴스 {claim_value:,.0f}{unit} (오차 {best_error*100:.1f}%)"}
     elif best_error <= 0.3:
+        # [v7] - 박재윤: LLM 재판정 트리거 복원
         return {"verdict": "판단불가", "reason": f"유사하나 오차 {best_error*100:.1f}% — LLM 재판정"}
     elif best_error > 0.9:
         # [v5] - 박재윤: 90% 초과 오차는 테이블 매칭 오류로 판단불가
@@ -468,14 +488,13 @@ def numeric_check(claim: dict, kosis_data: list) -> dict:
 
 
 def is_relevant_table(claim: dict, stat_name: str) -> bool:
-    """테이블이 claim과 완전히 무관한지 확인 (무관하면 False)"""
-    prompt = f"""다음 뉴스 수치 주장과 KOSIS 통계표 이름이 같은 주제를 다루는지 판단하세요.
+    prompt = f"""두 텍스트가 같은 통계 주제를 다루는지 판단하세요.
 
-뉴스 주장 지표: {claim['field_name']}
-KOSIS 통계표명: {stat_name}
+A: {claim['field_name']}
+B: {stat_name}
 
-같은 주제(인구, 고용, 임금, 물가 등 분야가 일치)이면 "YES"
-완전히 다른 주제이면 "NO"
+판단 기준: A에서 측정하려는 지표를 B 통계표에서 찾을 수 있으면 YES
+전혀 관련없는 분야면 NO
 
 YES 또는 NO만 답하세요."""
 
@@ -483,11 +502,11 @@ YES 또는 NO만 답하세요."""
         resp = httpx.post(
             "https://clovastudio.stream.ntruss.com/v3/chat-completions/HCX-DASH-002",
             headers={"Authorization": f"Bearer {HCX_API_KEY}", "Content-Type": "application/json"},
-            json={"messages": [{"role": "user", "content": prompt}], "maxTokens": 10, "temperature": 0},
+            json={"messages": [{"role": "user", "content": prompt}], "maxTokens": 5, "temperature": 0},
             timeout=30,
         )
         content = resp.json()["result"]["message"]["content"].strip().upper()
-        return "NO" not in content  # NO가 있으면 스킵, 나머지는 통과
+        return "NO" not in content
     except:
         return True
     
@@ -536,6 +555,11 @@ def process_single_claim(claim: dict) -> dict:
         data_count = len(kosis_data) if isinstance(kosis_data, list) else 1
         safe_print(f"  ✅ KOSIS 데이터 {data_count}건 조회 성공")
 
+        # # [v6] - 박재윤: 키워드 기반 관련성 필터 (LLM 제거, 도메인 무관)
+        # if not is_relevant_table(claim, table["stat_name"]):
+        #     safe_print(f"  ⏭️  키워드 불일치 스킵")
+        #     continue
+
         # [v3] - 박재윤: LLM만으로 판정
         # result = judge_with_hcx(claim, kosis_data, table["stat_name"])
 
@@ -543,10 +567,14 @@ def process_single_claim(claim: dict) -> dict:
         # elif result["verdict"] == "판단불가":
         #     llm_result = judge_with_hcx(...)
 
-        # [v5] - 박재윤: LLM 판단불가 재판정 제거 (도메인 제약 방지)
+        # [v7] - 박재윤: LLM 재판정 복원 (제거 시 일치 감소 확인)
         result = numeric_check(claim, kosis_data)
         if result["verdict"] == "판단불가" and "LLM 재판정" in result["reason"]:
-            result = judge_with_hcx(claim, kosis_data, table["stat_name"])
+            # [v7] - 박재윤: LLM 재판정 전 관련성 체크 추가 (가짜 일치 방지)
+            if is_relevant_table(claim, table["stat_name"]):
+                result = judge_with_hcx(claim, kosis_data, table["stat_name"])
+            else:
+                result = {"verdict": "판단불가", "reason": "테이블 관련성 없음 — 스킵"}
 
         safe_print(f"  ⚖️  판정: {result['verdict']}")
         safe_print(f"  📝 근거: {result['reason']}")
