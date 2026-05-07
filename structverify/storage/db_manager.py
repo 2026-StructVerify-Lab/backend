@@ -10,6 +10,7 @@
 # [TODO] save_feedback 구현
 """
 from __future__ import annotations
+import os                          # ← 추가
 from structverify.core.schemas import SIRDocument, Claim, VerificationResult
 from structverify.utils.logger import get_logger
 
@@ -49,30 +50,26 @@ class DBManager:
         logger.warning(f"DB 저장 stub: doc {doc.doc_id}")
 
     async def save_claims(self, claims: list[Claim]) -> None:
-      cur = self.conn.cursor()
-      
-      for claim in claims:
-          cur.execute("""
-              INSERT INTO claims (claim_id, request_id, field_name, field_value,
-                                unit, is_approximate, modifier, parent_path,
-                                time_reference, context)
-              VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-          """, (
-              str(claim.claim_id),
-              str(claim.doc_id),
-              claim.schema.indicator,
-              claim.schema.value,
-              claim.schema.unit,
-              False,
-              None,
-              None,
-              claim.schema.time_period,
-              claim.claim_text
-          ))
-      
-      self.conn.commit()
-      cur.close()
-
+        cur = self.conn.cursor()
+        for claim in claims:
+            # requests 테이블 먼저 INSERT
+            cur.execute(
+                "INSERT INTO requests (request_id) VALUES (%s) ON CONFLICT (request_id) DO NOTHING",
+                (str(claim.doc_id),)
+            )
+            cur.execute("""
+                INSERT INTO claims (claim_id, request_id, field_name, field_value,
+                                  unit, is_approximate, modifier, parent_path,
+                                  time_reference, context)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                str(claim.claim_id), str(claim.doc_id),
+                claim.schema.indicator, claim.schema.value,
+                claim.schema.unit, False, None, None,
+                claim.schema.time_period, claim.claim_text
+            ))
+        self.conn.commit()
+        cur.close()
     async def save_results(self, results: list[VerificationResult]) -> None:
         """
         TODO [박재윤]: verification_results 테이블 배치 INSERT 구현

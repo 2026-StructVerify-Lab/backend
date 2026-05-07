@@ -69,7 +69,12 @@ class RuntimeAgent:
 
     def __init__(self, config: dict | None = None):
         self.config = config or {}
-        self.kosis = KOSISConnector(config=self.config.get("kosis", {}))
+        # [v3 김예슬] kosis config에 llm 포함 → CatalogSearchTool LLM Agent가 llm 설정 사용
+        kosis_cfg = {
+            **self.config.get("kosis", {}),
+            "llm": self.config.get("llm", {}),
+        }
+        self.kosis = KOSISConnector(config=kosis_cfg)
 
         # TODO [김예슬]: Graph Store 초기화 (Neo4j 노드/엣지 실시간 저장용)
         # from structverify.graph.graph_store import GraphStore
@@ -142,8 +147,7 @@ class RuntimeAgent:
             )
             all_nodes.extend(ev_nodes)
             all_edges.extend(ev_edges)
-            logger.info(f"[Agent A] Step 7 retrieve_evidence → {evidence}")
-
+            logger.info(f"[Agent A] Step 7 retrieve_evidence → {str(evidence)[:80] if evidence else None}")
             # Action: verify_claim (Deterministic, LLM 미개입)
             # Tool: 수치 비교 엔진 — hallucination 방지를 위해 LLM 사용 안 함
             # Thought: "수치를 비교하여 MATCH/MISMATCH/UNVERIFIABLE 판정해야 한다"

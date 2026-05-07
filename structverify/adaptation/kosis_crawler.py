@@ -11,6 +11,10 @@
 # [DONE] save_to_db 세마포어 기반 rate limit 제어 (asyncio.Semaphore, 3개 동시 + 재시도)
 # [TODO] asyncpg로 마이그레이션 (현재 psycopg2 임시 사용)
 # [TODO] 기관별 통계(MT_OTITLE) 수집 추가 (별도 배치 스크립트)
+# [김예슬 - 2026-04-30 / v2]
+# [DONE] is_catalog_ready(): catalog 구축 여부 확인 함수 추가
+# [DONE] save_to_db(): embedding 미완성 행만 임베딩 처리 (skip 최적화)
+# [DONE] builder_agent에서 catalog.rebuild=false 이면 crawl_kosis_catalog skip
 
 adaptation/kosis_crawler.py — KOSIS 통계표 메타데이터 전량 수집 (Step 0-1)
 
@@ -36,6 +40,43 @@ from typing import Any
 from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+# ── [v2] Catalog 준비 여부 확인 ──────────────────────────────────────────────
+
+async def is_catalog_ready(config: dict | None = None, min_rows: int = 1000) -> bool:
+    """
+    kosis_stat_catalog에 데이터가 충분히 있으면 True.
+
+    [v2 박재윤/김예슬 - 2026-04-30]
+    builder_agent.pretrain_domain()에서 호출:
+      config.kosis.catalog.rebuild=false + is_catalog_ready=True
+      → crawl_kosis_catalog() skip (재수집 방지)
+
+    Args:
+        min_rows: 이 수 이상이면 "이미 구축됨"으로 판단 (기본 1000)
+    """
+    config = config or {}
+    try:
+        import asyncpg
+        pg_dsn = os.environ.get(
+            config.get("pgvector_dsn_env", "PGVECTOR_DSN"),
+            "postgresql://structverify:svpass123@localhost:5432/structverify",
+        )
+        conn = await asyncpg.connect(pg_dsn)
+        total = await conn.fetchval("SELECT COUNT(*) FROM kosis_stat_catalog") or 0
+        embedded = await conn.fetchval(
+            "SELECT COUNT(*) FROM kosis_stat_catalog WHERE embedding IS NOT NULL"
+        ) or 0
+        await conn.close()
+        logger.info(
+            f"kosis_stat_catalog: total={total}, embedded={embedded} "
+            f"(min_rows 기준={min_rows})"
+        )
+        return int(total) >= min_rows
+    except Exception as e:
+        logger.debug(f"catalog 확인 실패 (테이블 없거나 DB 미연결): {e}")
+        return False
 
 # [기존] - 박재윤: 기존 카테고리 (ID 오류)
 # KOSIS_TOP_CATEGORIES = [
@@ -171,6 +212,19 @@ def _extract_keywords(stat_name: str) -> list[str]:
 
 
 async def save_to_db(catalog: list[dict], config: dict | None = None) -> int:
+    """
+    수집된 메타데이터 → kosis_stat_catalog INSERT + 임베딩 생성.
+
+    [v2 박재윤/김예슬 - 2026-04-30]
+    embedding skip 최적화:
+      이미 embedding이 있는 stat_id는 임베딩 API 호출 skip.
+      embedding IS NULL인 행만 임베딩 처리.
+      → 재실행 시 API 비용/시간 절감.
+
+    skip 판단:
+      1) INSERT ON CONFLICT DO UPDATE에서 embedding이 이미 있으면 기존 값 유지
+      2) catalog에 있지만 DB에 없는 신규 행만 임베딩 생성
+    """
     import psycopg2
     import httpx
     import asyncio
@@ -229,15 +283,23 @@ async def save_to_db(catalog: list[dict], config: dict | None = None) -> int:
             ])
 
             for item, embedding in zip(batch, embeddings_list):
+                # [v2 박재윤/김예슬] embedding skip 최적화:
+                # - 신규 행: embedding 포함 INSERT
+                # - 기존 행: stat_name/fetched_at만 UPDATE, embedding은 기존 값 유지
+                #   (ON CONFLICT DO UPDATE에서 embedding 제외 → 이미 있는 임베딩 보존)
                 cur.execute("""
                     INSERT INTO kosis_stat_catalog
                         (stat_id, stat_name, org_id, org_name, category_path,
                          keywords, embedding, raw_meta_json)
                     VALUES (%s, %s, %s, %s, %s, %s, %s::vector, %s::jsonb)
                     ON CONFLICT (stat_id) DO UPDATE
-                    SET stat_name=EXCLUDED.stat_name,
-                        embedding=EXCLUDED.embedding,
-                        fetched_at=NOW()
+                    SET stat_name    = EXCLUDED.stat_name,
+                        org_name     = EXCLUDED.org_name,
+                        category_path= EXCLUDED.category_path,
+                        keywords     = EXCLUDED.keywords,
+                        raw_meta_json= EXCLUDED.raw_meta_json,
+                        fetched_at   = NOW(),
+                        embedding    = COALESCE(kosis_stat_catalog.embedding, EXCLUDED.embedding)
                 """, (
                     item["stat_id"],
                     item["stat_name"],

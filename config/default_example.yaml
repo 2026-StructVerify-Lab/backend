@@ -32,6 +32,10 @@ kosis:
   base_url: "https://kosis.kr/openapi"
   api_key_env: "KOSIS_API_KEY"
   timeout: 30
+  catalog:
+    rebuild: false          # true: 강제 재수집, false: DB에 있으면 skip
+    embed_batch_size: 100   # 임베딩 배치 크기
+    min_rows: 1000          # 이 수 이상이면 "이미 구축됨"으로 판단
 
 database:
   url: "postgresql+asyncpg://user:pass@localhost:5432/structverify"
