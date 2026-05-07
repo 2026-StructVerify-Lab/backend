@@ -112,12 +112,18 @@ class RuntimeAgent:
             logger.info("[Agent A] 검증 가능한 주장 없음 — 파이프라인 종료")
             return [], [], [], []
 
+        # ── [v4 김예슬] Context Window 부착 ────────────────────────────
+        # 각 claim에 앞뒤 문장 context를 붙여서 LLM이 맥락을 이해할 수 있게 함
+        # 예: "이는 20년 새 2.6배 증가한 것이다" → 앞 문장 "쉬었음 청년이 21만7천명"도 함께 전달
+        # schema_inductor + query_builder에서 context_text 활용
+        for claim in claims:
+            claim.context_text = _get_context_window(claim, sir_doc, window=2)
+
         # ── Action: induce_schemas ───────────────────────────────────
         # Tool: HCX-007 Structured Outputs (v3 API)
         # Thought: "각 주장을 indicator/value/unit/population으로 구조화해야 한다"
         # Observation: claim.schema = ClaimSchema({indicator, value, ...})
-        # 기존 generate_json() + 파싱 실패 재시도 → Structured Outputs로 교체
-        # JSON Schema 정의로 파싱 실패 자체가 없어짐
+        # [v4] context_text 포함 → "이는" 같은 대명사 참조 해소
         claims = await induce_schemas(claims, self.config)
         logger.info(f"[Agent A] Step 5 induce_schemas → schemas attached")
 
@@ -168,3 +174,61 @@ class RuntimeAgent:
         logger.info(f"[Agent A] 완료: claims={len(claims)}, results={len(results)}, "
                     f"nodes={len(all_nodes)}, edges={len(all_edges)}")
         return claims, results, all_nodes, all_edges
+
+# ── [v4 김예슬] Context Window 헬퍼 ─────────────────────────────────────────
+
+def _get_context_window(
+    claim: "Claim",
+    sir_doc: "SIRDocument",
+    window: int = 2,
+) -> str:
+    """
+    claim의 앞 문장 window개를 SIR Tree에서 가져와서 context 문자열로 반환.
+
+    [v4 김예슬 - 2026-05-07]
+    "이는 20년 새 2.6배 증가한 것이다" 같은 문장은
+    앞 문장 "2024년 쉬었음 청년이 21만7천명이다"가 있어야 정확한 schema 추출 가능.
+
+    SIR Tree의 block_id/sent_id를 기반으로 같은 블록 내 앞 문장들을 찾음.
+    NEXT_SENT 엣지를 graph에서 탐색하지 않고 sir_doc에서 직접 조회 (더 효율적).
+
+    Args:
+        claim: 대상 주장
+        sir_doc: SIR 문서 (blocks → sentences 계층)
+        window: 앞에서 가져올 문장 수 (기본 2)
+
+    Returns:
+        "앞문장1. 앞문장2. 현재문장" 형태의 context 문자열
+    """
+    target_block = claim.block_id
+    target_sent  = claim.sent_id
+
+    # sir_doc에서 해당 블록 찾기
+    block = None
+    for b in sir_doc.blocks:
+        if b.block_id == target_block:
+            block = b
+            break
+
+    if not block or not block.sentences:
+        return claim.claim_text
+
+    # 현재 문장 인덱스 찾기
+    sent_idx = None
+    for i, sent in enumerate(block.sentences):
+        if sent.sent_id == target_sent:
+            sent_idx = i
+            break
+
+    if sent_idx is None:
+        return claim.claim_text
+
+    # 앞 window개 문장 수집
+    start = max(0, sent_idx - window)
+    context_sents = []
+    for i in range(start, sent_idx + 1):
+        text = block.sentences[i].text.strip()
+        if text:
+            context_sents.append(text)
+
+    return " ".join(context_sents)

@@ -22,11 +22,13 @@ retrieval/kosis_connector.py — KOSIS Open API 커넥터 (v3: CatalogSearchTool
 - KOSIS 통합검색 + getMeta(PRD/CMMT) 병렬 + Param fetch 구현
 
 [김예슬 - 2026-04-30 / v4]
-- search_and_fetch() 재설계:
+- search_and_fetch() 재설계 (v4: 후보 순회 retry):
   · 1단계: CatalogSearchTool.search() → 후보 stat_id top_k
   · 2단계: LLM Agent stat_id 선택 + 파라미터 결정 (HCX-DASH-002)
   · 3단계: KOSIS Param/statisticsParameterData.do fetch
-  · 4단계: err=30 시 LLM Agent retry (최대 2회)
+  · 4단계: 실패 → tried_ids에 추가 → Agent에게 "이건 실패, 남은 후보에서 골라라"
+  · 5단계: 남은 후보에서 재선택 → fetch → 최대 _MAX_CANDIDATES(5)개 순회
+  · Agent가 "NONE" 답하거나 남은 후보 없으면 포기
 
 - fetch() 개선 (factcheck_test.py 참고):
   · prd_se 순회: Y → M → Q (연간 없으면 월간 시도)
@@ -58,7 +60,8 @@ from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-_FETCH_MAX_RETRY = 2
+_FETCH_MAX_RETRY  = 2    # 단일 stat_id 내 prd_se 순회 retry
+_MAX_CANDIDATES   = 5    # [v4] 후보 순회 최대 횟수
 _JSON_HEADERS: dict[str, str] = {
     "Accept":     "application/json, */*;q=0.1",
     "User-Agent": "StructVerify/1.0 (KOSIS OpenAPI; +https://kosis.kr/openapi/)",
@@ -87,31 +90,114 @@ JSON으로만 답하세요:
   "end_prd_de": "종료 기간"
 }}"""
 
-_AGENT_RETRY_PROMPT = """KOSIS API 조회가 실패했습니다. 파라미터를 수정하거나 다른 후보를 선택하세요.
+_AGENT_RETRY_PROMPT = """KOSIS API 조회가 실패했습니다. 다른 후보 통계표를 선택하세요.
 
 검증 주장: "{claim_text}"
-실패한 stat_id: {stat_id}
-이전 파라미터: {prev_params}
-오류: {error}
 
-후보 통계표:
-{candidates}
+이미 실패한 통계표 (다시 선택 금지):
+{tried_list}
+
+남은 후보 통계표:
+{remaining_candidates}
+
+[중요]
+- 이미 실패한 stat_id는 절대 다시 선택하지 마세요
+- 남은 후보 중에서 가장 적합한 통계표를 선택하세요
+- 남은 후보가 모두 부적합하면 stat_id를 "NONE"으로 답하세요
 
 JSON으로만 답하세요:
 {{
-  "stat_id": "사용할 통계표 ID",
+  "stat_id": "선택한 통계표 ID 또는 NONE",
   "prd_se": "Y/M/Q",
   "start_prd_de": "기간",
   "end_prd_de": "기간",
-  "reason": "수정 이유"
+  "reason": "선택 이유"
 }}"""
 
 
 # ── 단위 검증 유틸 (factcheck_test.py 참고) ──────────────────────────────────
+# 이 함수를 kosis_connector.py의 기존 _is_table_relevant 대신 넣으세요
+
+def _is_table_relevant(indicator: str, table_name: str) -> bool:
+    """
+    [v5] indicator와 테이블명이 같은 분야인지 키워드 검사.
+    LLM 미사용 — 키워드 겹침 + 도메인 그룹 매칭 (빠름).
+
+    "연평균기온" vs "기술개발 성과"      → False
+    "연평균기온" vs "종관기상 평년값"    → True
+    "평균 최저기온" vs "고온 일수 노출"  → True (기온 그룹)
+    "시가총액" vs "산업별 취업자"        → False
+    """
+    import re
+
+    if not indicator or not table_name:
+        return True
+
+    stopwords = {
+        "통계", "현황", "조사", "결과", "항목", "지표", "전체", "기타",
+        "관련", "변화", "추이", "비교", "분류", "지점별", "행정구역별",
+        "성별", "연령별", "시도별", "시도", "연도별", "월별",
+    }
+
+    def _tokens(text: str) -> set[str]:
+        words = set(re.split(r'[\s·,/()（）\-_]+', text.lower()))
+        return {w for w in words if len(w) >= 2 and w not in stopwords}
+
+    ind_tokens = _tokens(indicator)
+    tbl_tokens = _tokens(table_name)
+
+    # 1) 직접 키워드 겹침 (2글자 이상 토큰)
+    overlap = ind_tokens & tbl_tokens
+    if overlap:
+        return True
+
+    # 2) 부분 문자열 포함 (indicator 토큰이 테이블명에 포함)
+    tbl_lower = table_name.lower()
+    for tok in ind_tokens:
+        if len(tok) >= 3 and tok in tbl_lower:
+            return True
+
+    # 3) 도메인 키워드 그룹 — 같은 그룹이면 관련 있음
+    _GROUPS = [
+        # 기상/기후
+        {"기온", "기상", "기후", "날씨", "온도", "폭염", "한파", "평균기온",
+         "연평균", "최저기온", "최고기온", "강수", "강우", "습도", "종관"},
+        # 인구/가구
+        {"인구", "출산", "사망", "고령", "청년", "세대", "가구", "출생", "혼인"},
+        # 고용/노동
+        {"고용", "실업", "취업", "임금", "근로", "노동", "쉬었음", "경제활동",
+         "일자리", "실업률", "고용률"},
+        # 경제/산업
+        {"경제", "성장", "물가", "소비", "생산", "수출", "수입", "무역", "gdp"},
+        # 주식/금융
+        {"주가", "시총", "코스피", "코스닥", "시가총액", "금리", "환율", "주식"},
+        # 교육
+        {"교육", "학교", "학생", "진학", "졸업", "입학"},
+        # 보건/의료
+        {"의료", "건강", "질환", "사망률", "병원", "보건"},
+        # 환경
+        {"환경", "오염", "대기", "수질", "폐기물", "탄소", "에너지"},
+        # 농업
+        {"농업", "농가", "농림", "수확", "경작", "과수"},
+        # 부동산/건설
+        {"주택", "건설", "부동산", "아파트", "토지", "분양"},
+    ]
+
+    ind_lower = indicator.lower()
+    for group in _GROUPS:
+        ind_hit = any(kw in ind_lower for kw in group)
+        tbl_hit = any(kw in tbl_lower for kw in group)
+        if ind_hit and tbl_hit:
+            return True
+
+    return False
 
 def normalize_value(value: float, kosis_unit: str) -> float:
     """KOSIS 단위 → 기본 단위로 변환 (천명 → 명 등)"""
     u = kosis_unit.lower()
+    # [v4] 천명개월은 KOSIS 단위명 오류 — 실제로는 개월 단위, 변환 안 함
+    if "천명개월" in u:
+        return value
     if "천" in u:
         return value * 1000
     if "백만" in u or "million" in u:
@@ -127,6 +213,10 @@ def is_same_unit_type(claim_unit: str, kosis_unit: str) -> bool:
     kosis_unit = (kosis_unit or "").lower().strip()
 
     if not claim_unit or not kosis_unit:
+        return True
+
+    # [v4] 천명개월은 KOSIS 단위명 오류 — 비교 자체를 통과
+    if "천명개월" in kosis_unit:
         return True
 
     _TYPES = {
@@ -264,16 +354,58 @@ class KOSISConnector(BaseConnector):
 
     async def search_and_fetch(self, query: ConnectorQuery) -> StatData | None:
         """
-        Catalog → LLM Agent → KOSIS fetch 파이프라인.
+        Catalog → LLM Agent → KOSIS fetch 파이프라인 (v4: 후보 순회 retry).
 
         [v1] KOSIS 통합검색 직접 → err=30 다수
         [v3] CatalogSearchTool(pgvector) → LLM Agent → fetch_with_retry
+        [v4 김예슬] 후보 순회 retry:
+          1) Agent가 1순위 stat_id 선택 → fetch
+          2) 실패 → tried_ids에 추가 → Agent에게 "이건 실패했다, 남은 후보에서 골라라"
+          3) 남은 후보에서 재선택 → fetch
+          4) 최대 _MAX_CANDIDATES(5)개까지 순회
+          5) Agent가 "NONE" 답하거나 남은 후보 없으면 포기
+
+        ReAct 패턴:
+          Thought: "이 주장을 검증하려면 어떤 통계표가 필요한가?"
+          Action:  stat_id 선택 + 파라미터 결정
+          Observation: fetch 결과 (성공/실패)
+          → 실패 시 Thought: "이 테이블은 안 됐다, 다른 후보에서 골라야 한다"
+          → Action: 다음 stat_id 선택
         """
         # 1단계: Catalog 검색 (pgvector + KOSIS API)
         candidates = await self.catalog.search(query, top_k=10)
 
         if not candidates:
             logger.warning(f"후보 없음: {query.keyword}")
+                # ── [v6] LLM Agent 검색어 재생성 ─────────────────────────────────
+            simplified = await self._agent_simplify_keyword(query, tried_log)
+            if simplified and simplified != (query.indicator or query.keyword or ""):
+                logger.info(f"[재검색] Agent 검색어 변경: '{query.keyword}' → '{simplified}'")
+                from structverify.retrieval.base_connector import ConnectorQuery
+                retry_query = ConnectorQuery(
+                    keyword=simplified,
+                    indicator=simplified,
+                    time_period=query.time_period,
+                    population=query.population,
+                    extra_params=query.extra_params,
+                )
+                retry_candidates = await self.catalog.search(retry_query, top_k=5)
+                retry_candidates = [c for c in retry_candidates if c.stat_id not in tried_ids]
+
+                for rc in retry_candidates[:3]:
+                    if not _is_table_relevant(simplified, rc.stat_name):
+                        continue
+                    data = await self._fetch_with_retry(
+                        stat_id=rc.stat_id, stat_rec=rc, query=query,
+                        prd_se_hint="Y",
+                        start_prd_de=query.time_period or "",
+                        end_prd_de=query.time_period or "",
+                    )
+                    if data and data.official_value is not None:
+                        logger.info(f"[재검색] 성공: [{rc.stat_id}] {rc.stat_name}")
+                        return data
+
+            logger.warning(f"최종 Evidence 없음 ({len(tried_ids)}개 시도): {query.keyword}")
             return None
 
         # 2단계: getMeta 보강 (PRD/CMMT)
@@ -288,41 +420,66 @@ class KOSISConnector(BaseConnector):
             except Exception as e:
                 logger.debug(f"getMeta 보강 실패: {e}")
 
-        # 3단계: LLM Agent stat_id 선택
-        agent_decision = await self._agent_select_stat(query, candidates)
+        # ── [v4] 후보 순회 retry 루프 ────────────────────────────────────
+        tried_ids: set[str] = set()
+        tried_log: list[dict] = []   # Agent에게 보여줄 실패 이력
 
-        if agent_decision and agent_decision.get("stat_id"):
-            selected_id  = agent_decision["stat_id"]
-            prd_se       = agent_decision.get("prd_se", "Y")
-            start_prd_de = agent_decision.get("start_prd_de", "")
-            end_prd_de   = agent_decision.get("end_prd_de", "")
-        else:
-            # Agent 실패 → relevance_score 최고 후보
-            best         = max(candidates, key=lambda r: r.relevance_score)
-            selected_id  = best.stat_id
-            prd_se       = "Y"
-            start_prd_de = query.time_period or ""
-            end_prd_de   = query.time_period or ""
+        for round_idx in range(_MAX_CANDIDATES):
+            remaining = [c for c in candidates if c.stat_id not in tried_ids]
+            if not remaining:
+                logger.info("모든 후보 소진 → 종료")
+                break
 
-        stat_rec = next((r for r in candidates if r.stat_id == selected_id), candidates[0])
-
-        # 4단계: fetch (prd_se 순회 + objL 점진 + retry)
-        last_error = ""
-        for attempt in range(1, _FETCH_MAX_RETRY + 1):
-            if attempt > 1:
-                # LLM Agent retry — 파라미터 수정
-                retry = await self._agent_retry_params(
-                    query, candidates, selected_id,
-                    {"prdSe": prd_se, "startPrdDe": start_prd_de, "endPrdDe": end_prd_de},
-                    last_error,
+            # 3단계: stat_id 선택
+            if round_idx == 0:
+                # 첫 번째: LLM Agent가 최적 후보 선택
+                agent_decision = await self._agent_select_stat(query, candidates)
+            else:
+                # [v4]: Agent 재선택 대신 순차 순회 (factcheck_test.py 방식)
+                # Agent가 재선택해도 엉뚱한 테이블을 고르는 경우가 많아서
+                # relevance_score 순서대로 순차 시도하는 게 정확도 더 높음
+                agent_decision = {
+                    "stat_id":      remaining[0].stat_id,
+                    "prd_se":       "Y",
+                    "start_prd_de": query.time_period or "",
+                    "end_prd_de":   query.time_period or "",
+                }
+                logger.info(
+                    f"[순차 순회] 다음 후보: [{remaining[0].stat_id}] "
+                    f"{remaining[0].stat_name}"
                 )
-                if retry and retry.get("stat_id"):
-                    selected_id  = retry["stat_id"]
-                    stat_rec     = next((r for r in candidates if r.stat_id == selected_id), stat_rec)
-                    prd_se       = retry.get("prd_se", "Y")
-                    start_prd_de = retry.get("start_prd_de", "")
-                    end_prd_de   = retry.get("end_prd_de", "")
 
+            if agent_decision and agent_decision.get("stat_id"):
+                selected_id = agent_decision["stat_id"]
+                # "NONE" 답변 → Agent가 적합한 후보 없다고 판단
+                if selected_id.upper() == "NONE":
+                    logger.info("Agent: 적합한 후보 없음 → 종료")
+                    break
+                # 이미 시도한 stat_id를 다시 선택한 경우 → 강제로 다음 후보
+                if selected_id in tried_ids:
+                    selected_id = remaining[0].stat_id
+                prd_se       = agent_decision.get("prd_se", "Y")
+                start_prd_de = agent_decision.get("start_prd_de", "")
+                end_prd_de   = agent_decision.get("end_prd_de", "")
+            else:
+                # Agent 실패 → relevance_score 최고 후보 (시도 안 한 것 중)
+                selected_id  = remaining[0].stat_id
+                prd_se       = "Y"
+                start_prd_de = query.time_period or ""
+                end_prd_de   = query.time_period or ""
+
+            stat_rec = next(
+                (r for r in candidates if r.stat_id == selected_id),
+                remaining[0]
+            )
+            tried_ids.add(selected_id)
+
+            logger.info(
+                f"[후보 {round_idx+1}/{_MAX_CANDIDATES}] "
+                f"시도: [{selected_id}] {stat_rec.stat_name}"
+            )
+
+            # 4단계: fetch (prd_se 순회 + objL 점진)
             data = await self._fetch_with_retry(
                 stat_id=selected_id,
                 stat_rec=stat_rec,
@@ -333,12 +490,29 @@ class KOSISConnector(BaseConnector):
             )
 
             if data and data.official_value is not None:
+                # [v5] 가짜 match 방지 — 테이블 관련성 체크
+                indicator = query.indicator or query.keyword or ""
+                table_name = stat_rec.stat_name or ""
+                if not _is_table_relevant(indicator, table_name):
+                    logger.warning(
+                        f"테이블 관련성 없음 → skip: [{selected_id}] "
+                        f"{table_name} vs indicator={indicator}"
+                    )
+                    tried_ids.add(selected_id)
+                    tried_log.append({
+                        "stat_id":   selected_id,
+                        "stat_name": table_name,
+                        "error":     "테이블 관련성 없음",
+                    })
+                    continue
+
                 logger.info(
-                    f"Evidence 조회 성공: [{selected_id}] "
+                    f"Evidence 조회 성공 (후보 {round_idx+1}): [{selected_id}] "
                     f"value={data.official_value} {data.unit or ''}"
                 )
                 return data
 
+            # 실패 이력 기록 → 다음 라운드에서 Agent에게 전달
             last_error = "데이터 없음"
             if data and data.raw_response:
                 err = data.raw_response.get("err") or data.raw_response.get("error", "")
@@ -346,9 +520,17 @@ class KOSISConnector(BaseConnector):
                 if data.raw_response.get("errMsg"):
                     last_error += f" {data.raw_response['errMsg']}"
 
-            logger.warning(f"fetch 실패 (시도 {attempt}): {selected_id} | {last_error}")
+            tried_log.append({
+                "stat_id":   selected_id,
+                "stat_name": stat_rec.stat_name,
+                "error":     last_error,
+            })
+            logger.warning(
+                f"fetch 실패 (후보 {round_idx+1}): [{selected_id}] "
+                f"{stat_rec.stat_name} | {last_error}"
+            )
 
-        logger.warning(f"최종 Evidence 없음: {query.keyword}")
+        logger.warning(f"최종 Evidence 없음 ({len(tried_ids)}개 시도): {query.keyword}")
         return None
 
     # ── prd_se 순회 + objL 점진 fetch (factcheck_test.py 참고) ───────────────
@@ -640,8 +822,113 @@ class KOSISConnector(BaseConnector):
 
     # ── 기존 search() 유지 (catalog_search 폴백용) ───────────────────────────
 
+    async def _agent_retry_with_rotation(
+        self,
+        query: ConnectorQuery,
+        remaining: list[StatRecord],
+        tried_log: list[dict],
+    ) -> dict[str, Any] | None:
+        """
+        [v4 김예슬] 실패한 후보 제외하고 남은 후보에서 재선택.
+
+        ReAct Observation:
+          "DT_1BC0501 → 데이터 없음"
+          "DT_705003 → err=30"
+        → Thought: "산업 취업자 통계는 안 됨, 경제활동인구 통계로 시도"
+        → Action: 다음 stat_id 선택
+        """
+        if not remaining:
+            return None
+
+        try:
+            from structverify.utils.llm_client import LLMClient
+            llm = LLMClient(config=self.config.get("llm", {}))
+        except ImportError:
+            return None
+
+        # 실패 이력 텍스트
+        tried_text = "\n".join([
+            f"  - [{t['stat_id']}] {t['stat_name']} → {t['error']}"
+            for t in tried_log
+        ]) or "  (없음)"
+
+        # 남은 후보 텍스트
+        remaining_text = "\n".join([
+            f"  {i+1}. [{r.stat_id}] {r.stat_name} ({r.org_name}) "
+            f"[{r.metadata.get('category_path', '')}]"
+            for i, r in enumerate(remaining[:10])
+        ])
+
+        raw_claim = (query.extra_params or {}).get("raw_claim", "")
+        prompt = _AGENT_RETRY_PROMPT.format(
+            claim_text=raw_claim[:200] or query.keyword,
+            tried_list=tried_text,
+            remaining_candidates=remaining_text,
+        )
+
+        try:
+            result = await llm.generate_json(
+                prompt=prompt,
+                system_prompt="한국 통계 전문가. 이미 실패한 통계표는 절대 다시 선택하지 마세요. JSON으로만 답하세요.",
+                model_tier="light",
+            )
+            if result and result.get("stat_id"):
+                logger.info(
+                    f"Agent 재선택: [{result['stat_id']}] "
+                    f"{result.get('reason', '')}"
+                )
+            return result
+        except Exception as e:
+            logger.debug(f"Agent 재선택 실패: {e}")
+            return None
+
+
+    async def _agent_simplify_keyword(
+            self, query: ConnectorQuery, tried_log: list[dict]
+        ) -> str | None:
+            """LLM Agent가 실패 이력을 보고 검색어를 재생성"""
+            try:
+                from structverify.utils.llm_client import LLMClient
+                llm = LLMClient(config=self.config.get("llm", {}))
+            except ImportError:
+                return None
+
+            tried_text = "\n".join([
+                f"  - {t['stat_name']} → {t['error']}"
+                for t in tried_log
+            ]) or "  (없음)"
+
+            raw_claim = (query.extra_params or {}).get("raw_claim", "")
+            prompt = f"""KOSIS 통계표 검색이 실패했습니다. 검색어를 바꿔서 재시도하려 합니다.
+
+    검증 주장: "{raw_claim[:200]}"
+    기존 검색어: "{query.keyword}"
+    실패한 테이블들:
+    {tried_text}
+
+    원래 검색어로는 관련 테이블을 찾지 못했습니다.
+    KOSIS 통계표 이름에 실제로 들어갈 법한 더 단순하고 핵심적인 검색어 1~2단어를 제안하세요.
+
+    예시:
+    "연평균 기온 순위" → "기온"
+    "청년 쉬었음 비율 변화" → "경제활동인구"
+    "평균 최저기온 및 평균 최고기온" → "기온"
+
+    검색어만 답하세요 (설명 없이):"""
+
+            try:
+                result = await llm.generate(
+                    prompt=prompt,
+                    system_prompt="KOSIS 통계 검색 전문가. 검색어만 답하세요.",
+                    model_tier="light",
+                )
+                keyword = result.strip().strip('"\'')
+                if keyword and len(keyword) >= 2:
+                    return keyword
+            except Exception as e:
+                logger.debug(f"Agent 검색어 재생성 실패: {e}")
+            return None
     async def search(self, query: ConnectorQuery) -> list[StatRecord]:
-        """직접 호출 시 CatalogSearchTool로 위임"""
         return await self.catalog.search(query)
 
     async def fetch(self, stat_id: str, params: dict[str, Any]) -> StatData:

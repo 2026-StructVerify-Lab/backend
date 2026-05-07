@@ -24,12 +24,15 @@ def build_query(claim: Claim) -> ConnectorQuery:
       - embedding_text: pgvector 유사도 검색용 텍스트
     """
     s = claim.schema
+    # [v3 김예슬] context_text 있으면 raw_claim에 포함 → 검색 맥락 강화
+    context = getattr(claim, "context_text", None) or claim.claim_text
+
     if not s:
         return ConnectorQuery(
             keyword=claim.claim_text[:50],
             extra_params={
-                "raw_claim": claim.claim_text,
-                "embedding_text": claim.claim_text[:200],
+                "raw_claim":      context,
+                "embedding_text": context[:200],
             },
         )
 
@@ -49,7 +52,7 @@ def build_query(claim: Claim) -> ConnectorQuery:
         time_period=s.time_period,
         population=s.population,
         extra_params={
-            "raw_claim":      claim.claim_text,
+            "raw_claim":      context,       # [v3] context 포함
             "embedding_text": embedding_text,
             # source_reference가 있으면 KOSIS org_name 필터로 활용
             "source_org":     s.source_reference,

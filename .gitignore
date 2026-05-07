@@ -13,6 +13,11 @@ venv/
 .env.*.local
 .env
 
+# zip 으로 끝나는 모든 것 제외
+*.zip
+# .csv 로 끝나는 모든 것 제외
+*.csv
+
 # Example 제외
 !.env.example
 

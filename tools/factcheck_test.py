@@ -154,15 +154,22 @@ def search_kosis_api(keyword: str, max_results: int = 5) -> list[dict]:
         for item in data if item.get("TBL_ID") and item.get("ORG_ID")
     ]
 
-
 def get_embedding(text: str) -> list[float]:
-    resp = httpx.post(
-        "https://clovastudio.stream.ntruss.com/v1/api-tools/embedding/v2",
-        headers={"Authorization": f"Bearer {HCX_API_KEY}", "Content-Type": "application/json"},
-        json={"text": text},
-        timeout=30,
-    )
-    return resp.json()["result"]["embedding"]
+    try:
+        resp = httpx.post(
+            "https://clovastudio.stream.ntruss.com/v1/api-tools/embedding/v2",
+            headers={"Authorization": f"Bearer {HCX_API_KEY}", "Content-Type": "application/json"},
+            json={"text": text},
+            timeout=30,
+        )
+        data = resp.json()
+        if "result" not in data:
+            safe_print(f"  ⚠️ 임베딩 API 오류: {str(data)[:100]}")
+            return []
+        return data["result"]["embedding"]
+    except Exception as e:
+        safe_print(f"  ⚠️ 임베딩 예외: {e}")
+        return []
 
 
 def search_pgvector(embedding: list[float], category_keywords: list[str] = None,
@@ -660,7 +667,12 @@ def run_factcheck(limit: int = None):
     # CSV 저장
     filename = f"factcheck_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
     with open(filename, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.DictWriter(f, fieldnames=results_log[0].keys())
+        # writer = csv.DictWriter(f, fieldnames=results_log[0].keys())
+        
+        fieldnames = ["claim_id", "field_name", "field_value", "unit",
+              "time_reference", "verdict", "reason",
+              "matched_table", "matched_table_id"]
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(results_log)
 

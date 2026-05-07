@@ -54,9 +54,16 @@ class DBManager:
         for claim in claims:
             # requests 테이블 먼저 INSERT
             cur.execute(
-                "INSERT INTO requests (request_id) VALUES (%s) ON CONFLICT (request_id) DO NOTHING",
+                "INSERT INTO requests (request_id, submitted_at) VALUES (%s, NOW()) ON CONFLICT (request_id) DO NOTHING",
                 (str(claim.doc_id),)
             )
+
+            # schema 없는 claim 안전 처리
+            indicator = claim.schema.indicator if claim.schema else None
+            value     = claim.schema.value     if claim.schema else None
+            unit      = claim.schema.unit      if claim.schema else None
+            time_ref  = claim.schema.time_period if claim.schema else None
+
             cur.execute("""
                 INSERT INTO claims (claim_id, request_id, field_name, field_value,
                                   unit, is_approximate, modifier, parent_path,
@@ -64,9 +71,9 @@ class DBManager:
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 str(claim.claim_id), str(claim.doc_id),
-                claim.schema.indicator, claim.schema.value,
-                claim.schema.unit, False, None, None,
-                claim.schema.time_period, claim.claim_text
+                indicator, value, unit,
+                False, None, None,
+                time_ref, claim.claim_text
             ))
         self.conn.commit()
         cur.close()

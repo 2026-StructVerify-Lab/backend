@@ -91,18 +91,23 @@ CLAIM_SCHEMA_JSON_SCHEMA: dict[str, Any] = {
 
 SCHEMA_INDUCTION_PROMPT = """아래 주장에서 공식 통계 검증에 필요한 핵심 정보를 추출하세요.
 
-주장: "{claim_text}"
+검증 대상 문장: "{claim_text}"
+문맥 (참고용): {context}
 도메인: {domain}
 {domain_hint}
 
 [추출 기준]
-- indicator: 측정하는 핵심 지표
+- indicator: 측정하는 핵심 지표 (문맥을 참고하여 "이는", "해당" 등 대명사를 해소)
 - time_period: 기준 연도/시점
 - unit: 수치 단위
 - population: 대상 집단/범위
-- value: 주장에 나온 수치 (없으면 null)
+- value: **검증 대상 문장**에 직접 나온 수치만 추출 (문맥의 수치는 사용 금지, 없으면 null)
 - source_reference: 언급된 출처 (없으면 null)
-- graph_schema_candidates: KG 노드/엣지 후보 (최대 6개)"""
+- graph_schema_candidates: KG 노드/엣지 후보 (최대 6개)
+
+[중요] value는 반드시 "검증 대상 문장"에 있는 숫자여야 합니다.
+문맥에만 있는 숫자(14.8, 13.9 등)를 검증 대상 문장의 value로 넣지 마세요.
+검증 대상 문장에 숫자가 없으면 value는 반드시 null로 하세요."""
 
 
 async def induce_schemas(claims: list[Claim], config: dict | None = None) -> list[Claim]:
@@ -120,7 +125,9 @@ async def induce_schemas(claims: list[Claim], config: dict | None = None) -> lis
         domain = config.get("detected_domain", "general")
         domain_hint = f"주요 지표 예시: {DOMAIN_HINTS[domain]}" if domain in DOMAIN_HINTS else ""
 
-        schema = await _induce_single(llm, claim.claim_text, domain, domain_hint)
+        # [v5 김예슬] context_text 있으면 함께 전달 → 대명사 참조 해소
+        context = getattr(claim, "context_text", None) or claim.claim_text
+        schema = await _induce_single(llm, claim.claim_text, domain, domain_hint, context=context)
         if schema:
             claim.schema = schema
             success += 1
@@ -141,6 +148,7 @@ async def _induce_single(
     claim_text: str,
     domain: str = "general",
     domain_hint: str = "",
+    context: str = "",
 ) -> ClaimSchema | None:
     """
     단일 주장 → ClaimSchema 변환.
@@ -151,6 +159,7 @@ async def _induce_single(
     """
     prompt = SCHEMA_INDUCTION_PROMPT.format(
         claim_text=claim_text,
+        context=context or claim_text,
         domain=domain,
         domain_hint=domain_hint,
     )

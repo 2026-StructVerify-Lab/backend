@@ -198,6 +198,9 @@ class Claim(BaseModel):
     source_offset: SourceOffset = Field(default_factory=SourceOffset)
     check_worthy_score: float = 0.0
     graph_anchor_id: str | None = None
+    # [v4 김예슬] 앞뒤 문맥 (SIR Tree에서 추출, runtime_agent가 부착)
+    # "이는 2.6배" 같은 대명사 참조 해소 + schema_inductor/query_builder에서 활용
+    context_text: str | None = None
 
 
 # ── Graph ────────────────────────────────────────────────────

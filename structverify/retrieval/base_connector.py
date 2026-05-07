@@ -14,7 +14,9 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 from structverify.core.schemas import GraphNode, ProvenanceRecord
+from structverify.utils.logger import get_logger
 
+logger = get_logger(__name__)
 
 @dataclass
 class ConnectorQuery:
@@ -67,6 +69,35 @@ class BaseConnector(ABC):
     async def search_and_fetch(self, query: ConnectorQuery) -> StatData | None:
         records = await self.search(query)
         if not records:
+                # ── [v6] LLM Agent 검색어 재생성 ─────────────────────────────────
+            simplified = await self._agent_simplify_keyword(query, tried_log)
+            if simplified and simplified != (query.indicator or query.keyword or ""):
+                logger.info(f"[재검색] Agent 검색어 변경: '{query.keyword}' → '{simplified}'")
+                from structverify.retrieval.base_connector import ConnectorQuery
+                retry_query = ConnectorQuery(
+                    keyword=simplified,
+                    indicator=simplified,
+                    time_period=query.time_period,
+                    population=query.population,
+                    extra_params=query.extra_params,
+                )
+                retry_candidates = await self.catalog.search(retry_query, top_k=5)
+                retry_candidates = [c for c in retry_candidates if c.stat_id not in tried_ids]
+
+                for rc in retry_candidates[:3]:
+                    if not _is_table_relevant(simplified, rc.stat_name):
+                        continue
+                    data = await self._fetch_with_retry(
+                        stat_id=rc.stat_id, stat_rec=rc, query=query,
+                        prd_se_hint="Y",
+                        start_prd_de=query.time_period or "",
+                        end_prd_de=query.time_period or "",
+                    )
+                    if data and data.official_value is not None:
+                        logger.info(f"[재검색] 성공: [{rc.stat_id}] {rc.stat_name}")
+                        return data
+
+            logger.warning(f"최종 Evidence 없음 ({len(tried_ids)}개 시도): {query.keyword}")
             return None
         best = max(records, key=lambda r: r.relevance_score)
         return await self.fetch(
