@@ -51,6 +51,8 @@ from structverify.detection.domain_classifier import classify_domain
 from structverify.detection.claim_detector import detect_claims
 from structverify.detection.schema_inductor import induce_schemas
 from structverify.graph.graph_builder import build_claim_graph
+from structverify.graph.document_graph import build_document_temporal_graph
+from structverify.graph.claim_graph import ClaimGraph
 from structverify.retrieval.query_builder import build_query
 from structverify.retrieval.evidence_subgraph import build_evidence_subgraph
 from structverify.retrieval.kosis_connector import KOSISConnector
@@ -112,6 +114,19 @@ class RuntimeAgent:
             logger.info("[Agent A] 검증 가능한 주장 없음 — 파이프라인 종료")
             return [], [], [], []
 
+        # ── [v6 멀티홉] Action: build_document_temporal_graph ───────────
+        # Tool: HCX-007 Structured Outputs (v3, 1회 호출)
+        # Thought: "문서 전체에서 anchor 시점 + 모든 시간 표현 + coref를
+        #           한 번에 추출해서 그래프에 박아두자."
+        # Observation: DocumentNode + TemporalExprNodes + ResolvedTimeNodes
+        #
+        # 이 단계가 schema_inductor 앞에 와야 함:
+        #   schema_inductor가 그래프 traverse 결과를 prompt hint로 사용
+        # 룰 매핑 일체 없음 — LLM이 anchor와 모든 표현을 동시에 풀어냄
+        doc_nodes, doc_edges = await build_document_temporal_graph(sir_doc, self.config)
+        logger.info(f"[Agent A] Step 4.5 build_document_temporal_graph → "
+                    f"{len(doc_nodes)} nodes, {len(doc_edges)} edges")
+
         # ── [v4 김예슬] Context Window 부착 ────────────────────────────
         # 각 claim에 앞뒤 문장 context를 붙여서 LLM이 맥락을 이해할 수 있게 함
         # 예: "이는 20년 새 2.6배 증가한 것이다" → 앞 문장 "쉬었음 청년이 21만7천명"도 함께 전달
@@ -119,21 +134,28 @@ class RuntimeAgent:
         for claim in claims:
             claim.context_text = _get_context_window(claim, sir_doc, window=2)
 
+        # [v6] document graph만으로 ClaimGraph facade 생성
+        # 이 시점에서는 claim/metric 노드는 없지만, schema_inductor가
+        # claim.graph_anchor_id로 sentence를 찾아 시점 traverse만 하면 됨
+        pre_graph = ClaimGraph(doc_nodes, doc_edges)
+
         # ── Action: induce_schemas ───────────────────────────────────
         # Tool: HCX-007 Structured Outputs (v3 API)
-        # Thought: "각 주장을 indicator/value/unit/population으로 구조화해야 한다"
-        # Observation: claim.schema = ClaimSchema({indicator, value, ...})
-        # [v4] context_text 포함 → "이는" 같은 대명사 참조 해소
-        claims = await induce_schemas(claims, self.config)
+        # [v6] graph 전달 → "작년" 같은 표현이 그래프에서 "2023"으로 resolved
+        #     되어 prompt hint로 들어감. LLM은 그걸 그대로 time_period에 사용.
+        claims = await induce_schemas(claims, self.config, graph=pre_graph)
         logger.info(f"[Agent A] Step 5 induce_schemas → schemas attached")
 
         # ── Action: build_claim_graph ────────────────────────────────
-        # Tool: 내부 로직 (LLM 미사용)
-        # Thought: "ClaimSchema → Knowledge Graph 노드/엣지를 구성해야 한다"
-        # Observation: GraphNode[], GraphEdge[]
-        # TODO [신준수]: graph_builder.py 노드/엣지 타입 완성
-        all_nodes, all_edges = build_claim_graph(claims, sir_doc=sir_doc) # 호출부 로직 변경 [pipeline v3] 김예슬
+        # [v6] 기존 ClaimNode/MetricNode/EntityNode/COMPARE 생성
+        all_nodes, all_edges = build_claim_graph(claims, sir_doc=sir_doc)
+        # document temporal 그래프 합치기
+        all_nodes.extend(doc_nodes)
+        all_edges.extend(doc_edges)
         logger.info(f"[Agent A] Step 6 build_claim_graph → {len(all_nodes)} nodes")
+
+        # [v6] 전체 그래프로 ClaimGraph 재생성 (verifier/explainer가 사용)
+        full_graph = ClaimGraph(all_nodes, all_edges)
 
         # ── 각 주장별 Step 7~9 ──────────────────────────────────────
         results: list[VerificationResult] = []
@@ -155,11 +177,9 @@ class RuntimeAgent:
             all_edges.extend(ev_edges)
             logger.info(f"[Agent A] Step 7 retrieve_evidence → {str(evidence)[:80] if evidence else None}")
             # Action: verify_claim (Deterministic, LLM 미개입)
-            # Tool: 수치 비교 엔진 — hallucination 방지를 위해 LLM 사용 안 함
-            # Thought: "수치를 비교하여 MATCH/MISMATCH/UNVERIFIABLE 판정해야 한다"
-            # Observation: verdict + mismatch_type + confidence
-            # TODO [신준수]: verifier.py TIME_PERIOD/POPULATION/EXAGGERATION 세분화
-            result = verify_claim(claim, evidence, self.config)
+            # [v6] graph 전달 → schema.time_period가 "작년"이어도
+            #      그래프에서 멀티홉 traverse로 "2023" 찾아서 KOSIS row 매칭
+            result = verify_claim(claim, evidence, self.config, graph=full_graph)
             logger.info(f"[Agent A] Step 8 verify_claim → {result.verdict.value}")
 
             # Action: generate_explanation (LLM)

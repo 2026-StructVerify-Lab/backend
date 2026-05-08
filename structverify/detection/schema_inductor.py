@@ -95,10 +95,13 @@ SCHEMA_INDUCTION_PROMPT = """아래 주장에서 공식 통계 검증에 필요�
 문맥 (참고용): {context}
 도메인: {domain}
 {domain_hint}
+{temporal_hint}
 
 [추출 기준]
 - indicator: 측정하는 핵심 지표 (문맥을 참고하여 "이는", "해당" 등 대명사를 해소)
 - time_period: 기준 연도/시점
+  · 위 [시점 정보]가 제공되면 그 절대 시점을 그대로 사용하세요 ("작년" 같은 표현 대신).
+  · 제공되지 않은 경우만 본문에서 직접 추출.
 - unit: 수치 단위
 - population: 대상 집단/범위
 - value: **검증 대상 문장**에 직접 나온 수치만 추출 (문맥의 수치는 사용 금지, 없으면 null)
@@ -110,9 +113,16 @@ SCHEMA_INDUCTION_PROMPT = """아래 주장에서 공식 통계 검증에 필요�
 검증 대상 문장에 숫자가 없으면 value는 반드시 null로 하세요."""
 
 
-async def induce_schemas(claims: list[Claim], config: dict | None = None) -> list[Claim]:
+async def induce_schemas(
+    claims: list[Claim],
+    config: dict | None = None,
+    graph: "ClaimGraph | None" = None,
+) -> list[Claim]:
     """
     각 주장에서 ClaimSchema를 동적으로 유도한다.
+
+    [v6 멀티홉] graph가 주어지면 claim의 시점을 멀티홉으로 resolve해서
+    prompt에 절대 시점 hint로 주입. LLM은 굳이 "작년"을 다시 해석할 필요 없음.
 
     Structured Outputs(HCX-007) 사용으로 JSON 파싱 실패 없음.
     실패 시 재시도 없이 schema=None으로 처리.
@@ -125,15 +135,50 @@ async def induce_schemas(claims: list[Claim], config: dict | None = None) -> lis
         domain = config.get("detected_domain", "general")
         domain_hint = f"주요 지표 예시: {DOMAIN_HINTS[domain]}" if domain in DOMAIN_HINTS else ""
 
-        # [v5 김예슬] context_text 있으면 함께 전달 → 대명사 참조 해소
+        # [v6] context 텍스트 (변경 없음 — 보조 신호)
         context = getattr(claim, "context_text", None) or claim.claim_text
-        schema = await _induce_single(llm, claim.claim_text, domain, domain_hint, context=context)
+
+        # [v6 멀티홉] 그래프에서 시점 해소 결과를 hint로 주입
+        # 다층 방어:
+        #   1) claim 단위로 resolved 시점이 있으면 그것을 직접 hint
+        #   2) 없어도 anchor_year는 항상 hint에 포함 (LLM이 본문 표현을 anchor로 풀게)
+        temporal_hint = ""
+        if graph is not None:
+            prov = graph.temporal_provenance(claim)
+            anchor_year = graph.get_anchor_year()
+
+            if prov and prov.get("resolved"):
+                # 1차: 그래프에서 직접 풀린 절대 시점
+                temporal_hint = (
+                    f"\n[시점 정보 — 그래프 해소 결과]\n"
+                    f"- 원문 표현: {prov.get('expression')}\n"
+                    f"- 해소된 절대 시점: {prov['resolved']}\n"
+                    f"- 근거: {prov.get('basis') or '문서 anchor 기반'}\n"
+                    f"위 절대 시점을 time_period로 사용하세요."
+                )
+            elif anchor_year is not None:
+                # 2차: claim 단위 해소는 실패했지만 anchor_year는 있음
+                # → LLM이 본문의 "작년/지난해/재작년" 등을 anchor 기준으로 풀게
+                temporal_hint = (
+                    f"\n[시점 정보 — 문서 anchor]\n"
+                    f"- 이 문서의 기준 연도(anchor_year): {anchor_year}\n"
+                    f"- 본문에 '작년/지난해/재작년/올해' 같은 상대 표현이 있으면\n"
+                    f"  anchor_year를 기준으로 절대 연도(예: {anchor_year-1}, {anchor_year-2})로 풀어\n"
+                    f"  time_period에 절대값으로 적으세요.\n"
+                    f"- '산업화 이전' 같은 비-숫자 표현은 그대로 두어도 됩니다."
+                )
+
+        schema = await _induce_single(
+            llm, claim.claim_text, domain, domain_hint,
+            context=context, temporal_hint=temporal_hint,
+        )
         if schema:
             claim.schema = schema
             success += 1
             logger.info(
                 f"스키마 유도: {claim.sent_id} "
-                f"indicator={schema.indicator}, value={schema.value}, unit={schema.unit}"
+                f"indicator={schema.indicator}, value={schema.value}, "
+                f"time_period={schema.time_period}"
             )
         else:
             fail += 1
@@ -149,6 +194,7 @@ async def _induce_single(
     domain: str = "general",
     domain_hint: str = "",
     context: str = "",
+    temporal_hint: str = "",
 ) -> ClaimSchema | None:
     """
     단일 주장 → ClaimSchema 변환.
@@ -162,6 +208,7 @@ async def _induce_single(
         context=context or claim_text,
         domain=domain,
         domain_hint=domain_hint,
+        temporal_hint=temporal_hint,
     )
 
     try:

@@ -1,162 +1,501 @@
 {
   "domain": "environment",
+  "anchor_year": 2024,
+  "graph_stats": {
+    "nodes": 114,
+    "edges": 150,
+    "node_types": {
+      "claim": 19,
+      "metric": 16,
+      "time": 12,
+      "entity": 10,
+      "source": 30,
+      "document": 1,
+      "temporal_expr": 12,
+      "resolved_time": 9,
+      "evidence": 5
+    }
+  },
   "verdict_distribution": {
-    "match": 7,
-    "unverifiable": 10,
-    "mismatch": 2
+    "match": 4,
+    "unverifiable": 14,
+    "mismatch": 1
   },
   "results": [
     {
+      "sent_id": "b0000_s0000",
       "claim_text": "# 작년 연평균기온 14.8도…사상 처음 14도 돌파 또 신기록",
-      "indicator": "연평균기온",
-      "value": 14.8,
+      "schema": {
+        "indicator": "연평균기온",
+        "value": 14.8,
+        "unit": "도",
+        "time_period": "2023",
+        "population": null,
+        "source_reference": null
+      },
+      "graph_temporal": {
+        "expression": "작년",
+        "resolved": "2023",
+        "basis": "'2024년'으로부터 1년 전이므로 2023년",
+        "via_coref": null
+      },
+      "evidence": {
+        "stat_table_id": "DT_1YL9801",
+        "source_name": "기온(시도)",
+        "official_value": 13.7,
+        "unit": "℃",
+        "time_period": "2023"
+      },
       "verdict": "match",
       "confidence": 0.95,
-      "explanation": "작년 연평균 기온이 사상 처음으로 14도를 돌파했다는 주장은 사실입니다. 해당 수치는 대한민국 통계청 KOSIS에서 제공하는 '종관기상' 지점별 평년값(통계표 ID: DT_14102_B002)에서도 확인되며, 2021년 연평균 기온은 15.1도로 기록되어 있습니다. 따라서 기사에서 제시한 14.8도와 0.3도 차이가 있으나, 신뢰도 95% 수준에서 허용되는 오차 범위 내에 있으므로 두 값은 일치한다고 볼 수 있습니다."
+      "mismatch_type": null,
+      "explanation": "작년 연평균기온이 사상 처음으로 14도를 돌파했다는 주장은 사실입니다. 해당 수치는 14.8도로, 대한민국 통계청 KOSIS에서 제공하는 '기온(시도)' 통계 자료인 DT_1YL9801에서도 확인됩니다. 다만, 신뢰도는 95%이며, 공식 발표된 수치는 13.7도로 오차 범위 내에 있습니다."
     },
     {
+      "sent_id": "b0001_s0000",
       "claim_text": "(서울=연합뉴스) 이재영 기자 = 2024년은 우리나라 연평균 기온이 사상 처음 14도를 돌파해 '압도적으로 뜨거웠던 해'로 남았다.",
-      "indicator": "우리나라 연평균 기온",
-      "value": 14.0,
+      "schema": {
+        "indicator": "우리나라 연평균 기온",
+        "value": 14.0,
+        "unit": null,
+        "time_period": "2024",
+        "population": "전국",
+        "source_reference": "연합뉴스"
+      },
+      "graph_temporal": {
+        "expression": "2024년",
+        "resolved": "2024",
+        "basis": "명시적 언급",
+        "via_coref": null
+      },
+      "evidence": null,
       "verdict": "unverifiable",
       "confidence": 0.3,
-      "explanation": "해당 주장에 대한 공식 통계를 찾을 수 없어 검증이 불가능합니다. 이는 해당 연도의 평균 기온 정보가 아직 발표되지 않았거나, 다른 검색어를 사용해야 할 수도 있습니다. 독자께서는 국가통계포털(KOSIS)에서 시도한 검색어인 '우리나라 연평균 기온 전국 2024년'을 다시 한번 입력하여 찾아보시기 바랍니다."
+      "mismatch_type": null,
+      "explanation": "해당 주장에 대한 공식 통계를 찾을 수 없었습니다. 이는 해당 연도의 자료가 아직 발표되지 않았거나, 다른 기관에서 관리되고 있을 가능성이 있습니다. \n\n독자는 국가통계포털(KOSIS)에서 주제별 통계>환경>기후변화>연평균기온 에서 시도별/지점별로 과거부터 현재까지의 연평균 기온 정보를 확인할 수 있습니다. 단, 2024년 자료는 아직 제공되지 않습니다."
     },
     {
+      "sent_id": "b0001_s0001",
       "claim_text": "1일 기상청 기상자료개방포털을 보면 작년 평균기온은 14.8도로 재작년(13.9도)에 이어 2년 연속 '1973년 이후 연평균 기온 신기록'을 갈아치웠다.",
-      "indicator": "연평균 기온",
-      "value": 14.8,
+      "schema": {
+        "indicator": "연평균 기온",
+        "value": 13.9,
+        "unit": "도",
+        "time_period": "2022",
+        "population": "전국",
+        "source_reference": "기상청 기상자료개방포털"
+      },
+      "graph_temporal": {
+        "expression": "재작년",
+        "resolved": "2022",
+        "basis": "'2024년'으로부터 2년 전이므로 2022년",
+        "via_coref": null
+      },
+      "evidence": null,
       "verdict": "unverifiable",
       "confidence": 0.3,
-      "explanation": "해당 주장에서는 2022년 대한민국의 연평균 기온이 14.8도라고 하였으나, KOSIS에서 관련 통계표를 찾을 수 없어 이를 검증할 수 없습니다. 따라서 독자들은 해당 정보를 참고하되, 직접 KOSIS에서 자료를 찾아 확인해 보는 것이 좋습니다."
+      "mismatch_type": null,
+      "explanation": "해당 주장에서는 2022년 대한민국의 연평균 기온이 14.8도라고 하였으나, KOSIS에서 해당 자료를 찾을 수 없어 검증이 불가능했습니다. 따라서 독자들은 직접 KOSIS 홈페이지에서 시도한 검색어인 '연평균 기온 전국 2022'와 유사한 키워드를 입력하여 관련 정보를 찾아볼 수 있습니다."
     },
     {
+      "sent_id": "b0001_s0002",
       "claim_text": "1973년은 기상관측망이 대폭 확충돼 각종 기상기록 기준점이 되는 해다.",
-      "indicator": null,
-      "value": null,
+      "schema": {
+        "indicator": "기상기록 기준점 설정",
+        "value": 0.0,
+        "unit": null,
+        "time_period": "1973",
+        "population": null,
+        "source_reference": null
+      },
+      "graph_temporal": {
+        "expression": "1973년",
+        "resolved": "1973",
+        "basis": "명시적 언급",
+        "via_coref": null
+      },
+      "evidence": {
+        "stat_table_id": "DT_14102_B001",
+        "source_name": "[종관기상] 지점별 연·월 통계",
+        "official_value": 7.6,
+        "unit": "℃",
+        "time_period": "2022"
+      },
       "verdict": "unverifiable",
       "confidence": 0.2,
-      "explanation": "해당 주장에 대한 공식 통계를 찾을 수 없었습니다. 이는 해당 연도의 기상관측망 확충 여부와 관련된 구체적인 수치 정보를 제공하는 자료를 발견하지 못했기 때문입니다. 따라서, 보다 정확한 사실 관계 파악을 위해서는 추가적인 조사나 검증이 필요해 보입니다. \n\n추가적으로, 대한민국 정부에서는 국가통계포털(KOSIS)을 운영하여 국내의 다양한 분야별 통계자료를 제공하고 있습니다. 만약 더 자세한 정보를 원하신다면, 해당 포털을 방문하여 관련 키워드를 검색해 보시는 것도 좋은 방법일 수 있습니다."
+      "mismatch_type": null,
+      "explanation": "해당 주장을 검증하기 위해 '기상기록 기준점 설정 1973'이라는 검색어로 관련 공식 통계를 찾아보았지만, 찾을 수 없었습니다. 따라서 이 주장은 현재 시점에서는 검증이 불가능합니다. \n\n독자께서는 해당 주제와 관련된 더 많은 정보를 원하신다면 국가통계포털(KOSIS) 등 신뢰할 수 있는 기관이나 자료를 참고하시기 바랍니다."
     },
     {
+      "sent_id": "b0001_s0003",
       "claim_text": "한 해 평균기온이 14도를 넘기는 작년이 처음이다.",
-      "indicator": "연평균 기온",
-      "value": 14.0,
+      "schema": {
+        "indicator": "연평균 기온",
+        "value": 14.0,
+        "unit": "도",
+        "time_period": "작년",
+        "population": "전체",
+        "source_reference": "기상청 기상자료개방포털"
+      },
+      "graph_temporal": null,
+      "evidence": {
+        "stat_table_id": "DT_14102_B002",
+        "source_name": "[종관기상] 지점별 평년값",
+        "official_value": 15.1,
+        "unit": "℃",
+        "time_period": "202010"
+      },
       "verdict": "match",
       "confidence": 0.95,
+      "mismatch_type": null,
       "explanation": "작년 한 해 평균기온이 14도를 넘겼다는 주장은 사실입니다. \n\n한국통계청 KOSIS의 '기상청 기상자료개방포털 연평균 기온 전체' 자료(통계표 ID: DT_14102_B002)에 따르면, 작년 전국 연평균 기온은 15.1도로 확인됩니다. 이는 기사에서 제시한 14.0도보다 높은 수치이며, 신뢰도는 95%입니다."
     },
     {
+      "sent_id": "b0001_s0004",
       "claim_text": "작년 평균기온은 평년(1991∼2020년 평균) 연평균 기온(12.7±0.2도)을 2.3도나 웃돌았다.\n(서울=연합뉴스)",
-      "indicator": "연평균 기온",
-      "value": 2.3,
+      "schema": {
+        "indicator": "연평균 기온",
+        "value": 2.3,
+        "unit": "도",
+        "time_period": "작년",
+        "population": "평년(1991∼2020년 평균)",
+        "source_reference": "연합뉴스"
+      },
+      "graph_temporal": null,
+      "evidence": {
+        "stat_table_id": "DT_14102_B002",
+        "source_name": "[종관기상] 지점별 평년값",
+        "official_value": -0.3,
+        "unit": "℃",
+        "time_period": "201001"
+      },
       "verdict": "match",
       "confidence": 0.95,
-      "explanation": "해당 주장은 사실입니다. 작년 평균기온은 12.7 ± 0.2도인 평년(1991∼2020년 평균) 연평균 기온보다 2.3도 높았다는 연합뉴스의 보도는, KOSIS 종관기상 지점별 평년값 자료에서도 확인됩니다. 해당 자료에서는 작년 평균기온이 13도로 기록되어 있으며, 이는 1991년부터 2020년까지의 평균치인 12.7도보다 0.3도 높은 것입니다. 따라서 두 수치 사이에는 오차가 있으나, 전반적으로는 같은 경향성을 보여주고 있습니다."
+      "mismatch_type": null,
+      "explanation": "해당 주장은 사실입니다. 작년 평균기온은 12.7 ± 0.2도인 평년(1991∼2020년 평균) 연평균 기온보다 2.3도 높았다는 서울 연합뉴스의 보도는, KOSIS 종관기상 지점별 평년값 자료에서도 확인됩니다. 해당 자료에서는 작년 평균기온이 13도로 기록되어 있으며, 이는 1991년부터 2020년까지의 평균치인 12.7도보다 0.3도 높은 것으로 나타납니다. 따라서 두 수치 사이에는 약간의 차이가 있으나, 전반적으로는 동일한 경향성을 보여주고 있습니다."
     },
     {
+      "sent_id": "b0001_s0005",
       "claim_text": "김토일 기자 kmtoil@yna.co.kr\n페이스북 tuney.kr/LeYN1 X(트위터) @yonhap_graphics\n일최저기온과 일최고기온 연평균 값도 지난해가 역대 1위다.",
-      "indicator": "일최저기온과 일최고기온 연평균 값",
-      "value": 0.0,
+      "schema": {
+        "indicator": "일최저기온과 일최고기온 연평균 값",
+        "value": 0.0,
+        "unit": null,
+        "time_period": "지난해",
+        "population": null,
+        "source_reference": "연합뉴스"
+      },
+      "graph_temporal": null,
+      "evidence": {
+        "stat_table_id": "DT_14102_B002",
+        "source_name": "[종관기상] 지점별 평년값",
+        "official_value": 15.1,
+        "unit": "℃",
+        "time_period": "202010"
+      },
       "verdict": "unverifiable",
       "confidence": 0.2,
-      "explanation": "해당 주장을 검증하기 위해 '일최저기온과 일최고기온 연평균 값 전체 지난해'라는 검색어로 공식 통계를 찾아보았지만, 관련 정보를 찾을 수 없었습니다. 이와 관련해 더 자세한 사항은 국가통계포털(KOSIS)에서 직접 확인해 보시기 바랍니다."
+      "mismatch_type": null,
+      "explanation": "해당 주장을 검증하기 위해 '일최저기온과 일최고기온 연평균 값 지난해'라는 검색어로 공식 통계를 찾아보았지만, 관련 정보를 찾을 수 없었습니다. 이와 관련해 더 자세한 사항은 국가통계포털(KOSIS)에서 직접 확인해 보시기 바랍니다."
     },
     {
+      "sent_id": "b0001_s0006",
       "claim_text": "작년 평균 최저기온은 10.2도로 10도를 넘었고 평균 최고기온은 20.1도로 20도를 웃돌았다.",
-      "indicator": "평균 최저기온 및 평균 최고기온",
-      "value": 10.2,
+      "schema": {
+        "indicator": "평균 최저기온 및 평균 최고기온",
+        "value": 10.2,
+        "unit": "도",
+        "time_period": "작년",
+        "population": "전국",
+        "source_reference": "연합뉴스"
+      },
+      "graph_temporal": null,
+      "evidence": {
+        "stat_table_id": "DT_1YL9801",
+        "source_name": "기온(시도)",
+        "official_value": 13.7,
+        "unit": "℃",
+        "time_period": "2023"
+      },
       "verdict": "unverifiable",
       "confidence": 0.4,
-      "explanation": "해당 주장을 검증하기 위해 '평균 최저기온 및 평균 최고기온 전국 작년'이라는 검색어로 공식 통계를 찾아보았지만, 관련 자료를 찾을 수 없었습니다. 이와 관련해 더 자세한 사항은 국가통계포털(KOSIS) 홈페이지에서 직접 확인해 보시기 바랍니다."
+      "mismatch_type": null,
+      "explanation": "해당 주장을 검증하기 위해 '평균 최저기온 및 평균 최고기온 전국 작년'이라는 검색어로 공식 통계를 찾아보았지만, 관련 자료를 찾을 수 없었습니다. 이와 관련하여 더 자세한 사항은 국가통계포털(KOSIS) 홈페이지에서 직접 확인해 보시기 바랍니다."
     },
     {
+      "sent_id": "b0001_s0009",
       "claim_text": "지난여름 기온이 41도를 기록(8월 4일 경기 여주시 점동면)한 사례가 있을 정도로 최악의 폭염이 나타났다.",
-      "indicator": "최고기온",
-      "value": 41.0,
+      "schema": {
+        "indicator": "최고 기온",
+        "value": 41.0,
+        "unit": "도",
+        "time_period": "2023-06..2023-08",
+        "population": "경기 여주시 점동면",
+        "source_reference": "기상청"
+      },
+      "graph_temporal": {
+        "expression": "지난여름",
+        "resolved": "2023-06..2023-08",
+        "basis": "'작년'(2023년) 여름",
+        "via_coref": null
+      },
+      "evidence": {
+        "stat_table_id": "DT_14102_B001",
+        "source_name": "[종관기상] 지점별 연·월 통계",
+        "official_value": -6.3,
+        "unit": "℃",
+        "time_period": "202301"
+      },
       "verdict": "match",
-      "confidence": 0.9073170731707317,
-      "explanation": "2014년 8월 4일, 경기 여주시 점동면에서 여름철 역대 최고 기온인 41도를 기록한 사례가 있습니다. 이는 대한민국 통계청 KOSIS '극한기후 현상변화-여름철 폭염' 자료에서도 확인되며, 해당 수치는 신뢰도 91% 입니다. \n\n*자료 출처: KOSIS - 극한기후 현상변화-여름철 폭염 / 통계표 ID: DT_71105_14_G16"
+      "confidence": 0.95,
+      "mismatch_type": null,
+      "explanation": "지난여름 8월 4일, 경기 여주시 점동면에서 역대급 폭염으로 인해 기온이 41도를 기록했다는 주장은 사실입니다. \n\n한국 통계청 KOSIS의 '종관기상' 자료에 따르면 해당 일자의 실제 온도는 41도로 확인되며, 오차율은 750.8%이나 신뢰도는 95%로 매우 높습니다. 따라서 위 주장은 정확한 근거자료를 통해 입증되었습니다."
     },
     {
+      "sent_id": "b0001_s0011",
       "claim_text": "온이 평년기온보다 낮은 달은 단 한 달도 없었다.",
-      "indicator": "평균기온이 평년기온보다 낮은 달의 개수",
-      "value": 0.0,
+      "schema": {
+        "indicator": "평균기온이 평년기온보다 낮은 달의 개수",
+        "value": 0.0,
+        "unit": null,
+        "time_period": "작년",
+        "population": "열두 달",
+        "source_reference": null
+      },
+      "graph_temporal": null,
+      "evidence": {
+        "stat_table_id": "DT_14102_B002",
+        "source_name": "[종관기상] 지점별 평년값",
+        "official_value": -0.3,
+        "unit": "℃",
+        "time_period": "201001"
+      },
       "verdict": "unverifiable",
       "confidence": 0.2,
-      "explanation": "해당 주장인 \"온이 평년기온보다 낮은 달은 단 한 달도 없었다\"라는 말을 검증하기 위해 '평균기온이 평년기온보다 낮은 달의 개수'와 관련된 공식 통계를 찾아보았지만, 해당 자료를 찾을 수 없었습니다. 이처럼 검증에 필요한 정보가 충분하지 않아 검증이 불가능했습니다. \n\n독자분들은 국가통계포털(KOSIS)에서 국내 기온 및 기후 관련 통계를 찾아볼 수 있습니다. 다만, 이번 검증에서는 이러한 과정을 거쳐도 원하는 답을 얻을 수 없었습니다."
+      "mismatch_type": null,
+      "explanation": "해당 주장인 \"온이 평년기온보다 낮은 달은 단 한 달도 없었다\"라는 말을 검증하기 위해 '평균기온이 평년기온보다 낮은 달의 개수 열두 달 작년'이라는 검색어로 관련 자료를 찾아보았지만, 해당 내용을 담은 공식 통계를 찾을 수 없었습니다. 이와 관련해 더 자세한 내용을 알고 싶으시다면 국가통계포털(KOSIS) 홈페이지에서 국내 기온 변화와 관련된 통계 자료를 찾아보시는 것을 추천드립니다."
     },
     {
+      "sent_id": "b0001_s0012",
       "claim_text": "특히 늦더위가 지루하게 이어진 9월은 평균기온(25.3도)이 평년기온(20.8도)보다 4.5도나 높았다.",
-      "indicator": "평균기온 차이",
-      "value": 4.5,
-      "verdict": "match",
-      "confidence": 0.95,
-      "explanation": "해당 주장은 사실입니다. \n\n9월의 평균기온 차이는 KOSIS 종관기상 지점별 평년값, 통계표 ID DT_14102_B002에 따르면 4.5도로 확인됩니다. 따라서 기사에서 제시한 수치는 공식적인 수치와 일치합니다."
+      "schema": {
+        "indicator": "평균기온이 평년기온보다 높은 정도",
+        "value": 4.5,
+        "unit": "도",
+        "time_period": "2023-09",
+        "population": "전체",
+        "source_reference": null
+      },
+      "graph_temporal": {
+        "expression": "9월",
+        "resolved": "2023-09",
+        "basis": "'작년'(2023년) 9월",
+        "via_coref": null
+      },
+      "evidence": {
+        "stat_table_id": "DT_14102_B002",
+        "source_name": "[종관기상] 지점별 평년값",
+        "official_value": 15.1,
+        "unit": "℃",
+        "time_period": "202010"
+      },
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장인 \"특히 늦더위가 지루하게 이어진 9월은 평균기온(25.3도)이 평년기온(20.8도)보다 4.5도나 높았다\"라는 말을 검증하고자 했으나, 관련된 공식 통계를 찾을 수 없어 검증이 불가능했습니다. 이와 관련해 더 자세한 사항은 국가통계포털(KOSIS)에서 '평균기온'과 '평년기온' 등의 키워드로 검색하여 찾아보시기 바랍니다."
     },
     {
+      "sent_id": "b0001_s0013",
       "claim_text": "그나마 예년 기온을 지킨 달은 5월인데 이때도 평균기온(18.2도)이 평년기온(17.5도)을 0.7도 웃돌았다.",
-      "indicator": "평균기온",
-      "value": 0.7,
-      "verdict": "match",
-      "confidence": 0.95,
-      "explanation": "해당 주장은 사실입니다. \n\n한국 통계청 KOSIS의 '종관기상' 지점별 평년값 자료인 통계표 ID DT_14102_B002에 따르면, 2022년 5월의 평균기온은 18.2도로 평년기온 17.5도보다 0.7도 높았습니다. 따라서 해당 주장은 신뢰할 수 있습니다."
-    },
-    {
-      "claim_text": "우리나라 연평균 기온 순위를 보면 상위 10위 중 1998년(4위)과 1990년(9위)을 제외하고 모두 2000년 이후다.",
-      "indicator": "연평균 기온 순위",
-      "value": 4.0,
-      "verdict": "unverifiable",
-      "confidence": 0.3,
-      "explanation": "해당 주장에 대한 공식 통계를 찾을 수 없어 검증이 불가능합니다. 이는 'KOSIS'에서 시도한 검색어인 '연평균 기온 순위 대한민국 상위 10위 중 1998년 및 1990년 제외 시점'에 대한 적절한 통계표를 발견하지 못했기 때문입니다. 따라서, 해당 주장의 사실 여부를 확인하려면 독자가 직접 KOSIS 홈페이지나 관련 기관 등을 통해 추가적인 조사를 해보는 것이 좋습니다."
-    },
-    {
-      "claim_text": "2024년(연평균 기온이 역대 1위), 2023년(2위), 2021년(3위), 2020년(8위) 등 4개년은 열 손가락에 꼽힐 정도로 기온이 높았고 그나마 가장 '시원'했던 2022년도 연평균 기온 순위가 상위 9위이기 때문이다.",
-      "indicator": "연평균 기온 순위",
-      "value": 1.0,
-      "verdict": "unverifiable",
-      "confidence": 0.3,
-      "explanation": "해당 주장인 \"2024년(연평균 기온이 역대 1위), 2023년(2위), 2021년(3위), 2020년(8위) 등 4개년은 열 손가락에 꼽힐 정도로 기온이 높았고 그나마 가장 '시원'했던 2022년도 연평균 기온 순위가 상위 9위이기 때문이다.\"와 관련된 공식 통계를 대한민국 통계청 KOSIS에서 찾을 수 없었습니다. 따라서 이 주장의 사실 여부를 판단할 수 없습니다. 독자들은 해당 정보를 찾기 위해, 대한민국 통계청 KOSIS 홈페이지에서 ‘연평균 기온 순위’나 ‘우리나라 연도별 평균 기온’등의 키워드로 검색해 볼 수 있습니다."
-    },
-    {
-      "claim_text": "유럽연합(EU)의 기후변화 감시 기구인 코페르니쿠스 기후변화연구소(C3S)에 따르면 작년 1∼11월 평균 지구 표면 기온이 1991∼2020년 평균보다 0.85도 높았다.",
-      "indicator": "작년 1∼11월 평균 지구 표면 기온",
-      "value": 0.85,
+      "schema": {
+        "indicator": "평균기온이 평년기온을 웃돈 정도",
+        "value": 0.7,
+        "unit": "도",
+        "time_period": "2023-05",
+        "population": "5월",
+        "source_reference": null
+      },
+      "graph_temporal": {
+        "expression": "5월",
+        "resolved": "2023-05",
+        "basis": "'작년'(2023년) 5월",
+        "via_coref": null
+      },
+      "evidence": {
+        "stat_table_id": "DT_14102_B001",
+        "source_name": "[종관기상] 지점별 연·월 통계",
+        "official_value": 7.5,
+        "unit": "℃",
+        "time_period": "2013"
+      },
       "verdict": "unverifiable",
       "confidence": 0.4,
-      "explanation": "해당 주장을 검증하기 위해 '작년 1∼11월 평균 지구 표면 기온' 관련 공식 통계를 찾았으나, 충분한 정보를 얻지 못해 검증이 불가능했습니다. 이와 관련해 더 자세한 정보를 얻고 싶다면, 대한민국 통계청 KOSIS 홈페이지에서 제공하는 전 세계 기온 자료를 참고하시는 것을 추천드립니다."
+      "mismatch_type": null,
+      "explanation": "해당 주장을 검증하기 위해 '평균기온이 평년기온을 웃돈 정도 5월 2023'이라는 검색어로 관련 자료를 찾아보았으나, 공식 통계를 찾을 수 없었습니다. 이와 관련해 더 자세한 사항은 국가통계포털(KOSIS)에서 해당 월의 기상청 기후데이터를 통해 확인하실 수 있습니다."
     },
     {
+      "sent_id": "b0001_s0016",
+      "claim_text": "우리나라 연평균 기온 순위를 보면 상위 10위 중 1998년(4위)과 1990년(9위)을 제외하고 모두 2000년 이후다.",
+      "schema": {
+        "indicator": "연평균 기온 순위",
+        "value": 4.0,
+        "unit": null,
+        "time_period": "2020..2024",
+        "population": "대한민국",
+        "source_reference": null
+      },
+      "graph_temporal": {
+        "expression": "2020년부터 작년까지 5년",
+        "resolved": "2020..2024",
+        "basis": "2020년부터 2024년까지의 기간을 의미함",
+        "via_coref": null
+      },
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장에 대한 공식 통계를 찾기 위해 '연평균 기온 순위 대한민국 2020..2024'라는 검색어로 KOSIS를 찾아보았지만, 관련 통계표를 찾을 수 없었습니다. 따라서 이 주장은 현재 시점에서는 검증이 불가능합니다. 독자들은 해당 정보를 확인하려면 직접 KOSIS 홈페이지를 방문하여 원하는 기간 동안의 자료를 검색해 보는 것이 좋습니다."
+    },
+    {
+      "sent_id": "b0001_s0018",
+      "claim_text": "2024년(연평균 기온이 역대 1위), 2023년(2위), 2021년(3위), 2020년(8위) 등 4개년은 열 손가락에 꼽힐 정도로 기온이 높았고 그나마 가장 '시원'했던 2022년도 연평균 기온 순위가 상위 9위이기 때문이다.",
+      "schema": {
+        "indicator": "연평균 기온 순위",
+        "value": 2.0,
+        "unit": null,
+        "time_period": "2023",
+        "population": null,
+        "source_reference": null
+      },
+      "graph_temporal": {
+        "expression": "2023년(2위), 2021년(3위), 2020년(8위)",
+        "resolved": "2023, 2021, 2020",
+        "basis": "명시적 언급",
+        "via_coref": null
+      },
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장의 진위 여부를 판단할 수 있는 공식 통계를 찾을 수 없었습니다. 이는 국가통계포털(KOSIS)에서 해당 주제와 관련된 통계표를 발견하지 못했기 때문입니다. 독자들은 직접 KOSIS 홈페이지 검색창에 원하는 기간이나 조건을 입력하여 관련 정보를 찾아볼 수 있습니다."
+    },
+    {
+      "sent_id": "b0001_s0020",
+      "claim_text": "유럽연합(EU)의 기후변화 감시 기구인 코페르니쿠스 기후변화연구소(C3S)에 따르면 작년 1∼11월 평균 지구 표면 기온이 1991∼2020년 평균보다 0.85도 높았다.",
+      "schema": {
+        "indicator": "지구 표면 기온",
+        "value": 0.85,
+        "unit": "도",
+        "time_period": "2023",
+        "population": "전체 지구",
+        "source_reference": "코페르니쿠스 기후변화연구소(C3S)"
+      },
+      "graph_temporal": {
+        "expression": "작년",
+        "resolved": "2023",
+        "basis": "앞 문장에서 언급된 '지난해', 즉 2023년",
+        "via_coref": null
+      },
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장을 검증하고자 '지구 표면 기온'과 관련된 통계 자료를 찾았으나, 유럽연합(EU)의 기후변화 감시 기구인 코페르니쿠스 기후변화연구소(C3S)에서 발표한 2022년 1 - 11월 평균 지구 표면 기온 데이터를 찾을 수 없었습니다. 이와 관련하여 더 자세한 내용은 대한민국 통계청 KOSIS 홈페이지에서 직접 찾아보시기 바랍니다."
+    },
+    {
+      "sent_id": "b0001_s0021",
       "claim_text": "이는 아직 산업화 이래 가장 뜨거웠던 해인 재작년 같은 기간 온도보다 0.18도 높은 것이다.",
-      "indicator": "지구 표면 기온",
-      "value": 0.18,
-      "verdict": "match",
-      "confidence": 0.95,
-      "explanation": "코페르니쿠스 기후변화연구소(C3S) 지구 표면 기온 지구 전체 데이터를 바탕으로 한 KOSIS 종관기상 지점별 평년값에 따르면, 해당 주장은 사실입니다. 2021년 같은 기간 온도인 15.1도와 비교했을 때, 2022년 같은 기간 온도는 0.18도 더 높았습니다. 이러한 차이는 신뢰도 95% 수준에서 오차 범위 ±0.98도로 확인됩니다."
+      "schema": {
+        "indicator": "평균 지구 표면 기온",
+        "value": 0.18,
+        "unit": "도",
+        "time_period": "2022",
+        "population": "지구 전체",
+        "source_reference": "코페르니쿠스 기후변화연구소(C3S)"
+      },
+      "graph_temporal": {
+        "expression": "재작년",
+        "resolved": "2022",
+        "basis": "'작년'(2023년)로부터 2년 전이므로 2022년",
+        "via_coref": null
+      },
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장에 대한 공식 통계를 찾기 위해 '평균 지구 표면 기온 지구 전체 2022'라는 검색어로 KOSIS(국가통계포털)를 찾아보았지만, 관련 통계표를 찾을 수 없었습니다. 따라서 이 주장은 현재 시점에서는 검증이 불가능합니다. 독자들은 해당 정보를 확인하려면 국가통계포털이나 다른 신뢰할 수 있는 기관의 자료를 참고하시기 바랍니다."
     },
     {
+      "sent_id": "b0001_s0022",
       "claim_text": "연구소는 작년 지구 기온이 사상 처음 산업화 이전보다 1.5도 이상 높아 역대 가장 뜨거운 해가 될 것이 확실하다고 밝혔다.",
-      "indicator": "지구 기온 상승 폭",
-      "value": 1.5,
+      "schema": {
+        "indicator": "지구 기온 상승 폭",
+        "value": 1.5,
+        "unit": "도",
+        "time_period": "작년",
+        "population": "전 세계",
+        "source_reference": "코페르니쿠스 기후변화연구소(C3S)"
+      },
+      "graph_temporal": null,
+      "evidence": {
+        "stat_table_id": "DT_ES2017_054",
+        "source_name": "기후환경 변화와 권리",
+        "official_value": 14.8917887622,
+        "unit": "%",
+        "time_period": "2023"
+      },
       "verdict": "mismatch",
       "confidence": 0.54,
-      "explanation": "해당 기사에서는 연구소가 발표한 작년 지구 기온이 '산업화 이전보다 1.5도 이상'이라고 주장했으나, 이는 사실과 다릅니다. 실제로 해당 연구소에서 발표한 수치는 14.8917887622도로, 13.4도나 차이 나는 큰 과장이었습니다. 이러한 차이는 신뢰도에도 영향을 미쳐, 현재로서는 54% 정도의 신뢰도만을 가지고 있습니다. 따라서 우리는 이런 정보를 받아들일 때 신중하게 판단해야 합니다. \n\n*통계 자료 출처: KOSIS / 통계표 ID: DT_ES2017_054 / 검색어: 코페르니쿠스 기후변화연구소(C3S) 지구 기온 상승 폭 전 세계 / 조회 시각: 2026-05-07T08:02:57.184360"
+      "mismatch_type": "exaggeration",
+      "explanation": "코페르니쿠스 기후변화연구소(C3S)에서 발표한 자료에 따르면, 작년 지구 기온은 14.8917887622도로, 이는 연구소가 주장한 1.5도와는 큰 차이(-13.4도)가 있습니다. 이러한 차이는 '과장/축소'라는 불일치 유형에 해당하며, 실제 수치보다 크게 또는 작게 표현하여 신뢰도가 54%로 낮습니다. 따라서 이를 바탕으로 한 주장은 사실과 다르며, 정확한 정보를 확인하기 위해서는 KOSIS 홈페이지에서 관련 통계를 찾아보시는 것이 좋습니다."
     },
     {
+      "sent_id": "b0001_s0023",
       "claim_text": "'1.5도 상승'은 인류가 설정한 일종의 마지노선인데 이것이 뚫린 셈이다.",
-      "indicator": "지구 기온",
-      "value": 1.5,
-      "verdict": "mismatch",
-      "confidence": 0.3333333333333333,
-      "explanation": "해당 주장은 사실과 다릅니다. 기사에서는 지구 기온이 '1.5도 상승'했다고 했지만, 실제로 해당 연도인 2019년에는 지구 기온이 1980.0도로 측정되었습니다. 이는 약 1978.5도 차이 나는 것으로, 99.9%나 축소하여 표현한 것입니다. 이러한 차이는 신뢰도를 33%까지 떨어뜨립니다. 따라서 본 주장은 과장되어 있으며, 이를 바로잡을 필요가 있습니다. \n\n*통계 출처: KOSIS > 통계표 ID: DT_21_07 > 검색어: 연구소 지구 기온 전 세계 > 조회 시각: 2026-05-07T08:03:21.747985"
+      "schema": {
+        "indicator": "지구 기온",
+        "value": 1.5,
+        "unit": "도",
+        "time_period": "산업화 이전",
+        "population": "전 세계",
+        "source_reference": "연구소"
+      },
+      "graph_temporal": null,
+      "evidence": {
+        "stat_table_id": "DT_442001_003",
+        "source_name": "기후기술 부문별·기업규모별 종사자수 현황",
+        "official_value": 197867.0,
+        "unit": "명",
+        "time_period": "2016"
+      },
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장을 검증하기 위해 '지구 기온 전 세계 산업화 이전'이라는 검색어로 관련 자료를 찾아보았지만, 신뢰할 수 있는 기관의 공식 통계를 찾을 수 없었습니다. 이와 관련해 더 자세한 사항은 국가통계포털(KOSIS) 등을 통해 추가적으로 확인해 보시기 바랍니다."
     },
     {
+      "sent_id": "b0001_s0024",
       "claim_text": "세계는 2015년 파리협정을 통해 산업화 이전 대비 지구 온도 상승 폭을 1.5도 이하로 제한하는 데 노력을 다하자고 합의했다.",
-      "indicator": "산업화 이전 대비 지구 온도 상승 폭",
-      "value": 1.5,
+      "schema": {
+        "indicator": "지구 온도 상승 폭",
+        "value": 1.5,
+        "unit": "도",
+        "time_period": "2015년",
+        "population": "전 세계",
+        "source_reference": "파리협정"
+      },
+      "graph_temporal": null,
+      "evidence": {
+        "stat_table_id": "DT_14102_B002",
+        "source_name": "[종관기상] 지점별 평년값",
+        "official_value": -0.3,
+        "unit": "℃",
+        "time_period": "201001"
+      },
       "verdict": "unverifiable",
-      "confidence": 0.4,
-      "explanation": "해당 주장을 검증하기 위해 '산업화 이전 대비 지구 온도 상승 폭 전 세계 2015년'이라는 검색어로 관련 자료를 찾아보았지만, 해당 내용을 담은 공식 통계를 찾을 수 없었습니다. 이와 관련해 더 자세한 내용을 알고 싶다면 국가통계포털(KOSIS) 등 신뢰할 수 있는 기관이나 자료를 참고하시기 바랍니다."
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장을 검증하기 위해 '지구 온도 상승 폭 전 세계 2015년'이라는 검색어로 관련 자료를 찾아보았지만, 찾을 수 없었습니다. 이와 관련하여 더 자세한 사항은 국가통계포털(KOSIS) 등 신뢰할 수 있는 기관이나 자료를 참고해 주시길 바랍니다."
     }
   ]
 }

@@ -155,16 +155,15 @@ def _find_best_match(
 # ── 메인 검증 함수 ─────────────────────────────────────────────────────────────
 
 def verify_claim(claim: Claim, evidence: Evidence | None,
-                 config: dict | None = None) -> VerificationResult:
+                 config: dict | None = None,
+                 graph: "ClaimGraph | None" = None) -> VerificationResult:
     """
     공식 통계와 기사 수치를 비교하여 판정 (LLM 미사용).
 
-    [v3] factcheck_test.py v7 로직 전면 반영:
-      1) evidence.raw_response["row"] 전체 행 순회 → best match
-      2) 천명개월 예외 (normalize + is_same_unit_type)
-      3) 연도 ±2년 필터
-      4) 오차 구간: ≤10% MATCH / 10~30% UNVERIFIABLE / 30~90% MISMATCH / >90% UNVERIFIABLE
-      5) value=0.0 → UNVERIFIABLE
+    [v3] factcheck_test.py v7 로직 전면 반영
+    [v6 멀티홉] graph가 있으면 claim의 시점을 그래프에서 resolved된 절대 시점으로
+                보정하여 KOSIS row 매칭에 사용. claim.schema.time_period가
+                "작년" 같은 상대 표현이어도 그래프 traverse로 2023이 나옴.
     """
     config = config or {}
 
@@ -189,9 +188,20 @@ def verify_claim(claim: Claim, evidence: Evidence | None,
 
     claim_unit = (claim.schema.unit or "") if claim.schema else ""
 
-    # ── 연도 추출 ────────────────────────────────────────────────────────
+    # ── 연도 추출 — [v6] 그래프 우선, 그 다음 schema.time_period ────────
     claim_year = None
-    if claim.schema and claim.schema.time_period:
+
+    # 1) 그래프 멀티홉 traversal 결과 우선
+    if graph is not None:
+        resolved = graph.resolve_time_for_claim(claim)
+        if resolved:
+            m = re.search(r"(\d{4})", resolved)
+            if m:
+                claim_year = m.group(1)
+                logger.debug(f"verifier: 그래프에서 resolved year={claim_year} (from {resolved})")
+
+    # 2) 그래프에서 못 찾으면 schema.time_period에서 추출 (fallback)
+    if not claim_year and claim.schema and claim.schema.time_period:
         m = re.search(r"(\d{4})", claim.schema.time_period)
         if m:
             claim_year = m.group(1)

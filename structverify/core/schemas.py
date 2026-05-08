@@ -82,6 +82,11 @@ class GraphNodeType(str, Enum):
     TIME = "time"
     EVIDENCE = "evidence"
     SOURCE = "source"
+    # ── 멀티홉 시간 그래프용 (document_graph.py) ──────────────────────────
+    DOCUMENT = "document"            # 문서 메타 (anchor_year property 보유)
+    SENTENCE = "sentence"            # 문장 (REFERS_TO 타겟, sir_doc 호환)
+    TEMPORAL_EXPR = "temporal_expr"  # "작년", "9월", "재작년 같은 기간"
+    RESOLVED_TIME = "resolved_time"  # 절대 시점 (2023, 2024-09 등)
 
 
 class GraphEdgeType(str, Enum):
@@ -97,6 +102,11 @@ class GraphEdgeType(str, Enum):
     IN_DOC    = "in_doc"       # 문단 → 소속 문서
     # 복합 주장 검증용 (같은 지표를 공유하는 Claim 간)
     COMPARE   = "compare"      # C1 ↔ C2 (2.6배 같은 파생 주장 검증)
+    # ── 멀티홉 시간 그래프용 (document_graph.py) ──────────────────────────
+    HAS_TEMPORAL = "has_temporal"  # Sentence/Claim → TemporalExpr
+    RELATIVE_TO  = "relative_to"   # TemporalExpr → Document (anchor 의존)
+    RESOLVES_TO  = "resolves_to"   # TemporalExpr → ResolvedTime
+    REFERS_TO    = "refers_to"     # TemporalExpr → 다른 Sentence (coref)
 
 
 # ── SIR Tree ─────────────────────────────────────────────────
