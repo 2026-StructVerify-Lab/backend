@@ -3,8 +3,9 @@ preprocessing/extractor.py — 소스 유형별 텍스트 추출기 (디스패�
 
 세부 구현은 유형별 하위 모듈에 위임:
   * PDF  → `preprocessing.pdf`  (PyMuPDF + Docling + OCR 파이프라인, Markdown 반환)
-  * URL  → Trafilatura (TODO)
-  * DOCX → python-docx (TODO) << 우선순위 후순위
+  * URL  → Trafilatura (TODO[완료])
+  * DOCX → python-docx (TODO[완료])
+          (+ Docling 선택적 보강 (TODO)) 
 
 [참고] Trafilatura (Barbaresi, ACL 2021) — https://github.com/adbar/trafilatura
   논문: Barbaresi, A. (2021). Trafilatura: A Web Scraping Library and
@@ -19,7 +20,7 @@ preprocessing/extractor.py — 소스 유형별 텍스트 추출기 (디스패�
 
 [참고] python-docx — https://github.com/python-openxml/python-docx
   DOCX XML 구조 파싱
-  
+
 [0422(수) 진행 내용 관련 참고 논문]
 [참고] TableFormer (Nassar et al., IBM Research, CVPR 2022) — https://arxiv.org/abs/2203.01017
   논문: Nassar, A., Livathinos, N., Lysak, M., & Staar, P. (2022).
@@ -50,11 +51,35 @@ preprocessing/extractor.py — 소스 유형별 텍스트 추출기 (디스패�
   논문: Du, Y., Li, C., Guo, R., Yin, X., Liu, W., et al. (2020).
   PP-OCR: A Practical Ultra Lightweight OCR System. arXiv:2009.09941.
   PaddleOCR 백엔드의 기반 모델. `OCR_BACKEND=paddle` 로 활성화 가능.
+  
+[0507(목) 진행 내용 관련 참고 논문].  # v2 DOCX 파이프라인 구현 관련
+[참고] python-docx — https://github.com/python-openxml/python-docx
+  python-openxml/python-docx. OOXML 표준(ECMA-376) 기반 DOCX XML 파싱 오픈소스 라이브러리.
+  Document.element.body XML 트리 순회로 단락·테이블 문서 순서 보존.
+  단락 스타일명("Heading N", "List Paragraph" 등) 파싱으로 헤딩 레벨·리스트 타입 감지.
+
+[참고] ECMA-376 Office Open XML (OOXML) — ECMA International, 5th Edition (2015)
+  표준: ECMA-376 / ISO/IEC 29500. Office Open XML File Formats 국제 표준.
+  DOCX XML 스키마·스타일 계층("Heading 1"~"Heading 9"), 테이블 구조(<w:tbl>/<w:tr>/<w:tc>),
+  문서 속성(core.xml — dcterms:created, dc:title)의 정의 근거.
+  reader.py의 헤딩 레벨 감지·테이블 셀 파싱 로직의 사양 기반.
+
+[참고] Docling Technical Report — DOCX 지원 (IBM Research, 2024) — https://arxiv.org/abs/2408.09869
+  논문: Auer, C., Lysak, M., Nassar, A., Dolfi, M., Livathinos, N., et al. (2024).
+  Docling Technical Report. arXiv:2408.09869.
+  Docling은 PDF 외 DOCX도 DocumentConverter.convert()로 처리.
+  python-docx 파싱 후 title 공란 시 Docling JSON(doc.export_to_dict())으로 보강.
+  0422 PDF 파이프라인과 동일 논문; DOCX 파이프라인 보강 역할 추가 기록.
 """
 from __future__ import annotations
 
+import json
+
+import trafilatura    # import 누락 수정 - v2
+
 from structverify.core.schemas import SourceType
 from structverify.preprocessing.pdf import extract_pdf_to_markdown
+from structverify.preprocessing.docx import extract_docx_to_markdown
 from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -108,8 +133,9 @@ def _extract_from_pdf(filepath: str) -> str:
 
 def _extract_from_docx(filepath: str) -> str:
     """
-    DOCX → 문단/테이블 추출 (python-docx)
-    TODO: Document(filepath).paragraphs + .tables 파싱 구현
+    v2 : DOCX → Markdown 추출.
+    구현은 `structverify.preprocessing.docx` 하위 패키지에 위임.
+    파이프라인: python-docx 파싱 → 헤딩/리스트/테이블 → Markdown
+    TODO[DONE]: Document(filepath).paragraphs + .tables 파싱 구현
     """
-    logger.warning(f"DOCX 추출 stub: {filepath}")
-    return f"[STUB] {filepath}"
+    return extract_docx_to_markdown(filepath)
