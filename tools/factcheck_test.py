@@ -224,12 +224,15 @@ def find_candidate_tables(claim: dict, top_k: int = 5) -> list[dict]:
         if len(w) >= 2 and w not in stopwords and not re.match(r'^[\d.]+$', w)
     ]
 
+    # [v7] - 박재윤: 키워드 복수 시도 (field_name 직접 + LLM 추출 키워드)
     candidates = search_kosis_api(search_keyword, max_results=top_k)
+    field_name_results = search_kosis_api(claim['field_name'], max_results=3)
+    existing_ids = {c["stat_id"] for c in candidates}
+    for r in field_name_results:
+        if r["stat_id"] not in existing_ids:
+            candidates.append(r)
+            existing_ids.add(r["stat_id"])
 
-    # [v5] - 박재윤: 기존 포맷
-    # combined_keyword = f"{claim['field_name']} {search_keyword}"
-
-    # [v6] - 박재윤: KOSIS 임베딩 포맷에 맞춰 claim 임베딩 텍스트 보강
     combined_keyword = f"{' '.join(category_keywords)} > {claim['field_name']} | 항목: {claim['field_name']} | 분류: {search_keyword} | 단위: {claim['unit']}"
     embedding = get_embedding(combined_keyword)
 
@@ -240,7 +243,6 @@ def find_candidate_tables(claim: dict, top_k: int = 5) -> list[dict]:
 
     pg_unfiltered = search_pgvector(embedding, None, None, top_k=3)
 
-    existing_ids = {c["stat_id"] for c in candidates}
     for r in pg_filtered + pg_unfiltered:
         if r["stat_id"] not in existing_ids:
             candidates.append(r)
@@ -274,8 +276,6 @@ def fetch_kosis_data(org_id: str, tbl_id: str, time_reference: str):
             "endPrdDe": strategy["endPrdDe"],
         }
         data = _try_with_objL_escalation(base_params)
-        if tbl_id == "DT_1DE9058S":
-            print(f"  [DEBUG] prdSe={strategy['prdSe']} startPrdDe={strategy['startPrdDe']} → {type(data).__name__} {str(data)[:80]}")
         if data is not None:
             return data
 
@@ -288,8 +288,6 @@ def fetch_kosis_data(org_id: str, tbl_id: str, time_reference: str):
             "prdSe": prd, "newEstPrdCnt": 3,
         }
         data = _try_with_objL_escalation(fallback_params)
-        if tbl_id == "DT_1DE9058S":
-            print(f"  [DEBUG] fallback prdSe={prd} newEstPrdCnt=3 → {type(data).__name__} {str(data)[:80]}")
         if data is not None:
             return data
 
@@ -480,8 +478,8 @@ def numeric_check(claim: dict, kosis_data: list) -> dict:
     elif best_error <= 0.3:
         # [v7] - 박재윤: LLM 재판정 트리거 복원
         return {"verdict": "판단불가", "reason": f"유사하나 오차 {best_error*100:.1f}% — LLM 재판정"}
-    elif best_error > 0.9:
-        # [v5] - 박재윤: 90% 초과 오차는 테이블 매칭 오류로 판단불가
+    elif best_error > 0.8:
+        # [v5] - 박재윤: 80% 초과 오차는 테이블 매칭 오류로 판단불가
         return {"verdict": "판단불가", "reason": f"오차 {best_error*100:.1f}% — 테이블 매칭 오류 의심"}
     else:
         return {"verdict": "불일치", "reason": f"KOSIS {best_match['normalized']:,.0f}{unit} vs 뉴스 {claim_value:,.0f}{unit} (오차 {best_error*100:.1f}%)"}
