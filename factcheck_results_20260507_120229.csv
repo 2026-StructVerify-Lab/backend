@@ -1,2 +1,0 @@
-﻿claim_id,field_name,field_value,unit,time_reference,verdict,reason
-0e392a2e-14db-47c3-ad2a-f962fec96023,삼성전자 시가총액,,조원,,판단불가,"처리 중 오류: expected string or bytes-like object, got 'NoneType'"

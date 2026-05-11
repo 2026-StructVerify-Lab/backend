@@ -48,3 +48,15 @@ config/default.yaml
 
 kosis_catalog_cache.json
 /*.csv
+
+# result files
+*.csv
+*.zip
+
+# python
+__pycache__/
+*.pyc
+
+# env
+.env
+venv/
