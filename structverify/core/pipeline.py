@@ -144,7 +144,7 @@ class VerificationPipeline:
 
         # [v1] - 박재윤: Claims → PostgreSQL 저장
         if claims:
-            await self.db_manager.save_claims(claims)
+            await self.db_manager.save_claims(claims, domain=sir_doc.detected_domain)
             logger.info(f"Claims 저장 완료: {len(claims)}건")
 
         # [v1] - 박재윤: Results → PostgreSQL 저장

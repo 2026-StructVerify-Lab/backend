@@ -7,11 +7,13 @@
 # [DONE] save_claims 배치 INSERT 구현
 # [DONE] save_results 배치 INSERT 구현 (claimed_value, true_value, deviation 계산 포함)
 # [DONE] save_claims ON CONFLICT (claim_id) DO NOTHING 추가 (중복 실행 방지)
+# [DONE] save_claims/save_results 매번 새 연결로 변경 (long-running 연결 끊김 방지)
+# [DONE] save_claims domain 파라미터 추가
 # [TODO] save_document 구현
 # [TODO] save_feedback 구현
 """
 from __future__ import annotations
-import os                          # ← 추가
+import os
 from structverify.core.schemas import SIRDocument, Claim, VerificationResult
 from structverify.utils.logger import get_logger
 
@@ -20,19 +22,19 @@ logger = get_logger(__name__)
 
 class DBManager:
     def __init__(self, config: dict | None = None):
-      self.config = config or {}
-       
-      import psycopg2
-      from dotenv import load_dotenv
-      load_dotenv()
-      
-      self.conn = psycopg2.connect(
-          host=os.getenv("POSTGRES_HOST"),
-          port=os.getenv("POSTGRES_PORT"),
-          dbname=os.getenv("POSTGRES_DB"),
-          user=os.getenv("POSTGRES_USER"),
-          password=os.getenv("POSTGRES_PASSWORD")
-      )
+        self.config = config or {}
+        from dotenv import load_dotenv
+        load_dotenv()
+
+    def _get_conn(self):
+        import psycopg2
+        return psycopg2.connect(
+            host=os.getenv("POSTGRES_HOST"),
+            port=os.getenv("POSTGRES_PORT"),
+            dbname=os.getenv("POSTGRES_DB"),
+            user=os.getenv("POSTGRES_USER"),
+            password=os.getenv("POSTGRES_PASSWORD")
+        )
 
     async def save_document(self, doc: SIRDocument) -> None:
         """
@@ -42,47 +44,42 @@ class DBManager:
           INSERT INTO documents (doc_id, source_type, source_uri, sir_json, extracted_at)
           VALUES ($1, $2, $3, $4::jsonb, $5)
           ON CONFLICT (doc_id) DO NOTHING
-
-          - doc_id: str(doc.doc_id)
-          - source_type: doc.source_type.value
-          - sir_json: doc.model_dump_json() 또는 json.dumps
-          - 비동기 세션 사용 (async with self.AsyncSession() as session)
         """
         logger.warning(f"DB 저장 stub: doc {doc.doc_id}")
 
-    async def save_claims(self, claims: list[Claim]) -> None:
-        cur = self.conn.cursor()
+    async def save_claims(self, claims: list[Claim], domain: str = None) -> None:
+        # [v2] - 박재윤: 매번 새 연결 (long-running 연결 끊김 방지)
+        conn = self._get_conn()
+        cur = conn.cursor()
         for claim in claims:
-            # requests 테이블 먼저 INSERT
             cur.execute(
-                "INSERT INTO requests (request_id, submitted_at) VALUES (%s, NOW()) ON CONFLICT (request_id) DO NOTHING",
-                (str(claim.doc_id),)
+                "INSERT INTO requests (request_id, domain, submitted_at) VALUES (%s, %s, NOW()) ON CONFLICT (request_id) DO NOTHING",
+                (str(claim.doc_id), domain)
             )
-
-            # schema 없는 claim 안전 처리
             indicator = claim.schema.indicator if claim.schema else None
             value     = claim.schema.value     if claim.schema else None
             unit      = claim.schema.unit      if claim.schema else None
             time_ref  = claim.schema.time_period if claim.schema else None
-
             cur.execute("""
-                    INSERT INTO claims (claim_id, request_id, field_name, field_value,
-                                    unit, is_approximate, modifier, parent_path,
-                                    time_reference, context)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (claim_id) DO NOTHING
-                """, (
+                INSERT INTO claims (claim_id, request_id, field_name, field_value,
+                                  unit, is_approximate, modifier, parent_path,
+                                  time_reference, context)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (claim_id) DO NOTHING
+            """, (
                 str(claim.claim_id), str(claim.doc_id),
                 indicator, value, unit,
                 False, None, None,
                 time_ref, claim.claim_text
             ))
-        self.conn.commit()
+        conn.commit()
         cur.close()
+        conn.close()
+
     async def save_results(self, results: list[VerificationResult], claims: list[Claim] = None) -> None:
-        # [v1] - 박재윤: results 테이블 배치 INSERT 구현
-        import uuid
-        cur = self.conn.cursor()
+        # [v2] - 박재윤: 매번 새 연결 (long-running 연결 끊김 방지)
+        conn = self._get_conn()
+        cur = conn.cursor()
 
         claim_value_map = {}
         if claims:
@@ -118,8 +115,9 @@ class DBManager:
                 result.created_at,
             ))
 
-        self.conn.commit()
+        conn.commit()
         cur.close()
+        conn.close()
         logger.info(f"Results 저장 완료: {len(results)}건")
 
     async def save_feedback(self, event) -> None:
