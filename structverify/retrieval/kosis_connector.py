@@ -39,6 +39,11 @@ retrieval/kosis_connector.py — KOSIS Open API 커넥터 (v3: CatalogSearchTool
 [모듈 분리]
   CatalogSearchTool  ← catalog_search.py (pgvector 검색 전담)
   KOSISConnector     ← kosis_connector.py (LLM Agent + KOSIS API fetch)
+
+
+[박재윤 - 2026-05-11]
+- tried_log UnboundLocalError 버그 수정
+  · candidates 없을 때 tried_ids, tried_log 초기화 누락 수정
 """
 from __future__ import annotations
 
@@ -377,7 +382,10 @@ class KOSISConnector(BaseConnector):
 
         if not candidates:
             logger.warning(f"후보 없음: {query.keyword}")
-                # ── [v6] LLM Agent 검색어 재생성 ─────────────────────────────────
+            # [v5] - 박재윤: tried_log 초기화 (candidates 없을 때 UnboundLocalError 수정)
+            tried_ids: set[str] = set()
+            tried_log: list[dict] = []
+            # ── [v6] LLM Agent 검색어 재생성 ─────────────────────────────────
             simplified = await self._agent_simplify_keyword(query, tried_log)
             if simplified and simplified != (query.indicator or query.keyword or ""):
                 logger.info(f"[재검색] Agent 검색어 변경: '{query.keyword}' → '{simplified}'")
