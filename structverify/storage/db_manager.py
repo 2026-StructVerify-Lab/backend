@@ -6,6 +6,7 @@
 # [DONE] __init__ DB 연결 초기화
 # [DONE] save_claims 배치 INSERT 구현
 # [DONE] save_results 배치 INSERT 구현 (claimed_value, true_value, deviation 계산 포함)
+# [DONE] save_claims ON CONFLICT (claim_id) DO NOTHING 추가 (중복 실행 방지)
 # [TODO] save_document 구현
 # [TODO] save_feedback 구현
 """
@@ -65,11 +66,12 @@ class DBManager:
             time_ref  = claim.schema.time_period if claim.schema else None
 
             cur.execute("""
-                INSERT INTO claims (claim_id, request_id, field_name, field_value,
-                                  unit, is_approximate, modifier, parent_path,
-                                  time_reference, context)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
+                    INSERT INTO claims (claim_id, request_id, field_name, field_value,
+                                    unit, is_approximate, modifier, parent_path,
+                                    time_reference, context)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (claim_id) DO NOTHING
+                """, (
                 str(claim.claim_id), str(claim.doc_id),
                 indicator, value, unit,
                 False, None, None,
