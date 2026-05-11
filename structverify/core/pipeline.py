@@ -149,7 +149,7 @@ class VerificationPipeline:
 
         # [v1] - 박재윤: Results → PostgreSQL 저장
         if results:
-            await self.db_manager.save_results(results)
+            await self.db_manager.save_results(results, claims)
             logger.info(f"Results 저장 완료: {len(results)}건")
 
         # TODO [박재윤]: Nodes/Edges → Neo4j 저장

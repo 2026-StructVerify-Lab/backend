@@ -5,8 +5,8 @@
 
 # [DONE] __init__ DB 연결 초기화
 # [DONE] save_claims 배치 INSERT 구현
+# [DONE] save_results 배치 INSERT 구현 (claimed_value, true_value, deviation 계산 포함)
 # [TODO] save_document 구현
-# [TODO] save_results 구현
 # [TODO] save_feedback 구현
 """
 from __future__ import annotations
@@ -77,17 +77,48 @@ class DBManager:
             ))
         self.conn.commit()
         cur.close()
-    async def save_results(self, results: list[VerificationResult]) -> None:
-        """
-        TODO [박재윤]: verification_results 테이블 배치 INSERT 구현
-          INSERT INTO verification_results
-            (result_id, claim_id, verdict, confidence, mismatch_type,
-             evidence_json, explanation, created_at)
-          VALUES ...
-          - verdict: result.verdict.value
-          - evidence_json: result.evidence.model_dump() if result.evidence else None
-        """
-        logger.warning(f"DB 저장 stub: {len(results)} results")
+    async def save_results(self, results: list[VerificationResult], claims: list[Claim] = None) -> None:
+        # [v1] - 박재윤: results 테이블 배치 INSERT 구현
+        import uuid
+        cur = self.conn.cursor()
+
+        claim_value_map = {}
+        if claims:
+            for c in claims:
+                if c.schema and c.schema.value is not None:
+                    claim_value_map[str(c.claim_id)] = c.schema.value
+
+        for result in results:
+            ev = result.evidence
+            claimed_value = claim_value_map.get(str(result.claim_id))
+            true_value = ev.official_value if ev else None
+
+            deviation = None
+            if claimed_value and true_value and true_value != 0:
+                deviation = abs(claimed_value - true_value) / abs(true_value)
+
+            cur.execute("""
+                INSERT INTO results (result_id, claim_id, truth_id,
+                                    claimed_value, true_value, deviation,
+                                    match_status, reason, explanation, judged_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (result_id) DO NOTHING
+            """, (
+                str(result.result_id),
+                str(result.claim_id),
+                None,
+                claimed_value,
+                true_value,
+                deviation,
+                result.verdict.value,
+                result.mismatch_type.value if result.mismatch_type else None,
+                result.explanation,
+                result.created_at,
+            ))
+
+        self.conn.commit()
+        cur.close()
+        logger.info(f"Results 저장 완료: {len(results)}건")
 
     async def save_feedback(self, event) -> None:
         """
