@@ -9,6 +9,7 @@
 # [DONE] save_claims ON CONFLICT (claim_id) DO NOTHING 추가 (중복 실행 방지)
 # [DONE] save_claims/save_results 매번 새 연결로 변경 (long-running 연결 끊김 방지)
 # [DONE] save_claims domain 파라미터 추가
+# [DONE] save_claims/save_results 재실행 시 기존 데이터 삭제 후 재삽입
 # [TODO] save_document 구현
 # [TODO] save_feedback 구현
 """
@@ -44,42 +45,63 @@ class DBManager:
           INSERT INTO documents (doc_id, source_type, source_uri, sir_json, extracted_at)
           VALUES ($1, $2, $3, $4::jsonb, $5)
           ON CONFLICT (doc_id) DO NOTHING
+
+          - doc_id: str(doc.doc_id)
+          - source_type: doc.source_type.value
+          - sir_json: doc.model_dump_json() 또는 json.dumps
+          - 비동기 세션 사용 (async with self.AsyncSession() as session)
         """
         logger.warning(f"DB 저장 stub: doc {doc.doc_id}")
 
     async def save_claims(self, claims: list[Claim], domain: str = None) -> None:
-        # [v2] - 박재윤: 매번 새 연결 (long-running 연결 끊김 방지)
+        # [v3] - 박재윤: 매번 새 연결 + 재실행 시 기존 데이터 삭제 후 재삽입
         conn = self._get_conn()
         cur = conn.cursor()
-        for claim in claims:
+
+        if claims:
+            request_id = str(claims[0].doc_id)
+            # 기존 claims 삭제 (재실행 시 중복 방지)
+            cur.execute("DELETE FROM claims WHERE request_id = %s", (request_id,))
+            # requests 테이블 INSERT
             cur.execute(
                 "INSERT INTO requests (request_id, domain, submitted_at) VALUES (%s, %s, NOW()) ON CONFLICT (request_id) DO NOTHING",
-                (str(claim.doc_id), domain)
+                (request_id, domain)
             )
+
+        for claim in claims:
             indicator = claim.schema.indicator if claim.schema else None
             value     = claim.schema.value     if claim.schema else None
             unit      = claim.schema.unit      if claim.schema else None
             time_ref  = claim.schema.time_period if claim.schema else None
+
             cur.execute("""
                 INSERT INTO claims (claim_id, request_id, field_name, field_value,
                                   unit, is_approximate, modifier, parent_path,
                                   time_reference, context)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (claim_id) DO NOTHING
             """, (
                 str(claim.claim_id), str(claim.doc_id),
                 indicator, value, unit,
                 False, None, None,
                 time_ref, claim.claim_text
             ))
+
         conn.commit()
         cur.close()
         conn.close()
+        logger.info(f"Claims 저장 완료: {len(claims)}건")
 
     async def save_results(self, results: list[VerificationResult], claims: list[Claim] = None) -> None:
-        # [v2] - 박재윤: 매번 새 연결 (long-running 연결 끊김 방지)
+        # [v3] - 박재윤: 매번 새 연결 + 재실행 시 기존 데이터 삭제 후 재삽입
         conn = self._get_conn()
         cur = conn.cursor()
+
+        if results:
+            # 기존 results 삭제 (재실행 시 중복 방지)
+            claim_ids = [str(r.claim_id) for r in results]
+            cur.execute(
+                "DELETE FROM results WHERE claim_id = ANY(%s)", (claim_ids,)
+            )
 
         claim_value_map = {}
         if claims:
@@ -101,7 +123,6 @@ class DBManager:
                                     claimed_value, true_value, deviation,
                                     match_status, reason, explanation, judged_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (result_id) DO NOTHING
             """, (
                 str(result.result_id),
                 str(result.claim_id),
