@@ -54,10 +54,14 @@ from structverify.graph.graph_builder import build_claim_graph
 from structverify.graph.document_graph import build_document_temporal_graph
 from structverify.graph.claim_graph import ClaimGraph
 from structverify.retrieval.query_builder import build_query
-from structverify.retrieval.evidence_subgraph import build_evidence_subgraph
+from structverify.retrieval.evidence_subgraph import (
+    build_evidence_subgraph, build_evidence_subgraph_for_plan,
+)
 from structverify.retrieval.kosis_connector import KOSISConnector
 from structverify.verification.verifier import verify_claim
+from structverify.verification.evidence_check import check_evidence_relevance
 from structverify.explanation.explainer import generate_explanation
+from structverify.core.memory import DocumentMemory  # [v6.4 추가]
 from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -101,6 +105,11 @@ class RuntimeAgent:
         self.config["detected_domain_desc"] = domain_desc
         logger.info(f"[Agent A] Step 3 classify_domain → {domain} ({domain_desc})")
 
+        # [v6.4 추가] 문서 단위 작업 기억 — 이 process() 호출 동안만 유효
+        # claim 간 컨텍스트 공유 + KOSIS 표 캐싱 + indicator → stat_id 매핑
+        memory = DocumentMemory()
+        logger.info(f"[Agent A] DocumentMemory 초기화")
+
         # ── Action: detect_claims ────────────────────────────────────
         # [4-1] candidate_scorer: HCX-DASH-002 (v3, 경량) → 0~1 점수
         # [4-2] claim_detector:   HCX-003 (v1, 중량) → check-worthiness
@@ -143,7 +152,10 @@ class RuntimeAgent:
         # Tool: HCX-007 Structured Outputs (v3 API)
         # [v6] graph 전달 → "작년" 같은 표현이 그래프에서 "2023"으로 resolved
         #     되어 prompt hint로 들어감. LLM은 그걸 그대로 time_period에 사용.
-        claims = await induce_schemas(claims, self.config, graph=pre_graph)
+        # [v6.4 추가] memory 전달 → 이전 claim들의 schema/plan을 prompt에 컨텍스트 주입
+        claims = await induce_schemas(
+            claims, self.config, graph=pre_graph, memory=memory,
+        )
         logger.info(f"[Agent A] Step 5 induce_schemas → schemas attached")
 
         # ── Action: build_claim_graph ────────────────────────────────
@@ -170,16 +182,71 @@ class RuntimeAgent:
             # TODO [신준수]: kosis_connector.py 실제 HTTP 호출 구현
             # TODO [신준수]: query_builder.py ClaimSchema → KOSIS 파라미터 변환
             query = build_query(claim)
-            evidence, ev_nodes, ev_edges = await build_evidence_subgraph(
-                self.kosis, query, claim_nid,
-            )
+
+            # ── [v6.3] Step 7: plan-aware retrieval ─────────────────────
+            # claim.schema.evidence_plan에 따라 1~2개 evidence를 가져옴.
+            # measurement → 1개, delta/ratio → 2개 (같은 통계표 시점만 변경)
+            plan = claim.schema.evidence_plan if claim.schema else None
+            evidences: list = []
+            evidence = None  # primary evidence (하위 호환)
+            ev_nodes: list = []
+            ev_edges: list = []
+
+            if plan is not None and plan.requirements:
+                evidences, ev_nodes, ev_edges = await build_evidence_subgraph_for_plan(
+                    self.kosis, query, plan, claim_nid, memory=memory,  # [v6.4 추가]
+                )
+                if evidences:
+                    evidence = next(
+                        (e for e in evidences if e.requirement_role in ("primary", "endpoint_a")),
+                        evidences[0],
+                    )
+
+            # [v6.3.1] plan 기반 조회가 비어있으면 단일 fallback 시도
+            # — anchor 시점이 너무 구체적이거나 KOSIS 데이터 부재로 실패한 경우
+            # — 단일 evidence라도 가져와야 partial verification 가능
+            if not evidences:
+                if plan is not None and plan.requirements:
+                    logger.info(
+                        f"[Agent A] Step 7 plan-fetch 실패 → 단일 fallback 시도"
+                    )
+                evidence, ev_nodes, ev_edges = await build_evidence_subgraph(
+                    self.kosis, query, claim_nid, memory=memory,  # [v6.4 추가]
+                )
+                if evidence:
+                    evidences = [evidence]
+
             all_nodes.extend(ev_nodes)
             all_edges.extend(ev_edges)
-            logger.info(f"[Agent A] Step 7 retrieve_evidence → {str(evidence)[:80] if evidence else None}")
+            logger.info(
+                f"[Agent A] Step 7 retrieve_evidence → "
+                f"{len(evidences)}개 evidence "
+                f"(plan_combiner={plan.combiner if plan else 'none'})"
+            )
+
+            # ── [v6.2] Step 7.5: evidence relevance check (LLM 1회) ──────
+            # plan의 첫 번째(anchor) evidence만 검증 — 같은 표에서 가져온
+            # 나머지 endpoint는 자동으로 동일 의미.
+            if evidence is not None:
+                is_relevant, reason = await check_evidence_relevance(
+                    claim, evidence, self.config,
+                )
+                if not is_relevant:
+                    logger.info(
+                        f"[Agent A] Step 7.5 evidence 무관 → discard: "
+                        f"[{evidence.stat_table_id}] {evidence.source_name} | {reason}"
+                    )
+                    evidence = None
+                    evidences = []
+                else:
+                    logger.debug(f"[Agent A] Step 7.5 evidence 통과 | {reason}")
+
             # Action: verify_claim (Deterministic, LLM 미개입)
-            # [v6] graph 전달 → schema.time_period가 "작년"이어도
-            #      그래프에서 멀티홉 traverse로 "2023" 찾아서 KOSIS row 매칭
-            result = verify_claim(claim, evidence, self.config, graph=full_graph)
+            # [v6.3] evidences(list) 전달 → combiner 분기로 delta/ratio 검증 가능
+            result = verify_claim(
+                claim, evidence, self.config,
+                graph=full_graph, evidences=evidences,
+            )
             logger.info(f"[Agent A] Step 8 verify_claim → {result.verdict.value}")
 
             # Action: generate_explanation (LLM)
@@ -189,9 +256,36 @@ class RuntimeAgent:
             result.explanation = await generate_explanation(claim, result, self.config)
             logger.info(f"[Agent A] Step 9 generate_explanation → {len(result.explanation or '')}자")
 
+            # [v6.4 추가] 이 claim 처리 결과를 memory에 반영
+            # schema_inductor에서 이미 memo append 했음 — 여기선 verdict/stat_id/계산값 보강
+            if memory.processed_claims and memory.processed_claims[-1].sent_id == claim.sent_id:
+                last_memo = memory.processed_claims[-1]
+                last_memo.verdict = result.verdict.value
+                if evidence is not None:
+                    last_memo.evidence_stat_id = evidence.stat_table_id
+                    if last_memo.indicator and evidence.stat_table_id:
+                        memory.last_stat_for_indicator[last_memo.indicator] = evidence.stat_table_id
+                # [v6.4] 계산값과 endpoint 값 보관 — 다음 claim이 "이는"으로 참조 가능
+                if result.computed_value is not None:
+                    last_memo.computed_value = result.computed_value
+                if len(evidences) >= 2:
+                    ep_a = next(
+                        (e for e in evidences if e.requirement_role == "endpoint_a"),
+                        None,
+                    )
+                    ep_b = next(
+                        (e for e in evidences if e.requirement_role == "endpoint_b"),
+                        None,
+                    )
+                    if ep_a:
+                        last_memo.endpoint_a_value = ep_a.official_value
+                    if ep_b:
+                        last_memo.endpoint_b_value = ep_b.official_value
+
             results.append(result)
 
-        logger.info(f"[Agent A] 완료: claims={len(claims)}, results={len(results)}, "
+        logger.info(f"[Agent A] 완료: {memory.summary()} | "
+                    f"claims={len(claims)}, results={len(results)}, "
                     f"nodes={len(all_nodes)}, edges={len(all_edges)}")
         return claims, results, all_nodes, all_edges
 

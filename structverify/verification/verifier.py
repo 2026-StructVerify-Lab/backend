@@ -34,7 +34,10 @@ from __future__ import annotations
 import re
 
 from structverify.core.schemas import (
-    Claim, Evidence, VerificationResult, VerdictType, MismatchType)
+    Claim, Evidence, VerificationResult, VerdictType, MismatchType, ValueRole)
+from structverify.verification.combiners import (
+    combine, COMBINER_DIRECT, COMBINER_DELTA, COMBINER_RATIO_PCT,
+)
 from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -110,21 +113,71 @@ def _extract_numeric_values(rows: list[dict]) -> list[dict]:
     return values
 
 
+# [v6.2] row 컨텍스트 토큰 추출용 컬럼 — KOSIS 표준 분류 컬럼들
+_ROW_CONTEXT_COLUMNS = ("C1_NM", "C2_NM", "C3_NM", "C4_NM", "ITM_NM")
+
+# 광역시도 레퍼런스 — claim이 "전국"이면 이 중 하나가 row.C1_NM에 있을 때 부적합
+_SIDO_TOKENS = (
+    "서울", "부산", "대구", "인천", "광주", "대전", "울산", "세종",
+    "경기", "강원", "충북", "충남", "전북", "전남", "경북", "경남", "제주",
+)
+_GLOBAL_POPULATION_TOKENS = ("전국", "대한민국", "한국", "전체", "전 국민", "국내")
+
+
+def _row_population_compatible(raw_row: dict, claim_population: str | None) -> bool:
+    """
+    [v6.2] row의 지역 컨텍스트와 claim의 population이 호환되는지.
+
+    명백한 충돌만 잡음:
+      - claim="전국/한국/전체" + row.C1_NM이 특정 시도 → 부적합
+      - 그 외 모든 케이스(정보 부족 등)는 통과
+
+    이건 도메인 룰이 아니라 일반적 컨텍스트 매칭. KOSIS 표는 시도별 row가
+    섞여 있는 경우가 많아 best 매칭이 우연히 같은 값을 찾는 가짜 match를 차단.
+    """
+    if not claim_population:
+        return True
+    region = (raw_row.get("C1_NM") or "").strip()
+    if not region:
+        return True
+
+    pop = claim_population.lower()
+    rg = region.lower()
+
+    is_claim_global = any(tok in pop for tok in _GLOBAL_POPULATION_TOKENS)
+    is_row_sido = any(tok in rg for tok in _SIDO_TOKENS)
+
+    if is_claim_global and is_row_sido:
+        return False  # 전국 vs 특정 시도 → 차단
+
+    # 역방향: claim에 특정 시도가 있는데 row가 다른 시도 → 부적합
+    claim_sidos = [tok for tok in _SIDO_TOKENS if tok in pop]
+    if claim_sidos and is_row_sido:
+        if not any(tok in rg for tok in claim_sidos):
+            return False  # claim="서울" + row="부산" → 차단
+
+    return True
+
+
 def _find_best_match(
     claimed: float,
     claim_unit: str,
     claim_year: str | None,
     kosis_values: list[dict],
+    claim_population: str | None = None,
 ) -> tuple[dict | None, float]:
     """
     KOSIS 전체 행에서 claim과 가장 가까운 값 탐색.
-    factcheck_test.py v7 numeric_check 로직 그대로.
+
+    [v6.2] claim_population을 받아 row의 지역 컨텍스트 호환성 체크 추가.
+           "전국" claim에 시도별 row가 매칭되는 가짜 match 차단.
 
     Returns:
         (best_match_dict, best_error_rate)
     """
     best_match = None
     best_error = float("inf")
+    skipped_ctx = 0
 
     for kv in kosis_values:
         # 연도 ±2년 필터
@@ -144,10 +197,18 @@ def _find_best_match(
         if not is_same_unit_type(claim_unit, kv["unit"]):
             continue
 
+        # [v6.2] row 컨텍스트 호환성 체크
+        if not _row_population_compatible(kv.get("raw", {}), claim_population):
+            skipped_ctx += 1
+            continue
+
         error_rate = abs(normalized - claimed) / max(abs(claimed), 1)
         if error_rate < best_error:
             best_error = error_rate
             best_match = {**kv, "normalized": normalized, "error_rate": error_rate}
+
+    if skipped_ctx:
+        logger.debug(f"_find_best_match: 컨텍스트 충돌로 {skipped_ctx}개 row 제외")
 
     return best_match, best_error
 
@@ -156,35 +217,181 @@ def _find_best_match(
 
 def verify_claim(claim: Claim, evidence: Evidence | None,
                  config: dict | None = None,
-                 graph: "ClaimGraph | None" = None) -> VerificationResult:
+                 graph: "ClaimGraph | None" = None,
+                 evidences: list[Evidence] | None = None) -> VerificationResult:
     """
     공식 통계와 기사 수치를 비교하여 판정 (LLM 미사용).
 
     [v3] factcheck_test.py v7 로직 전면 반영
     [v6 멀티홉] graph가 있으면 claim의 시점을 그래프에서 resolved된 절대 시점으로
-                보정하여 KOSIS row 매칭에 사용. claim.schema.time_period가
-                "작년" 같은 상대 표현이어도 그래프 traverse로 2023이 나옴.
+                보정하여 KOSIS row 매칭에 사용.
+    [v6.3] evidences 인자(list) 지원 — delta/ratio 검증을 위한 multi-evidence.
+            value_role이 measurement면 evidences[0] 또는 evidence를 사용 (호환).
+            delta/ratio이면 combiner로 결합.
     """
+    config = config or {}
+
+    # evidences 정규화: list 우선, 없으면 단일 evidence를 list로 wrap
+    if evidences is None:
+        evidences = [evidence] if evidence is not None else []
+    elif evidence is None and evidences:
+        # 호환성: primary/endpoint_a evidence를 단일 evidence 슬롯에도 넣기
+        evidence = next(
+            (e for e in evidences if e.requirement_role in ("primary", "endpoint_a")),
+            evidences[0],
+        )
+
+    # ── [v6.3] value_role/combiner 기반 분기 ────────────────────────────
+    schema = claim.schema
+    value_role = schema.value_role if schema else ValueRole.MEASUREMENT
+    plan = schema.evidence_plan if schema else None
+    combiner_name = (plan.combiner if plan else None) or COMBINER_DIRECT
+
+    # threshold/rank/none 등 검증 부적합 케이스
+    if value_role in (ValueRole.THRESHOLD, ValueRole.RANK, ValueRole.NONE):
+        logger.info(
+            f"value_role={value_role.value} → KOSIS 직접 비교 제외 "
+            f"(claim={claim.sent_id})"
+        )
+        return VerificationResult(
+            claim_id=claim.claim_id,
+            verdict=VerdictType.UNVERIFIABLE,
+            confidence=0.5,
+            evidence=evidence,
+            supplementary_evidences=list(evidences),
+            combiner_used=combiner_name,
+        )
+
+    # delta/ratio: combiner 분기
+    if combiner_name in (COMBINER_DELTA, COMBINER_RATIO_PCT):
+        return _verify_with_combiner(
+            claim, evidences, combiner_name, evidence,
+        )
+
+    # 그 외 (measurement / direct): 기존 단일 evidence 비교 로직
+    return _verify_direct(claim, evidence, evidences, combiner_name, graph=graph, config=config)
+
+
+def _verify_with_combiner(
+    claim: Claim,
+    evidences: list[Evidence],
+    combiner_name: str,
+    primary_evidence: Evidence | None,
+) -> VerificationResult:
+    """
+    [v6.3] delta/ratio 검증.
+
+    1. evidences를 combiner로 결합 → computed_value
+    2. computed_value vs claim.schema.value 비교
+    3. 오차에 따라 verdict 결정 (단일 비교와 동일한 임계)
+    """
+    schema = claim.schema
+    if schema is None or schema.value is None:
+        return VerificationResult(
+            claim_id=claim.claim_id, verdict=VerdictType.UNVERIFIABLE,
+            confidence=0.2, evidence=primary_evidence,
+            supplementary_evidences=list(evidences),
+            combiner_used=combiner_name,
+        )
+
+    # endpoint 부족 → 검증 불가
+    if len(evidences) < 2:
+        logger.info(
+            f"combiner={combiner_name}: evidence {len(evidences)}개 — 2개 필요 "
+            f"→ unverifiable (claim={claim.sent_id})"
+        )
+        return VerificationResult(
+            claim_id=claim.claim_id, verdict=VerdictType.UNVERIFIABLE,
+            confidence=0.3, evidence=primary_evidence,
+            supplementary_evidences=list(evidences),
+            combiner_used=combiner_name,
+        )
+
+    computed, formula = combine(combiner_name, evidences)
+    if computed is None:
+        logger.warning(f"combiner={combiner_name} 결합 실패: {formula}")
+        return VerificationResult(
+            claim_id=claim.claim_id, verdict=VerdictType.UNVERIFIABLE,
+            confidence=0.3, evidence=primary_evidence,
+            supplementary_evidences=list(evidences),
+            combiner_used=combiner_name,
+        )
+
+    claimed = float(schema.value)
+
+    # 오차율 (절대값 + 0 division 회피)
+    denom = max(abs(claimed), abs(computed), 1e-6)
+    error_rate = abs(computed - claimed) / denom
+
+    logger.info(
+        f"[combiner] {combiner_name}: claimed={claimed} computed={computed:+.4g} "
+        f"오차={error_rate*100:.1f}% formula={formula}"
+    )
+
+    # 임계 (단일 비교와 동일)
+    if error_rate <= 0.10:
+        verdict = VerdictType.MATCH
+        confidence = 0.95 - error_rate
+    elif error_rate <= 0.30:
+        verdict = VerdictType.UNVERIFIABLE
+        confidence = 0.5
+    elif error_rate <= 0.90:
+        verdict = VerdictType.MISMATCH
+        confidence = min(0.95, 0.5 + error_rate / 2)
+    else:
+        verdict = VerdictType.UNVERIFIABLE
+        confidence = 0.3
+
+    return VerificationResult(
+        claim_id=claim.claim_id,
+        verdict=verdict,
+        confidence=confidence,
+        evidence=primary_evidence,
+        supplementary_evidences=list(evidences),
+        computed_value=computed,
+        combiner_used=combiner_name,
+        mismatch_type=MismatchType.VALUE if verdict == VerdictType.MISMATCH else None,
+    )
+
+
+def _verify_direct(
+    claim: Claim,
+    evidence: Evidence | None,
+    evidences: list[Evidence],
+    combiner_name: str,
+    graph: "ClaimGraph | None" = None,
+    config: dict | None = None,
+) -> VerificationResult:
+    """기존 단일 evidence 비교 로직 (measurement/direct)."""
     config = config or {}
 
     # evidence 없음
     if evidence is None or evidence.official_value is None:
         return VerificationResult(
             claim_id=claim.claim_id, verdict=VerdictType.UNVERIFIABLE,
-            confidence=0.3, evidence=evidence)
+            confidence=0.3, evidence=evidence,
+            supplementary_evidences=list(evidences),
+            combiner_used=combiner_name,
+        )
 
     # claim schema 없음
     claimed = claim.schema.value if claim.schema else None
     if claimed is None:
         return VerificationResult(
             claim_id=claim.claim_id, verdict=VerdictType.UNVERIFIABLE,
-            confidence=0.2, evidence=evidence)
+            confidence=0.2, evidence=evidence,
+            supplementary_evidences=list(evidences),
+            combiner_used=combiner_name,
+        )
 
     # value=0.0 → 수치 미추출
     if claimed == 0.0:
         return VerificationResult(
             claim_id=claim.claim_id, verdict=VerdictType.UNVERIFIABLE,
-            confidence=0.2, evidence=evidence)
+            confidence=0.2, evidence=evidence,
+            supplementary_evidences=list(evidences),
+            combiner_used=combiner_name,
+        )
 
     claim_unit = (claim.schema.unit or "") if claim.schema else ""
 
@@ -212,8 +419,11 @@ def verify_claim(claim: Claim, evidence: Evidence | None,
     if isinstance(rows, list) and rows:
         kosis_values = _extract_numeric_values(rows)
         if kosis_values:
+            # [v6.2] claim_population 전달 → 전국 vs 시도 충돌 row 제외
+            claim_population = (claim.schema.population if claim.schema else None)
             best_match, best_error = _find_best_match(
-                claimed, claim_unit, claim_year, kosis_values
+                claimed, claim_unit, claim_year, kosis_values,
+                claim_population=claim_population,
             )
 
             if best_match is None:

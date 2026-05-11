@@ -41,10 +41,41 @@ def build_query(claim: Claim) -> ConnectorQuery:
     parts = [p for p in [s.source_reference, s.indicator, s.population] if p]
     keyword = " ".join(parts) or claim.claim_text[:50]
 
-    # embedding_text: indicator + population + time_period
-    # pgvector 유사도 검색에 사용 (source_reference 제외 — 기관명 편향 방지)
-    emb_parts = [p for p in [s.indicator, s.population, s.time_period] if p]
-    embedding_text = " ".join(emb_parts) or keyword
+    # [v6.6 변경] embedding_text를 박재윤 factcheck_test.py v6 포맷에 맞춤
+    # KOSIS 카탈로그가 인덱싱된 포맷과 매칭되어야 임베딩 거리가 작아짐:
+    #   "{categories} > {indicator} | 항목: {indicator} | 분류: {kw} | 단위: {unit}"
+    # 단, build_query 시점에는 category_keywords가 없음 (catalog_search 내부 LLM이 추출).
+    # 그러므로 여기서는 base_text만 넘기고, catalog_search가 cats를 prepend 함.
+    indicator = s.indicator or ""
+    unit = s.unit or ""
+    population = s.population or ""
+
+    # [v6.8 추가] 단위 정규화 — KOSIS 카탈로그가 인덱싱될 때 사용한 표기에 맞춤
+    # 예: KOSIS 데이터에는 "℃"로 인덱싱되어 있는데 우리 claim 단위는 "도"라고 박혀있어서
+    # 임베딩 거리가 멀어짐. 의미상 동일한 단위는 KOSIS 표기로 변환.
+    # 이건 룰 기반이지만 *단위 명칭 표기* 매핑일 뿐 indicator 매핑 아님.
+    _UNIT_NORMALIZE = {
+        "도":   "℃",
+        "℃":   "℃",
+        "도씨": "℃",
+        "퍼센트": "%",
+        "%":    "%",
+        "프로":  "%",
+        "위안":  "위안",
+        "엔":   "엔",
+        "달러":  "달러",
+    }
+    unit_normalized = _UNIT_NORMALIZE.get(unit, unit)
+
+    embedding_text = (
+        f"{indicator} {population} "
+        f"| 항목: {indicator} "
+        f"| 단위: {unit_normalized}"
+    ).strip()
+
+    # [v6.5 기존 — 비교용으로 주석 보존]
+    # emb_parts = [p for p in [s.indicator, s.population, s.time_period] if p]
+    # embedding_text = " ".join(emb_parts) or keyword
 
     return ConnectorQuery(
         keyword=keyword,
@@ -56,5 +87,9 @@ def build_query(claim: Claim) -> ConnectorQuery:
             "embedding_text": embedding_text,
             # source_reference가 있으면 KOSIS org_name 필터로 활용
             "source_org":     s.source_reference,
+            # [v6.6 추가] unit을 명시적으로 보관 — catalog_search에서 임베딩 텍스트 강화 시 활용
+            # [v6.8 변경] 정규화된 단위 저장
+            "unit":           unit_normalized,
+            "unit_raw":       unit,
         },
     )

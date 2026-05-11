@@ -53,20 +53,28 @@ MISMATCH_PROMPT = """당신은 팩트체크 전문 작가입니다.
 
 [판정: 불일치 (MISMATCH) — 기사 수치와 공식 수치가 다릅니다.]
 주장: "{claim_text}"
+주장 지표: {claim_indicator} ({claim_population})
 기사 수치: {claimed_value} {unit}
+
+근거 통계명: {stat_source}
 공식 수치: {official_value} {unit}
 차이: {diff} {unit} ({diff_pct:.1f}%)
 불일치 유형: {mismatch_reason}
 신뢰도: {confidence:.0%}
-근거 통계: {stat_source}
 출처: {provenance}
 
+[중요 — 의미 비교 우선]
+- 주장 지표("{claim_indicator}")와 근거 통계명("{stat_source}")이 의미상
+  같은 것을 측정하는지 먼저 판단하세요.
+- 의미가 다르면(예: "평균기온" vs "기온 변화 폭", "실업률" vs "실업자 수") 단정적
+  표현을 쓰지 말고, "직접 비교가 어렵다"거나 "다른 지표라 검증이 부족하다"고
+  쓰세요. "실제로는 X로 확인되었다"는 표현 금지.
+
 [작성 규칙]
-- 3~4문장으로 작성
-- 기사 수치({claimed_value})와 공식 수치({official_value})를 반드시 정확히 인용
-- 위에 적힌 수치만 사용하세요. 새로운 수치를 만들어내지 마세요.
-- 불일치 유형({mismatch_reason})에 맞는 원인 설명 포함
-- KOSIS 출처 포함"""
+- 3~4문장
+- 기사 수치({claimed_value})와 공식 수치({official_value}) 정확히 인용
+- 새로운 수치 생성 금지
+- 출처는 통계명을 그대로 인용 ("{stat_source}")"""
 
 UNVERIFIABLE_PROMPT = """당신은 팩트체크 전문 작가입니다.
 아래 검증 결과를 독자가 이해하기 쉽게 한국어로 설명하세요.
@@ -82,6 +90,54 @@ UNVERIFIABLE_PROMPT = """당신은 팩트체크 전문 작가입니다.
 - 왜 공식 통계를 찾지 못했는지만 설명
 - 독자가 직접 KOSIS에서 확인할 방법 제시
 - 수치를 새로 만들어내지 마세요. "100.0°C" 같은 거짓 수치 생성 금지"""
+
+
+# [v6.3] 멀티-에비던스 (delta/ratio) 전용 프롬프트
+MATCH_COMBINED_PROMPT = """당신은 팩트체크 전문 작가입니다.
+아래 검증 결과를 독자가 이해하기 쉽게 한국어로 설명하세요.
+
+[판정: ✅ 일치 (MATCH) — 이 판정은 확정입니다.]
+주장: "{claim_text}"
+기사 수치: {claimed_value} {unit} ({combiner_label})
+
+근거 통계: {stat_source}
+시점별 공식 수치:
+{endpoints_block}
+
+KOSIS 데이터로 계산한 값: {computed_value} {unit}
+오차: {diff_pct:.1f}%
+신뢰도: {confidence:.0%}
+출처: {provenance}
+
+[작성 규칙]
+- 2~3문장
+- 두 시점의 공식 수치를 모두 언급한 뒤 계산값과 기사 수치를 비교
+- "사실입니다", "확인됩니다" 등 긍정적 표현 사용
+- 새로운 수치 생성 금지"""
+
+
+MISMATCH_COMBINED_PROMPT = """당신은 팩트체크 전문 작가입니다.
+아래 검증 결과를 독자가 이해하기 쉽게 한국어로 설명하세요.
+
+[판정: 불일치 (MISMATCH) — 기사가 주장한 {combiner_label}와 KOSIS 계산값이 다릅니다.]
+주장: "{claim_text}"
+주장 지표: {claim_indicator} ({claim_population})
+기사 수치: {claimed_value} {unit}
+
+근거 통계: {stat_source}
+시점별 공식 수치:
+{endpoints_block}
+
+KOSIS 데이터로 계산한 값: {computed_value} {unit}
+차이: {diff} {unit} ({diff_pct:.1f}%)
+신뢰도: {confidence:.0%}
+출처: {provenance}
+
+[작성 규칙]
+- 3~4문장
+- 두 시점의 공식 수치를 명시 → 계산값 → 기사 수치 순으로 비교
+- 새로운 수치 생성 금지
+- 출처 통계명을 그대로 인용"""
 
 
 # ── 메인 함수 ─────────────────────────────────────────────────────────────
@@ -147,6 +203,18 @@ def _build_prompt(
 
     claimed_value = schema.value if schema and schema.value is not None else "N/A"
     unit = schema.unit or "" if schema else ""
+
+    # ── [v6.3] 멀티-에비던스 (delta/ratio) 분기 ──────────────────────────
+    # combiner가 direct가 아니면 computed_value와 시점별 evidence를 같이 보여줌
+    is_combined = (
+        result.combiner_used in ("delta", "ratio_pct")
+        and result.computed_value is not None
+        and len(result.supplementary_evidences) >= 2
+    )
+    if is_combined and result.verdict in (VerdictType.MATCH, VerdictType.MISMATCH):
+        return _build_combined_prompt(claim, result, prov_text)
+
+    # ── 기존 단일 evidence 경로 ────────────────────────────────────────
     official_value = ev.official_value if ev and ev.official_value is not None else "N/A"
     stat_source = _format_stat_source(ev)
 
@@ -167,8 +235,13 @@ def _build_prompt(
         diff_pct = _calc_diff_pct(claimed_value, official_value)
         diff = _calc_diff(claimed_value, official_value)
         mismatch_reason = _mismatch_reason_text(result.mismatch_type)
+        # [v6.2] claim 지표/대상 prompt에 추가 → LLM이 evidence와 의미 비교 가능
+        claim_indicator = (claim.schema.indicator if claim.schema else None) or "?"
+        claim_population = (claim.schema.population if claim.schema else None) or "?"
         return MISMATCH_PROMPT.format(
             claim_text=claim.claim_text,
+            claim_indicator=claim_indicator,
+            claim_population=claim_population,
             claimed_value=claimed_value,
             official_value=official_value,
             unit=unit,
@@ -187,6 +260,80 @@ def _build_prompt(
             claim_text=claim.claim_text,
             reason=reason,
             search_hint=search_hint,
+        )
+
+
+# [v6.3] 멀티-에비던스용 prompt 빌더
+def _build_combined_prompt(
+    claim: Claim,
+    result: VerificationResult,
+    prov_text: str,
+) -> str:
+    """delta/ratio 검증 결과를 위한 prompt 생성."""
+    schema = claim.schema
+    claimed_value = schema.value if schema and schema.value is not None else "N/A"
+    unit = schema.unit or "" if schema else ""
+    computed = result.computed_value if result.computed_value is not None else 0.0
+
+    combiner_label = {
+        "delta": "차이값",
+        "ratio_pct": "증가율(%)",
+    }.get(result.combiner_used or "", result.combiner_used or "")
+
+    # 시점별 공식 수치 블록 생성
+    endpoints_lines = []
+    for ev in result.supplementary_evidences:
+        label = ev.requirement_label or ev.requirement_role or "?"
+        time = ev.time_period or "?"
+        val = ev.official_value if ev.official_value is not None else "N/A"
+        ev_unit = ev.unit or ""
+        endpoints_lines.append(f"  - {label} ({time}): {val} {ev_unit}")
+    endpoints_block = "\n".join(endpoints_lines) if endpoints_lines else "  (시점별 데이터 없음)"
+
+    # 대표 stat_source — 모든 evidence가 같은 표에서 왔으므로 첫 번째로 충분
+    primary_ev = result.evidence or (
+        result.supplementary_evidences[0] if result.supplementary_evidences else None
+    )
+    stat_source = _format_stat_source(primary_ev)
+
+    try:
+        claimed_num = float(claimed_value) if claimed_value != "N/A" else 0.0
+    except (TypeError, ValueError):
+        claimed_num = 0.0
+    diff = computed - claimed_num
+    denom = max(abs(claimed_num), abs(computed), 1e-6)
+    diff_pct = abs(diff) / denom * 100
+
+    if result.verdict == VerdictType.MATCH:
+        return MATCH_COMBINED_PROMPT.format(
+            claim_text=claim.claim_text,
+            claimed_value=claimed_value,
+            unit=unit,
+            combiner_label=combiner_label,
+            stat_source=stat_source,
+            endpoints_block=endpoints_block,
+            computed_value=f"{computed:+.3f}" if combiner_label == "차이값" else f"{computed:.3f}",
+            diff_pct=diff_pct,
+            confidence=result.confidence,
+            provenance=prov_text,
+        )
+    else:  # MISMATCH
+        claim_indicator = (claim.schema.indicator if claim.schema else None) or "?"
+        claim_population = (claim.schema.population if claim.schema else None) or "?"
+        return MISMATCH_COMBINED_PROMPT.format(
+            claim_text=claim.claim_text,
+            claim_indicator=claim_indicator,
+            claim_population=claim_population,
+            claimed_value=claimed_value,
+            unit=unit,
+            combiner_label=combiner_label,
+            stat_source=stat_source,
+            endpoints_block=endpoints_block,
+            computed_value=f"{computed:+.3f}" if combiner_label == "차이값" else f"{computed:.3f}",
+            diff=f"{diff:+.3f}",
+            diff_pct=diff_pct,
+            confidence=result.confidence,
+            provenance=prov_text,
         )
 
 

@@ -1,0 +1,119 @@
+{
+  "domain": "population",
+  "anchor_year": 2024,
+  "graph_stats": {
+    "nodes": 29,
+    "edges": 41,
+    "node_types": {
+      "claim": 5,
+      "metric": 3,
+      "time": 2,
+      "entity": 1,
+      "source": 9,
+      "document": 1,
+      "temporal_expr": 2,
+      "resolved_time": 2,
+      "evidence": 4
+    }
+  },
+  "verdict_distribution": {
+    "unverifiable": 5
+  },
+  "results": [
+    {
+      "sent_id": "b0000_s0000",
+      "claim_text": "# 10월 출생아 수, 34년 만에 최대 증가…혼인도 6년 만에 최고치",
+      "schema": {
+        "indicator": "출생아 수",
+        "value": 34.0,
+        "unit": null,
+        "time_period": "2024-10",
+        "population": "전국",
+        "source_reference": null
+      },
+      "graph_temporal": null,
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장인 \"# 10월 출생아 수, 34년 만에 최대 증가...혼인도 6년 만에 최고치\"와 관련된 공식 통계를 찾을 수 없었습니다. 이는 해당 주제와 관련된 통계 자료가 존재하지 않거나, 검색어가 정확하지 않아 원하는 정보를 얻지 못했을 가능성이 있습니다. \n\n따라서, 보다 정확한 사실 관계를 파악하기 위해서는 대한민국 통계청(KOSIS) 홈페이지에서 '출생아 수'나 '혼인 건수' 등의 키워드로 검색하여 최신 통계 자료를 확인해 보는 것이 좋습니다."
+    },
+    {
+      "sent_id": "b0002_s0000",
+      "claim_text": "코로나 이후 미뤘던 결혼 본격화\n“결혼·출산 환경 개선 지속 필요”\n[서울경제]\n올해 10월 출생아 수는 총 2만 1426명으로 지난해 같은 달(1만 8878명)보다 6.7% 늘었다.",
+      "schema": {
+        "indicator": "출생아 수",
+        "value": 6.7,
+        "unit": "명",
+        "time_period": "2024-10",
+        "population": "전국",
+        "source_reference": "서울경제"
+      },
+      "graph_temporal": null,
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장에 대한 공식 통계를 찾을 수 없어 검증이 불가능합니다. 이는 해당 기간의 출생아 수와 관련된 통계표를 KOSIS에서 발견하지 못했기 때문입니다. 따라서, 독자들은 직접 KOSIS 홈페이지에서 '출생아 수' 항목을 선택하여 원하는 기간의 통계를 찾아볼 수 있습니다."
+    },
+    {
+      "sent_id": "b0002_s0001",
+      "claim_text": "이는 1991년 4월(8.1%) 이후 34년 만에 가장 높은 증가율이다.",
+      "schema": {
+        "indicator": "출생아 수",
+        "value": 6.7,
+        "unit": "%",
+        "time_period": "2025-10",
+        "population": "전국",
+        "source_reference": "서울경제"
+      },
+      "graph_temporal": {
+        "expression": "1991년 4월",
+        "resolved": "1991-04",
+        "basis": "'1991년 4월'은 절대 표현이므로 그대로 사용함",
+        "via_coref": null
+      },
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장인 \"이는 1991년 4월(8.1%) 이후 34년 만에 가장 높은 증가율이다.\"라는 말을 검증하고자 했으나, 국가통계포털(KOSIS)에서 '출생아 수 전국 2025-10'이라는 검색어로는 관련 통계표를 찾을 수 없었습니다. 따라서 이 주장의 사실 여부를 판단할 수 없습니다. \n\n국가통계포털에서는 주제별, 기관별, 지역별 등 다양한 방식으로 통계 자료를 제공하고 있으니, 관심 있는 주제나 분야에 대해 검색해 보시면 필요한 정보를 찾으실 수 있습니다."
+    },
+    {
+      "sent_id": "b0002_s0002",
+      "claim_text": "올 10월 합계출산율도 0.76명으로 지난해 같은 달보다 0.04명 증가했다.",
+      "schema": {
+        "indicator": "합계출산율",
+        "value": 0.76,
+        "unit": null,
+        "time_period": "2024-10",
+        "population": "전국",
+        "source_reference": "서울경제"
+      },
+      "graph_temporal": null,
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장에 대한 공식 통계를 찾을 수 없어 검증이 불가능합니다. 이는 해당 기간의 '합계출산율 전국' 통계표가 KOSIS에 존재하지 않기 때문입니다. 따라서, 독자들은 직접 KOSIS(국가통계포털) 사이트에서 원하는 기간의 자료를 찾아보시기 바랍니다."
+    },
+    {
+      "sent_id": "b0002_s0003",
+      "claim_text": "올 10월 혼인 건수는 1만 7921건으로 전년보다 3.9% 증가했다.",
+      "schema": {
+        "indicator": "혼인 건수",
+        "value": 3.9,
+        "unit": "%",
+        "time_period": "2024-10",
+        "population": "전국",
+        "source_reference": null
+      },
+      "graph_temporal": null,
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장에 대한 공식 통계를 찾을 수 없어 검증이 불가능합니다. 이는 해당 기간의 혼인 건수와 관련된 통계 자료가 존재하지 않거나, 검색어가 정확하지 않아 원하는 정보를 얻지 못했을 가능성이 있습니다. \n\n통계청 국가통계포털(KOSIS)에서 '혼인 건수' 항목을 선택하신 후, 시도별/성별 등 다양한 조건을 설정하여 원하시는 통계를 찾아보시기 바랍니다. 만약 그래도 찾으시는 통계를 발견하지 못하신다면, 추가적인 도움을 드리기 위해 문의해 주세요."
+    }
+  ]
+}

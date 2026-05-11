@@ -29,6 +29,7 @@ Runtime Agent와 Builder Agent가 공유하는 LLM 호출 인터페이스.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import uuid
@@ -43,6 +44,58 @@ logger = get_logger(__name__)
 # ── 엔드포인트 ────────────────────────────────────────────────────────────
 HCX_V1_BASE = "https://clovastudio.stream.ntruss.com/v1/chat-completions"
 HCX_V3_BASE = "https://clovastudio.stream.ntruss.com/v3/chat-completions"
+
+
+# ── [v6.2] 429 backoff 재시도 헬퍼 ──────────────────────────────────────────
+# HCX TPM 초과 시 자동 재시도. claim_detector가 동시에 26개 호출하면 429 빈발.
+# Retry-After 헤더 우선, 없으면 exponential backoff.
+
+_RATE_LIMIT_MAX_RETRIES = 4
+_RATE_LIMIT_BASE_DELAY = 1.5
+
+
+async def _post_with_backoff(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    json_payload: dict,
+    headers: dict,
+) -> httpx.Response:
+    """
+    HCX API POST + 429 자동 재시도.
+
+    재시도 정책:
+      - 429 발생 시 Retry-After 헤더 우선 (서버 지정 대기시간)
+      - 헤더 없으면 base * 2^attempt 만큼 대기
+      - 최대 _RATE_LIMIT_MAX_RETRIES회 재시도
+      - 다른 4xx/5xx는 즉시 raise
+    """
+    last_response: httpx.Response | None = None
+    for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
+        resp = await client.post(url, json=json_payload, headers=headers)
+        if resp.status_code != 429:
+            return resp
+
+        last_response = resp
+        if attempt == _RATE_LIMIT_MAX_RETRIES:
+            break
+
+        # Retry-After 헤더 (초 단위 또는 HTTP-date) — 초 단위만 처리
+        retry_after = resp.headers.get("Retry-After")
+        try:
+            delay = float(retry_after) if retry_after else _RATE_LIMIT_BASE_DELAY * (2 ** attempt)
+        except (ValueError, TypeError):
+            delay = _RATE_LIMIT_BASE_DELAY * (2 ** attempt)
+
+        logger.warning(
+            f"HCX 429 rate limit — {delay:.1f}초 후 재시도 "
+            f"(attempt {attempt + 1}/{_RATE_LIMIT_MAX_RETRIES})"
+        )
+        await asyncio.sleep(delay)
+
+    # 최대 재시도 후에도 429 → 마지막 응답 반환 (호출자가 raise_for_status로 처리)
+    assert last_response is not None
+    return last_response
 
 
 class LLMClient:
@@ -208,7 +261,7 @@ class LLMClient:
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(url, json=payload, headers=headers)
+                resp = await _post_with_backoff(client, url, json_payload=payload, headers=headers)
                 resp.raise_for_status()
                 data = resp.json()
             status_code = data.get("status", {}).get("code", "")
@@ -263,7 +316,7 @@ class LLMClient:
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(url, json=payload, headers=headers)
+                resp = await _post_with_backoff(client, url, json_payload=payload, headers=headers)
                 resp.raise_for_status()
                 data = resp.json()
             status_code = data.get("status", {}).get("code", "")
@@ -324,7 +377,7 @@ class LLMClient:
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(url, json=payload, headers=headers)
+                resp = await _post_with_backoff(client, url, json_payload=payload, headers=headers)
                 resp.raise_for_status()
                 data = resp.json()
 

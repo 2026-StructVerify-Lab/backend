@@ -68,6 +68,22 @@ class MismatchType(str, Enum):
     EXAGGERATION = "exaggeration"
 
 
+class ValueRole(str, Enum):
+    """
+    Claim의 value가 어떤 의미적 역할인지 — KOSIS와의 직접 비교 가능 여부 결정.
+
+    [v6.2 김예슬 - 2026-05-08]
+    "14도를 넘겼다"의 14, "1.5도 마지노선"의 1.5는 측정값이 아니라 기준선/임계값.
+    이런 값을 KOSIS와 직접 비교하면 가짜 mismatch가 발생함.
+    """
+    MEASUREMENT = "measurement"  # 직접 측정값 (14.8도, 5천만명) → KOSIS 비교
+    THRESHOLD   = "threshold"    # 기준선/임계값 ("14도를 넘겼다", "1.5도 이상") → 비교 제외
+    DELTA       = "delta"        # 변화량/차이 ("2.3도 웃돌았다", "0.18도 더 높다") → 별도 검증 필요
+    RANK        = "rank"         # 순위 ("4위", "역대 1위") → 별도 검증 필요
+    RATIO       = "ratio"        # 비율/배수 ("2.6배", "30% 증가") → 별도 검증 필요
+    NONE        = "none"         # 검증 부적합
+
+
 class FeedbackType(str, Enum):
     HUMAN_REVIEW = "human_review"
     LOW_CONFIDENCE = "low_confidence"
@@ -190,6 +206,13 @@ class ClaimSchema(BaseModel):
     unit: str | None = None
     population: str | None = None
     value: float | None = None
+    # [v6.2 김예슬] value의 역할 분류 — KOSIS 직접 비교 가능 여부 결정
+    # measurement만 verify_claim()이 KOSIS row와 직접 비교
+    # threshold/rank/none은 즉시 unverifiable, delta/ratio는 별도 검증 (TODO)
+    value_role: ValueRole = ValueRole.MEASUREMENT
+    # [v6.3] evidence_plan — 검증에 필요한 시점들의 명세
+    # measurement: 1개, delta/ratio: 2개, rank/none: 0개
+    evidence_plan: "EvidencePlan | None" = None
     comparison_type: ClaimType | None = None
     source_reference: str | None = None
     graph_schema_candidates: list[dict[str, str]] = Field(default_factory=list)
@@ -243,6 +266,34 @@ class ProvenanceRecord(BaseModel):
 
 # ── Evidence / Verification ──────────────────────────────────
 
+class EvidenceRequirement(BaseModel):
+    """
+    [v6.3] EvidencePlan의 단일 항목.
+    delta/ratio 검증을 위한 endpoint, 또는 measurement 검증의 primary 등.
+    """
+    role: str  # "primary" | "endpoint_a" | "endpoint_b" | "comparison"
+    label: str | None = None  # "current", "baseline", "1991-04", 등 사람이 읽는 레이블
+    indicator: str | None = None
+    time_period: str | None = None
+    population: str | None = None
+
+
+class EvidencePlan(BaseModel):
+    """
+    [v6.3] claim 검증에 필요한 evidence들의 명세서.
+    schema_inductor가 LLM으로 생성. value_role에 따라 형태 결정:
+      - measurement: requirements=[primary] (1개)
+      - delta:      requirements=[endpoint_a, endpoint_b] (2개)
+      - ratio:      requirements=[endpoint_a, endpoint_b] (2개)
+      - rank/none:  requirements=[] (KOSIS 직접 비교 불가)
+
+    combiner는 verifier가 value_role 기반으로 자동 선택.
+    LLM이 임의 수식을 생성하면 안전성 문제 → enum으로 제한.
+    """
+    requirements: list[EvidenceRequirement] = Field(default_factory=list)
+    combiner: str = "direct"  # "direct" | "delta" | "ratio_pct"
+
+
 class Evidence(BaseModel):
     source_name: str
     stat_table_id: str | None = None
@@ -252,6 +303,9 @@ class Evidence(BaseModel):
     raw_response: dict[str, Any] = Field(default_factory=dict)
     graph_nodes: list[GraphNode] = Field(default_factory=list)
     provenance: ProvenanceRecord | None = None
+    # [v6.3] 어떤 EvidenceRequirement에 매핑되는지
+    requirement_role: str | None = None
+    requirement_label: str | None = None
 
 
 class VerificationResult(BaseModel):
@@ -259,7 +313,12 @@ class VerificationResult(BaseModel):
     claim_id: UUID
     verdict: VerdictType
     confidence: float = 0.0
-    evidence: Evidence | None = None
+    evidence: Evidence | None = None  # 주(primary) evidence (하위 호환)
+    # [v6.3] delta/ratio 검증을 위한 보조 evidences
+    supplementary_evidences: list[Evidence] = Field(default_factory=list)
+    # [v6.3] combiner가 계산한 값 (검증에 실제로 사용된 값)
+    computed_value: float | None = None
+    combiner_used: str | None = None
     mismatch_type: MismatchType | None = None
     explanation: str | None = None
     provenance_summary: str | None = None
@@ -301,4 +360,7 @@ class VerificationReport(BaseModel):
     feedbacks: list[FeedbackEvent] = Field(default_factory=list)
     domain_pack_used: str | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    summary: str | None = None
+
+
+# [v6.3] Forward reference 해결 — ClaimSchema가 EvidencePlan을 참조
+ClaimSchema.model_rebuild()

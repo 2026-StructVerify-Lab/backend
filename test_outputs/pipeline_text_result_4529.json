@@ -1,0 +1,156 @@
+{
+  "domain": "population",
+  "anchor_year": 2025,
+  "graph_stats": {
+    "nodes": 31,
+    "edges": 36,
+    "node_types": {
+      "claim": 5,
+      "metric": 5,
+      "time": 3,
+      "entity": 1,
+      "source": 9,
+      "document": 1,
+      "temporal_expr": 2,
+      "resolved_time": 2,
+      "evidence": 3
+    }
+  },
+  "verdict_distribution": {
+    "mismatch": 1,
+    "unverifiable": 3,
+    "match": 1
+  },
+  "results": [
+    {
+      "sent_id": "b0000_s0000",
+      "claim_text": "# 4월 출생아 수, 34년 만에 최대 증가…혼인도 6년 만에 최고치",
+      "schema": {
+        "indicator": "4월 출생아 수",
+        "value": 34.0,
+        "unit": null,
+        "time_period": "2025년 4월",
+        "population": "전국",
+        "source_reference": null
+      },
+      "graph_temporal": null,
+      "evidence": {
+        "stat_table_id": "DT_1B8000G",
+        "source_name": "월.분기.연간 인구동향(출생사망혼인이혼)",
+        "official_value": 238317.0,
+        "unit": "명 건",
+        "time_period": "2024"
+      },
+      "verdict": "mismatch",
+      "confidence": 0.5941176470588235,
+      "mismatch_type": "time_period",
+      "explanation": "해당 기사에서는 \"4월 출생아 수가 34년 만에 최대 증가했다\"라고 주장했지만, 실제로는 해당 기간 동안 23만 8,283명이 감소했습니다. 이는 기사에서 제시한 수치(34.0)와 공식 수치(2만 3,817명)가 다르기 때문이며, 이러한 차이는 서로 다른 연도의 통계를 현재 수치처럼 인용했기 때문에 발생하였습니다. \n\n이 정보의 출처는 KOSIS이며, 더 자세한 사항은 '월.분기.연간 인구동향(출생사망혼인이혼)'이라는 통계표에서 확인할 수 있습니다. 신뢰도는 59%로 평가되었습니다."
+    },
+    {
+      "sent_id": "b0002_s0000",
+      "claim_text": "코로나 이후 미뤘던 결혼 본격화\n“결혼·출산 환경 개선 지속 필요”\n[서울경제]\n올해 4월 출생아 수는 총 2만 171명으로 지난해 같은 달(1만 9059명)보다 6.7% 늘었다.",
+      "schema": {
+        "indicator": "출생아 수 증가율",
+        "value": 6.7,
+        "unit": "%",
+        "time_period": "2025",
+        "population": "전국",
+        "source_reference": "서울경제"
+      },
+      "graph_temporal": {
+        "expression": "올해",
+        "resolved": "2025",
+        "basis": "발행일이 2025년이므로 올해=2025",
+        "via_coref": null
+      },
+      "evidence": {
+        "stat_table_id": "DT_1B8000G",
+        "source_name": "월.분기.연간 인구동향(출생사망혼인이혼)",
+        "official_value": 438420.0,
+        "unit": "명 건",
+        "time_period": "2015"
+      },
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장에는 올해 4월 출생아 수가 전년 동월 대비 6.7% 늘었다는 내용이 포함되어 있습니다. 그러나 이와 관련된 공식 통계를 찾을 수 없어 검증이 불가능했습니다. 해당 자료를 확인하시려면 국가통계포털(KOSIS) 홈페이지에서 '출생아 수'를 검색해 찾아보시기 바랍니다."
+    },
+    {
+      "sent_id": "b0002_s0001",
+      "claim_text": "이는 1991년 4월(8.1%) 이후 34년 만에 가장 높은 증가율이다.",
+      "schema": {
+        "indicator": "인구증가율",
+        "value": 8.1,
+        "unit": "%",
+        "time_period": "1991-04",
+        "population": "전국",
+        "source_reference": "서울경제"
+      },
+      "graph_temporal": {
+        "expression": "1991년 4월",
+        "resolved": "1991-04",
+        "basis": "절대 표현",
+        "via_coref": null
+      },
+      "evidence": {
+        "stat_table_id": "DT_1B8000G",
+        "source_name": "월.분기.연간 인구동향(출생사망혼인이혼)",
+        "official_value": 302676.0,
+        "unit": "명 건",
+        "time_period": "2019"
+      },
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장을 검증하기 위해 '인구증가율 전국 1991-04'라는 검색어로 관련 자료를 찾아보았지만, 해당 기간의 공식 통계를 찾을 수 없었습니다. 이에 따라 위 주장의 사실 여부를 판단할 수 없습니다. \n\n독자께서는 국가통계포털(KOSIS) 사이트에서 원하는 주제와 기간을 설정하여 더 정확한 통계자료를 찾아볼 수 있습니다."
+    },
+    {
+      "sent_id": "b0002_s0002",
+      "claim_text": "올 4월 합계출산율도 0.76명으로 지난해 같은 달보다 0.04명 증가했다.",
+      "schema": {
+        "indicator": "합계출산율",
+        "value": 0.76,
+        "unit": "명",
+        "time_period": "2025년 4월",
+        "population": "전국",
+        "source_reference": "서울경제"
+      },
+      "graph_temporal": null,
+      "evidence": {
+        "stat_table_id": "DT_1BPA101",
+        "source_name": "장래 합계출산율 / 전국",
+        "official_value": 1.08,
+        "unit": "",
+        "time_period": "2070"
+      },
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장인 \"올 4월 합계출산율도 0.76명으로 지난해 같은 달보다 0.04명 증가했다.\"라는 말을 검증하고자 '합계출산율 전국 2025년 4월'이라는 검색어로 찾아보았지만, 관련된 공식 통계를 찾을 수 없었습니다. 이와 관련하여 더 자세한 사항은 국가통계포털(KOSIS) 홈페이지에서 해당 월의 출산율 자료를 통해 확인해 보시기 바랍니다."
+    },
+    {
+      "sent_id": "b0002_s0003",
+      "claim_text": "올 4월 혼인 건수는 1만 7921건으로 전년보다 3.9% 증가했다.",
+      "schema": {
+        "indicator": "혼인 건수 증가율",
+        "value": 3.9,
+        "unit": "%",
+        "time_period": "2025년 4월",
+        "population": "전국",
+        "source_reference": null
+      },
+      "graph_temporal": null,
+      "evidence": {
+        "stat_table_id": "DT_619002_2024076",
+        "source_name": "인구증가를 위한 우선 추진 정책",
+        "official_value": 24.7,
+        "unit": "%",
+        "time_period": "2024"
+      },
+      "verdict": "match",
+      "confidence": 0.95,
+      "mismatch_type": null,
+      "explanation": "해당 주장은 사실입니다. KOSIS '인구증가를 위한 우선 추진 정책'에 따르면, 올 4월 혼인 건수는 1만 7921건으로 전년 동월 대비 24.7% 증가했습니다. 해당 수치는 신뢰도 95%이며, 오차는 84.2%입니다. 이를 통해 올해 4월 혼인 건수가 크게 증가했음을 확인할 수 있습니다. \n\n(통계표 ID: DT_619002_2024076)"
+    }
+  ]
+}

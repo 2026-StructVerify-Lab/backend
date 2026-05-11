@@ -352,7 +352,11 @@ class KOSISConnector(BaseConnector):
 
     # ── search_and_fetch (v3 핵심) ────────────────────────────────────────────
 
-    async def search_and_fetch(self, query: ConnectorQuery) -> StatData | None:
+    async def search_and_fetch(
+        self,
+        query: ConnectorQuery,
+        memory: "DocumentMemory | None" = None,   # [v6.4 추가] 옵셔널 — 기존 호출자 호환
+    ) -> StatData | None:
         """
         Catalog → LLM Agent → KOSIS fetch 파이프라인 (v4: 후보 순회 retry).
 
@@ -365,6 +369,9 @@ class KOSISConnector(BaseConnector):
           4) 최대 _MAX_CANDIDATES(5)개까지 순회
           5) Agent가 "NONE" 답하거나 남은 후보 없으면 포기
 
+        [v6.4 추가] memory — 같은 indicator의 이전 성공 결과를 재사용하고
+                  같은 (stat_id, time, population) 조합은 캐시 hit으로 즉시 반환.
+
         ReAct 패턴:
           Thought: "이 주장을 검증하려면 어떤 통계표가 필요한가?"
           Action:  stat_id 선택 + 파라미터 결정
@@ -372,6 +379,20 @@ class KOSISConnector(BaseConnector):
           → 실패 시 Thought: "이 테이블은 안 됐다, 다른 후보에서 골라야 한다"
           → Action: 다음 stat_id 선택
         """
+        # [v6.4 추가] memory 빠른 경로 — 같은 indicator의 이전 성공한 (stat_id, time, pop)
+        if memory is not None and query.indicator:
+            last_stat = memory.last_stat_for_indicator.get(query.indicator.strip())
+            if last_stat:
+                cached = memory.get_cached_table(
+                    last_stat, query.time_period, query.population,
+                )
+                if cached is not None:
+                    logger.info(
+                        f"[memory] 캐시 hit (indicator={query.indicator!r}) "
+                        f"→ skip catalog/agent: [{last_stat}]"
+                    )
+                    return cached
+
         # 1단계: Catalog 검색 (pgvector + KOSIS API)
         candidates = await self.catalog.search(query, top_k=10)
 
@@ -510,6 +531,15 @@ class KOSISConnector(BaseConnector):
                     f"Evidence 조회 성공 (후보 {round_idx+1}): [{selected_id}] "
                     f"value={data.official_value} {data.unit or ''}"
                 )
+                # [v6.3] 같은 표에서 다른 시점 재조회용 메타 보관
+                data.stat_record = stat_rec
+                # [v6.4 추가] memory 캐시 저장 + indicator→stat_id 매핑
+                if memory is not None:
+                    memory.cache_table(
+                        selected_id, query.time_period, query.population, data,
+                    )
+                    if query.indicator:
+                        memory.last_stat_for_indicator[query.indicator.strip()] = selected_id
                 return data
 
             # 실패 이력 기록 → 다음 라운드에서 Agent에게 전달
@@ -535,6 +565,105 @@ class KOSISConnector(BaseConnector):
 
     # ── prd_se 순회 + objL 점진 fetch (factcheck_test.py 참고) ───────────────
 
+    # [v6.4 추가] 시점 형식 자동 인식 헬퍼
+    @staticmethod
+    def _detect_prd_se_from_time(time_str: str) -> str:
+        """
+        claim의 time_period 형식 보고 prdSe 우선순위 결정.
+          - "2024-04", "202404" → "M"
+          - "2024Q2"             → "Q"
+          - "2024"               → "Y"
+        """
+        if not time_str:
+            return "Y"
+        t = time_str.strip()
+        if re.fullmatch(r"\d{4}-\d{2}", t) or re.fullmatch(r"\d{6}", t):
+            return "M"
+        if re.fullmatch(r"\d{4}Q[1-4]", t, re.IGNORECASE):
+            return "Q"
+        return "Y"
+
+    @staticmethod
+    def _normalize_prd_de(time_str: str, prd_se: str) -> str:
+        """time_period를 KOSIS API 형식으로 정규화."""
+        if not time_str:
+            return ""
+        t = time_str.replace("-", "").strip()
+        if prd_se == "M" and len(t) == 4:
+            return t
+        return t
+
+    def _select_itm_id_by_indicator(
+        self,
+        cmmt_rows: list[dict],
+        claim_indicator: str | None,
+    ) -> tuple[str, str]:
+        """
+        [v6.4] cmmt_rows의 ITM_NM과 claim_indicator를 매칭하여 ITM_ID 선택.
+
+        같은 KOSIS 표에 여러 항목이 섞여 있을 때 (예: 출생아수+합계출산율 한 표)
+        claim의 indicator와 가장 의미 가까운 ITM_NM을 골라야 함.
+
+        Returns:
+            (itm_id, matched_itm_nm). 매칭 실패 시 첫 행 사용.
+        """
+        if not cmmt_rows:
+            return "ALL", ""
+        if not claim_indicator:
+            r0 = cmmt_rows[0]
+            return (
+                str(r0.get("ITM_ID") or "ALL").strip() or "ALL",
+                str(r0.get("ITM_NM") or "").strip(),
+            )
+
+        claim_ind = claim_indicator.strip().lower()
+
+        # 1) 완전 일치
+        for r in cmmt_rows:
+            itm_nm = str(r.get("ITM_NM") or "").strip()
+            if itm_nm and itm_nm.lower() == claim_ind:
+                logger.debug(f"ITM 매칭 (완전): {itm_nm} ← {claim_indicator}")
+                return (
+                    str(r.get("ITM_ID") or "ALL").strip() or "ALL",
+                    itm_nm,
+                )
+
+        # 2) claim의 핵심 토큰이 ITM_NM에 포함
+        claim_tokens = [
+            t for t in re.split(r"[\s,/\(\)·\-]+", claim_ind) if len(t) >= 2
+        ]
+        for r in cmmt_rows:
+            itm_nm = str(r.get("ITM_NM") or "").strip()
+            itm_lower = itm_nm.lower()
+            if itm_nm and any(tok in itm_lower for tok in claim_tokens):
+                logger.debug(f"ITM 매칭 (토큰): {itm_nm} ← {claim_indicator}")
+                return (
+                    str(r.get("ITM_ID") or "ALL").strip() or "ALL",
+                    itm_nm,
+                )
+
+        # 3) ITM_NM이 claim에 포함 (반대 방향)
+        for r in cmmt_rows:
+            itm_nm = str(r.get("ITM_NM") or "").strip()
+            if itm_nm and len(itm_nm) >= 2 and itm_nm.lower() in claim_ind:
+                logger.debug(f"ITM 매칭 (역포함): {itm_nm} ← {claim_indicator}")
+                return (
+                    str(r.get("ITM_ID") or "ALL").strip() or "ALL",
+                    itm_nm,
+                )
+
+        # 4) fallback — 첫 행
+        r0 = cmmt_rows[0]
+        itm_nm0 = str(r0.get("ITM_NM") or "").strip()
+        logger.debug(
+            f"ITM 매칭 실패 → 첫 행 사용: {itm_nm0} "
+            f"(claim_indicator={claim_indicator!r})"
+        )
+        return (
+            str(r0.get("ITM_ID") or "ALL").strip() or "ALL",
+            itm_nm0,
+        )
+
     async def _fetch_with_retry(
         self,
         stat_id: str,
@@ -547,6 +676,11 @@ class KOSISConnector(BaseConnector):
         """
         prd_se 순회(Y→M→Q) + objL 점진 + newEstPrdCnt 폴백.
 
+        [v6.4 변경]
+        - claim의 time_period 형식에 따라 prd_se 우선순위 자동 결정
+          ("2024-04" → M 먼저, "2024" → Y 먼저)
+        - claim.indicator로 ITM_ID 매칭 (같은 표 안 여러 항목 구분)
+
         factcheck_test.py의 fetch_kosis_data() 로직을 비동기로 재구현.
         """
         # 연도 추출
@@ -554,18 +688,43 @@ class KOSISConnector(BaseConnector):
         year_m = re.search(r"(\d{4})", start_prd_de or time_ref)
         year = year_m.group(1) if year_m else "2024"
 
-        # prd_se 순회 전략
+        # [v6.4 추가] time_period 형식 기반 prd_se 자동 우선순위
+        # query.time_period가 "2024-04"면 M을 첫 시도로 (Y로 시도해도 빈 결과)
+        # 기존: prd_se_hint를 그대로 사용
+        # 신규: query.time_period 형식을 보고 우선순위 재배치
+        detected_prd = self._detect_prd_se_from_time(time_ref) if time_ref else prd_se_hint
+        primary_prd = detected_prd if time_ref else prd_se_hint
+
+        primary_prd_de = self._normalize_prd_de(start_prd_de or time_ref, primary_prd)
+        primary_prd_de_end = self._normalize_prd_de(end_prd_de or time_ref, primary_prd) or primary_prd_de
+
+        # [v6.4 신규] primary prd 우선 + 나머지 fallback
+        # (이전 v6.3 로직은 아래 주석으로 보존)
         prd_strategies = [
-            {"prdSe": prd_se_hint, "startPrdDe": start_prd_de or year,
-             "endPrdDe": end_prd_de or year},
+            {
+                "prdSe": primary_prd,
+                "startPrdDe": primary_prd_de or year,
+                "endPrdDe": primary_prd_de_end or year,
+            },
         ]
-        # hint가 Y가 아니면 Y도 시도
-        if prd_se_hint != "Y":
-            prd_strategies.insert(0, {"prdSe": "Y", "startPrdDe": year, "endPrdDe": year})
-        # M, Q 추가
-        for prd, sp, ep in [("M", f"{year}01", f"{year}12"), ("Q", f"{year}01", f"{year}04")]:
-            if prd != prd_se_hint:
+        for prd, sp, ep in [
+            ("Y", year, year),
+            ("M", f"{year}01", f"{year}12"),
+            ("Q", f"{year}01", f"{year}04"),
+        ]:
+            if prd != primary_prd:
                 prd_strategies.append({"prdSe": prd, "startPrdDe": sp, "endPrdDe": ep})
+
+        # [v6.3 원본 로직 — 비교용으로 주석 보존]
+        # prd_strategies = [
+        #     {"prdSe": prd_se_hint, "startPrdDe": start_prd_de or year,
+        #      "endPrdDe": end_prd_de or year},
+        # ]
+        # if prd_se_hint != "Y":
+        #     prd_strategies.insert(0, {"prdSe": "Y", "startPrdDe": year, "endPrdDe": year})
+        # for prd, sp, ep in [("M", f"{year}01", f"{year}12"), ("Q", f"{year}01", f"{year}04")]:
+        #     if prd != prd_se_hint:
+        #         prd_strategies.append({"prdSe": prd, "startPrdDe": sp, "endPrdDe": ep})
 
         # 기간 지정 실패 시 최신 데이터 폴백
         fallbacks = [
@@ -588,11 +747,21 @@ class KOSISConnector(BaseConnector):
         cmmt_rows = _rows_from_kosis_body(cmmt_m)
 
         obj_l1 = "ALL"
-        itm_id = "ALL"
         if cmmt_rows:
             r0 = cmmt_rows[0]
             obj_l1 = str(r0.get("OBJ_ID") or r0.get("C1") or "ALL").strip() or "ALL"
-            itm_id = str(r0.get("ITM_ID") or "ALL").strip() or "ALL"
+            # [v6.3 원본 — 첫 행의 ITM_ID 사용]
+            # itm_id = str(r0.get("ITM_ID") or "ALL").strip() or "ALL"
+
+        # [v6.4 신규] indicator 기반 ITM_ID 매칭
+        itm_id, itm_nm_matched = self._select_itm_id_by_indicator(
+            cmmt_rows, query.indicator
+        )
+        if itm_nm_matched and query.indicator:
+            logger.info(
+                f"[{stat_id}] ITM_ID={itm_id} (ITM_NM={itm_nm_matched!r}) "
+                f"← claim_indicator={query.indicator!r}"
+            )
 
         base = (self.config.get("base_url") or self.BASE_URL).rstrip("/")
 
@@ -930,6 +1099,94 @@ class KOSISConnector(BaseConnector):
             return None
     async def search(self, query: ConnectorQuery) -> list[StatRecord]:
         return await self.catalog.search(query)
+
+    async def fetch_with_locked_table(
+        self,
+        stat_record: StatRecord,
+        time_period: str,
+        original_query: ConnectorQuery | None = None,
+        memory: "DocumentMemory | None" = None,   # [v6.4 추가] 옵셔널 — 기존 호출자 호환
+    ) -> StatData | None:
+        """
+        [v6.3] 같은 통계표에서 시점만 바꿔 재조회.
+        [v6.4 추가] memory — (stat_id, time, population) 캐시 hit 시 즉시 반환.
+
+        delta/ratio 검증 시 endpoint_b를 가져오는 데 사용:
+          - 첫 번째 fetch는 search_and_fetch()로 stat_record 확정
+          - 두 번째 fetch는 이 메서드로 시점만 바꿔 같은 표에서 가져옴
+          - catalog 검색을 건너뛰므로 endpoint_a/b가 *반드시* 같은 통계표에서 옴
+            → indicator/단위/지역 정의가 동일하게 유지됨
+
+        Args:
+            stat_record: 첫 번째 fetch의 StatData.stat_record
+            time_period: 가져올 시점 (예: "2024-04", "2023")
+            original_query: 메타데이터 컨텍스트 (population 등 재사용)
+            memory: DocumentMemory (옵셔널) — 캐시 hit 검사
+
+        Returns:
+            StatData (성공) 또는 None (시점 데이터 없음)
+        """
+        if stat_record is None:
+            logger.warning("fetch_with_locked_table: stat_record가 None")
+            return None
+
+        # [v6.4 추가] memory 캐시 확인
+        if memory is not None:
+            pop = (original_query.population if original_query else None) or ""
+            cached = memory.get_cached_table(stat_record.stat_id, time_period, pop)
+            if cached is not None:
+                return cached
+
+        # population/indicator는 첫 query에서 가져오되 시점만 교체
+        if original_query is not None:
+            query = ConnectorQuery(
+                keyword=original_query.keyword,
+                indicator=original_query.indicator,
+                time_period=time_period,
+                population=original_query.population,
+                extra_params=dict(original_query.extra_params),
+            )
+        else:
+            query = ConnectorQuery(
+                keyword=stat_record.stat_name,
+                time_period=time_period,
+            )
+
+        # 시점 형식에 따라 prd_se 추정
+        prd_se_hint = "Y"
+        if re.fullmatch(r"\d{4}-\d{2}", time_period or ""):
+            prd_se_hint = "M"
+        elif re.fullmatch(r"\d{4}Q[1-4]", time_period or ""):
+            prd_se_hint = "Q"
+
+        # 시점을 KOSIS 형식으로 정규화 (YYYY-MM → YYYYMM)
+        prd_de = (time_period or "").replace("-", "")
+
+        data = await self._fetch_with_retry(
+            stat_id=stat_record.stat_id,
+            stat_rec=stat_record,
+            query=query,
+            prd_se_hint=prd_se_hint,
+            start_prd_de=prd_de,
+            end_prd_de=prd_de,
+        )
+
+        if data and data.official_value is not None:
+            data.stat_record = stat_record
+            logger.info(
+                f"[locked-fetch] [{stat_record.stat_id}] {time_period} "
+                f"→ value={data.official_value} {data.unit or ''}"
+            )
+            # [v6.4 추가] memory 캐시 저장
+            if memory is not None:
+                pop = (original_query.population if original_query else None) or ""
+                memory.cache_table(stat_record.stat_id, time_period, pop, data)
+            return data
+
+        logger.info(
+            f"[locked-fetch] 데이터 없음: [{stat_record.stat_id}] {time_period}"
+        )
+        return None
 
     async def fetch(self, stat_id: str, params: dict[str, Any]) -> StatData:
         """BaseConnector 인터페이스 유지 (search_and_fetch 내부에서 직접 사용)"""

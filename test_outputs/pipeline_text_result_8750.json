@@ -1,0 +1,124 @@
+{
+  "domain": "population",
+  "anchor_year": 2025,
+  "graph_stats": {
+    "nodes": 30,
+    "edges": 41,
+    "node_types": {
+      "claim": 5,
+      "metric": 3,
+      "time": 2,
+      "entity": 1,
+      "source": 9,
+      "document": 1,
+      "temporal_expr": 2,
+      "resolved_time": 2,
+      "evidence": 5
+    }
+  },
+  "verdict_distribution": {
+    "unverifiable": 5
+  },
+  "results": [
+    {
+      "sent_id": "b0000_s0000",
+      "claim_text": "# 4월 출생아 수, 34년 만에 최대 증가…혼인도 6년 만에 최고치",
+      "schema": {
+        "indicator": "출생아 수",
+        "value": 6.7,
+        "unit": "%",
+        "time_period": "2025-04",
+        "population": "전국",
+        "source_reference": null
+      },
+      "graph_temporal": null,
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장인 '# 4월 출생아 수, 34년 만에 최대 증가...혼인도 6년 만에 최고치'와 관련된 공식 통계를 국가통계포털(KOSIS)에서 찾을 수 없었습니다. 이는 해당 월의 출생아 수와 혼인 건수 정보가 아직 업데이트되지 않았기 때문일 수 있습니다. 따라서 정확한 사실 여부를 확인하려면 추후 발표될 최신 통계 자료를 참고해야 합니다. \n\n국가통계포털에서는 주제별, 기관별, 지역별 등 다양한 방식으로 통계 자료를 조회할 수 있으니 필요한 경우 직접 방문하여 원하는 정보를 찾아보시기 바랍니다."
+    },
+    {
+      "sent_id": "b0002_s0000",
+      "claim_text": "코로나 이후 미뤘던 결혼 본격화\n“결혼·출산 환경 개선 지속 필요”\n[서울경제]\n올해 4월 출생아 수는 총 2만 171명으로 지난해 같은 달(1만 9059명)보다 6.7% 늘었다.",
+      "schema": {
+        "indicator": "출생아 수",
+        "value": 6.7,
+        "unit": "%",
+        "time_period": "2025-04",
+        "population": "전국",
+        "source_reference": "서울경제"
+      },
+      "graph_temporal": null,
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장에 대한 공식 통계를 찾을 수 없어 검증이 불가능합니다. \n통계청 KOSIS 홈페이지에서 '출생아 수'와 관련된 통계를 검색해 보았으나, 해당 월의 출생아 수를 확인할 수 없었습니다. \n\n따라서 이 주장의 사실 여부를 판단하려면 추가적인 정보나 자료가 필요합니다. 만약 더 정확한 정보를 원하신다면, 출처인 서울경제 신문사에 문의하시거나, 통계청 웹사이트를 방문하여 최신 데이터를 확인하시는 것도 좋은 방법입니다."
+    },
+    {
+      "sent_id": "b0002_s0001",
+      "claim_text": "이는 1991년 4월(8.1%) 이후 34년 만에 가장 높은 증가율이다.",
+      "schema": {
+        "indicator": "출생아 수",
+        "value": 6.7,
+        "unit": "%",
+        "time_period": "2025-04",
+        "population": "전국",
+        "source_reference": "서울경제"
+      },
+      "graph_temporal": {
+        "expression": "1991년 4월",
+        "resolved": "1991-04",
+        "basis": "절대 표현이므로 그대로 사용",
+        "via_coref": null
+      },
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장인 \"이는 1991년 4월(8.1%) 이후 34년 만에 가장 높은 증가율이다.\"라는 말을 검증하고자 했으나, 국가통계포털(KOSIS)에서 '출생아 수 전국 2025-04'와 관련된 통계표를 찾을 수 없어 검증이 불가능했습니다. 이 부분에 대한 정확한 사실관계 파악을 위해서는 추가적인 자료 조사나 해당 분야 전문가의 의견을 참고해야 할 것으로 보입니다. \n\n국가통계포털에서는 주제별, 기관별, 지역별 등 다양한 방식으로 통계 자료를 제공하고 있으니, 필요한 경우 직접 방문하여 원하는 정보를 찾아보시기 바랍니다."
+    },
+    {
+      "sent_id": "b0002_s0002",
+      "claim_text": "올 4월 합계출산율도 0.76명으로 지난해 같은 달보다 0.04명 증가했다.",
+      "schema": {
+        "indicator": "합계출산율",
+        "value": 0.76,
+        "unit": null,
+        "time_period": "2024-04",
+        "population": null,
+        "source_reference": "[서울경제]"
+      },
+      "graph_temporal": {
+        "expression": "지난해 같은 달",
+        "resolved": "2024-04",
+        "basis": "anchor_year - 1 = 2024",
+        "via_coref": null
+      },
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장에 대한 공식 통계를 찾을 수 없어 검증이 불가능합니다. 이는 해당 월의 합계출산율 자료가 아직 발표되지 않았거나, 다른 검색어를 사용해야 할 수도 있습니다. \n\n통계청 국가통계포털(KOSIS)에서 '합계출산율' 항목을 검색하여 최신 자료를 확인해 보시기 바랍니다."
+    },
+    {
+      "sent_id": "b0002_s0003",
+      "claim_text": "올 4월 혼인 건수는 1만 7921건으로 전년보다 3.9% 증가했다.",
+      "schema": {
+        "indicator": "혼인 건수",
+        "value": 3.9,
+        "unit": "%",
+        "time_period": "2025-04",
+        "population": "전국",
+        "source_reference": null
+      },
+      "graph_temporal": null,
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장에 대한 공식 통계를 찾을 수 없어 검증이 불가능합니다. \n통계청 KOSIS(국가통계포털)에서 '혼인 건수'와 관련된 통계를 검색해 보았으나, 해당 월의 혼인 건수를 확인할 수 없었습니다. \n\n더 정확한 정보를 얻기 위해서는 국가통계포털 사이트(https://kosis.kr/index/index.do) 에 접속하여 주제별>인구·가구>혼인 항목을 선택하신 후, 원하시는 조건을 설정하여 검색하시기 바랍니다."
+    }
+  ]
+}

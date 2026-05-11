@@ -1,0 +1,202 @@
+{
+  "domain": "environment",
+  "anchor_year": 2024,
+  "graph_stats": {
+    "nodes": 46,
+    "edges": 65,
+    "node_types": {
+      "claim": 8,
+      "metric": 6,
+      "time": 3,
+      "entity": 1,
+      "source": 12,
+      "document": 1,
+      "temporal_expr": 4,
+      "resolved_time": 4,
+      "evidence": 7
+    }
+  },
+  "verdict_distribution": {
+    "unverifiable": 7,
+    "mismatch": 1
+  },
+  "results": [
+    {
+      "sent_id": "b0000_s0000",
+      "claim_text": "# 작년 연평균기온 14.8도…사상 처음 14도 돌파 또 신기록",
+      "schema": {
+        "indicator": "연평균기온",
+        "value": 14.8,
+        "unit": "도",
+        "time_period": "2023",
+        "population": "전국",
+        "source_reference": null
+      },
+      "graph_temporal": null,
+      "evidence": {
+        "stat_table_id": "DT_14102_B002",
+        "source_name": "[종관기상] 지점별 평년값",
+        "official_value": 15.1,
+        "unit": "℃",
+        "time_period": "202010"
+      },
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "2023년 대한민국의 연평균 기온이 사상 처음으로 14도를 돌파했다는 주장을 검증하고자 했으나, 관련 공식 통계를 찾을 수 없어 검증이 불가능했습니다. 이와 관련해 더 자세한 정보를 알고 싶다면 국가통계포털(KOSIS)에서 '연평균기온' 항목을 찾아보시기 바랍니다."
+    },
+    {
+      "sent_id": "b0001_s0000",
+      "claim_text": "(서울=연합뉴스) 이재영 기자 = 2024년은 우리나라 연평균 기온이 사상 처음 14도를 돌파해 '압도적으로 뜨거웠던 해'로 남았다.",
+      "schema": {
+        "indicator": "우리나라 연평균 기온",
+        "value": 14.0,
+        "unit": "도",
+        "time_period": "2024",
+        "population": "전국",
+        "source_reference": "연합뉴스"
+      },
+      "graph_temporal": {
+        "expression": "2024년",
+        "resolved": "2024",
+        "basis": "'2024년은...'이라는 표현에서 직접 언급됨.",
+        "via_coref": null
+      },
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.5,
+      "mismatch_type": null,
+      "explanation": "해당 주장에 대한 공식 통계를 찾을 수 없어 검증이 불가능합니다. 이는 해당 연도의 평균 기온 정보가 아직 발표되지 않았거나, 다른 기관에서 관리되고 있을 가능성이 있습니다. \n\n독자께서는 국가통계포털(KOSIS)에서 시도별 기후 통계나 기상청 홈페이지에서 과거 날씨 자료를 찾아보실 수 있습니다. 다만, 현재 시점에서는 2024년 데이터가 제공되지 않을 수 있으니 참고하시기 바랍니다."
+    },
+    {
+      "sent_id": "b0001_s0001",
+      "claim_text": "1일 기상청 기상자료개방포털을 보면 작년 평균기온은 14.8도로 재작년(13.9도)에 이어 2년 연속 '1973년 이후 연평균 기온 신기록'을 갈아치웠다.",
+      "schema": {
+        "indicator": "연평균기온",
+        "value": 14.8,
+        "unit": "도",
+        "time_period": "2023",
+        "population": null,
+        "source_reference": "기상청 기상자료개방포털"
+      },
+      "graph_temporal": {
+        "expression": "작년",
+        "resolved": "2023",
+        "basis": "anchor_year - 1 = 2023",
+        "via_coref": null
+      },
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장에서는 2023년 대한민국의 연평균 기온이 14.8도라고 하였으나, KOSIS에서 해당 정보를 찾을 수 없었습니다. 따라서 이 주장의 사실 여부를 판단할 수 없습니다. \n\n독자는 국가통계포털(KOSIS)에서 시도별 기후 통계 메뉴 - 자료실 - 보고서 순으로 이동하여 ‘기후통계분석’ 보고서를 참고해 보세요. 여기에는 1973년부터 매년 전국 45개 지점의 일평균·최고기온·최저기온 등 상세한 기상정보가 담겨 있습니다. 다만, 최신 연도의 경우 아직 보고서 발간이 완료되지 않았을 수 있으니 추후 다시 확인해 보시기 바랍니다."
+    },
+    {
+      "sent_id": "b0001_s0002",
+      "claim_text": "1973년은 기상관측망이 대폭 확충돼 각종 기상기록 기준점이 되는 해다.",
+      "schema": {
+        "indicator": "기상관측망 확충",
+        "value": 0.0,
+        "unit": null,
+        "time_period": "1973",
+        "population": null,
+        "source_reference": "기상청 기상자료개방포털"
+      },
+      "graph_temporal": {
+        "expression": "1973년",
+        "resolved": "1973",
+        "basis": "'1973년은...'이라는 표현에서 직접 언급됨.",
+        "via_coref": null
+      },
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.5,
+      "mismatch_type": null,
+      "explanation": "해당 주장에 대한 공식 통계를 찾기 위해 '기상관측망 확충 1973'이라는 검색어로 KOSIS(국가통계포털)를 찾아보았지만, 관련 통계표를 찾을 수 없었습니다. 따라서 이 주장은 현재 시점에서는 검증되지 않습니다. \n\n독자는 국가통계포털(https://kosis.kr/) 에서 해당 주제와 관련된 다양한 통계 자료를 찾아볼 수 있습니다."
+    },
+    {
+      "sent_id": "b0001_s0003",
+      "claim_text": "한 해 평균기온이 14도를 넘기는 작년이 처음이다.",
+      "schema": {
+        "indicator": "연평균기온",
+        "value": 14.0,
+        "unit": "도",
+        "time_period": "2023",
+        "population": "전국",
+        "source_reference": "기상청 기상자료개방포털"
+      },
+      "graph_temporal": null,
+      "evidence": {
+        "stat_table_id": "DT_14102_B002",
+        "source_name": "[종관기상] 지점별 평년값",
+        "official_value": 15.1,
+        "unit": "℃",
+        "time_period": "202010"
+      },
+      "verdict": "unverifiable",
+      "confidence": 0.5,
+      "mismatch_type": null,
+      "explanation": "해당 주장을 검증하기 위해 '연평균 기온 전국 2023'이라는 검색어로 관련 자료를 찾아보았지만, 해당 연도의 연간 평균 기온에 대한 공식 통계를 찾을 수 없었습니다. 따라서 이 주장은 현재 시점에서는 검증이 불가능합니다. \n\n2023년 한 해 평균 기온에 대한 정보를 확인하시려면 국가통계포털(KOSIS) 사이트에서 국내 기후와 관련된 통계자료를 참고하시는 것을 추천드립니다. 단, 새로운 수치를 만들어내는 것은 지양해야 합니다."
+    },
+    {
+      "sent_id": "b0001_s0004",
+      "claim_text": "작년 평균기온은 평년(1991∼2020년 평균) 연평균 기온(12.7±0.2도)을 2.3도나 웃돌았다.\n(서울=연합뉴스)",
+      "schema": {
+        "indicator": "평균기온",
+        "value": 2.3,
+        "unit": "도",
+        "time_period": "2023",
+        "population": "전국",
+        "source_reference": "연합뉴스"
+      },
+      "graph_temporal": null,
+      "evidence": {
+        "stat_table_id": "DT_14102_B001",
+        "source_name": "[종관기상] 지점별 연·월 통계",
+        "official_value": 8.5,
+        "unit": "℃",
+        "time_period": "2023"
+      },
+      "verdict": "mismatch",
+      "confidence": 0.9190140845070423,
+      "mismatch_type": "value",
+      "explanation": "해당 기사에서는 작년 평균기온이 평년(1991–2020년 평균) 연평균 기온인 12.7 ± 0.2도를 2.3도 웃돌았다고 주장했습니다. 그러나 KOSIS에서 제공하는 종관기상 지점별 연·월 통계에 따르면, 2023년 평균기온은 8.5°C이고, 1991부터 2020년까지의 평년 평균기온은 -5.7°C 입니다. 이를 바탕으로 계산한 차이는 14.2도로, 기사에서 제시한 2.3도와 11.9도 차이나며 이는 83.8% 수준입니다. 따라서 해당 기사의 주장은 사실과 다르며, 신뢰도는 92%입니다."
+    },
+    {
+      "sent_id": "b0001_s0005",
+      "claim_text": "김토일 기자 kmtoil@yna.co.kr\n페이스북 tuney.kr/LeYN1 X(트위터) @yonhap_graphics\n일최저기온과 일최고기온 연평균 값도 지난해가 역대 1위다.",
+      "schema": {
+        "indicator": "일최저기온 및 일최고기온 연평균 값",
+        "value": 1.0,
+        "unit": null,
+        "time_period": "2023",
+        "population": "전국",
+        "source_reference": "연합뉴스"
+      },
+      "graph_temporal": null,
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.5,
+      "mismatch_type": null,
+      "explanation": "해당 주장에 대한 공식 통계를 찾을 수 없어 검증이 불가능합니다. 이는 대한민국 통계청 KOSIS에서 '일최저기온 및 일최고기온 연평균 값 전국 2023'이라는 검색어로 시도한 검색에서도 관련 통계표를 찾지 못했기 때문입니다. 따라서, 해당 주장의 사실 여부를 판단하려면 독자께서 직접 KOSIS 홈페이지나 다른 신뢰할 만한 기관이나 자료를 통해 추가적인 조사를 해보시는 것이 좋습니다."
+    },
+    {
+      "sent_id": "b0001_s0006",
+      "claim_text": "작년 평균 최저기온은 10.2도로 10도를 넘었고 평균 최고기온은 20.1도로 20도를 웃돌았다.",
+      "schema": {
+        "indicator": "평균 최저기온 및 평균 최고기온",
+        "value": 10.2,
+        "unit": "도",
+        "time_period": "2023",
+        "population": "전국",
+        "source_reference": "연합뉴스"
+      },
+      "graph_temporal": null,
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장에 대한 공식 통계를 찾을 수 없어 검증이 불가능합니다. 이는 대한민국 통계청 KOSIS에서 '평균 최저기온 및 평균 최고기온 전국 2023'이라는 검색어로 해당 정보를 찾아볼 수 없었기 때문입니다. 따라서, 독자 여러분께서 직접 KOSIS 홈페이지(kosis.kr) 에 방문하여 관련 자료를 찾아보시는 것을 제안 드립니다."
+    }
+  ]
+}

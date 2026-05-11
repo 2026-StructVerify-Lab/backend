@@ -1,0 +1,131 @@
+{
+  "domain": "population",
+  "anchor_year": 2024,
+  "graph_stats": {
+    "nodes": 31,
+    "edges": 39,
+    "node_types": {
+      "claim": 5,
+      "metric": 3,
+      "time": 2,
+      "entity": 1,
+      "source": 9,
+      "document": 1,
+      "temporal_expr": 3,
+      "resolved_time": 3,
+      "evidence": 4
+    }
+  },
+  "verdict_distribution": {
+    "unverifiable": 4,
+    "mismatch": 1
+  },
+  "results": [
+    {
+      "sent_id": "b0000_s0000",
+      "claim_text": "# 10월 출생아 수, 34년 만에 최대 증가…혼인도 6년 만에 최고치",
+      "schema": {
+        "indicator": "출생아 수",
+        "value": 34.0,
+        "unit": null,
+        "time_period": "2024-10",
+        "population": "전국",
+        "source_reference": null
+      },
+      "graph_temporal": null,
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.5,
+      "mismatch_type": null,
+      "explanation": "해당 주장인 \"# 10월 출생아 수, 34년 만에 최대 증가...혼인도 6년 만에 최고치\"와 관련된 공식 통계를 찾을 수 없었습니다. 이는 해당 주제와 관련된 통계 자료가 존재하지 않거나, 검색어가 정확하지 않아 원하는 정보를 얻지 못했을 가능성이 있습니다. \n\n통계청 국가통계포털(KOSIS)에서 '출생아 수'나 '혼인 건수' 등의 키워드로 검색하여 필요한 정보를 찾아보시기 바랍니다."
+    },
+    {
+      "sent_id": "b0002_s0000",
+      "claim_text": "코로나 이후 미뤘던 결혼 본격화\n“결혼·출산 환경 개선 지속 필요”\n[서울경제]\n올해 10월 출생아 수는 총 2만 1426명으로 지난해 같은 달(1만 8878명)보다 6.7% 늘었다.",
+      "schema": {
+        "indicator": "출생아 수",
+        "value": 6.7,
+        "unit": "%",
+        "time_period": "2024-10",
+        "population": null,
+        "source_reference": "서울경제"
+      },
+      "graph_temporal": null,
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장에 대한 공식 통계를 찾을 수 없어 검증이 불가능합니다. 이는 해당 기간의 출생아 수와 관련된 통계 자료가 존재하지 않거나, 검색어가 정확하지 않아 원하는 정보를 찾지 못했을 가능성이 있습니다. \n\n통계청 국가통계포털(KOSIS)에서 '출생아 수' 항목을 선택하신 후, 원하시는 기간을 설정하여 다시 한번 검색해 보시기 바랍니다. 이를 통해 보다 정확한 정보를 확인하실 수 있습니다."
+    },
+    {
+      "sent_id": "b0002_s0001",
+      "claim_text": "이는 1991년 4월(8.1%) 이후 34년 만에 가장 높은 증가율이다.",
+      "schema": {
+        "indicator": "출생아 수",
+        "value": 8.1,
+        "unit": "%",
+        "time_period": "1991-04",
+        "population": null,
+        "source_reference": "서울경제"
+      },
+      "graph_temporal": {
+        "expression": "1991년 4월",
+        "resolved": "1991-04",
+        "basis": "'1991년 4월'은 이미 절대 시점",
+        "via_coref": null
+      },
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.5,
+      "mismatch_type": null,
+      "explanation": "해당 주장인 \"1991년 4월 8.1% 이후 34년 만에 가장 높은 증가율\"이라는 것을 입증할 공식 통계를 찾을 수 없었습니다. 이와 관련해 대한민국 통계청 KOSIS 홈페이지에서 '출생아 수 1991-04'라는 검색어로 찾아보았지만, 해당 자료를 발견하지 못했습니다. 따라서 추가적인 조사나 검증이 필요하며, 현재로서는 이를 사실 여부를 판단할 수 없습니다. 더 자세한 정보를 원하신다면, 대한민국 통계청 KOSIS 홈페이지(https://kosis.kr/index/index.do) 에서 직접 원하시는 주제와 기간을 설정하여 검색해 보실 수 있습니다."
+    },
+    {
+      "sent_id": "b0002_s0002",
+      "claim_text": "올 10월 합계출산율도 0.76명으로 지난해 같은 달보다 0.04명 증가했다.",
+      "schema": {
+        "indicator": "합계출산율",
+        "value": 0.04,
+        "unit": null,
+        "time_period": "2024-10",
+        "population": null,
+        "source_reference": "서울경제"
+      },
+      "graph_temporal": {
+        "expression": "올 10월",
+        "resolved": "2024-10",
+        "basis": "anchor_year + 0 = 2024년에 해당하므로",
+        "via_coref": null
+      },
+      "evidence": {
+        "stat_table_id": "DT_1B81A23",
+        "source_name": "시군구/출생아수 합계출산율",
+        "official_value": 0.748,
+        "unit": "",
+        "time_period": "2024"
+      },
+      "verdict": "mismatch",
+      "confidence": 0.6624999999999996,
+      "mismatch_type": "value",
+      "explanation": "해당 기사에서는 2024년 10월의 합계출산율이 0.76명으로, 전년 동월 대비 0.04명 증가했다고 주장했습니다. 그러나 KOSIS에서 제공하는 '시군구/출생아수 합계출산율' 자료에 따르면, 실제로는 2024년 10월의 합계출산율이 0.748명이고 2023년 10월의 합계출산율이 0.721명으로, 그 차이는 0.027명이었습니다. 따라서 기사에서 제시한 수치는 사실과 다르며, 이는 32.5%의 오차 범위 내에 있습니다. 해당 정보의 출처는 KOSIS이며, 구체적인 통계표 ID는 DT_1B81A23입니다."
+    },
+    {
+      "sent_id": "b0002_s0003",
+      "claim_text": "올 10월 혼인 건수는 1만 7921건으로 전년보다 3.9% 증가했다.",
+      "schema": {
+        "indicator": "혼인 건수",
+        "value": 3.9,
+        "unit": "건",
+        "time_period": "2024-10",
+        "population": "전국",
+        "source_reference": null
+      },
+      "graph_temporal": null,
+      "evidence": null,
+      "verdict": "unverifiable",
+      "confidence": 0.3,
+      "mismatch_type": null,
+      "explanation": "해당 주장에 대한 공식 통계를 찾을 수 없어 검증이 불가능합니다. 이는 해당 기간의 혼인 건수와 관련된 통계 자료가 존재하지 않거나, 검색어가 정확하지 않아 원하는 정보를 얻지 못했을 가능성이 있습니다. \n\n통계청 국가통계포털(KOSIS)에서 '혼인 건수' 항목을 선택하신 후, 시도별, 분기별 등 다양한 조건을 설정하여 원하시는 통계를 찾아보시기 바랍니다."
+    }
+  ]
+}

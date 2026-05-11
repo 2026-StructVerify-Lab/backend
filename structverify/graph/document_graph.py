@@ -27,6 +27,7 @@ verifier가 KOSIS row 매칭 시 resolved time을 사용
 """
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 from structverify.core.schemas import (
@@ -47,6 +48,62 @@ _TEMPORAL_AGENT_PROMPT = """당신은 문서의 시간 정보를 정밀하게 �
 # 추출 대상
 
 ## 1) anchor: 이 문서가 "기준 시점"으로 삼는 시점
+
+[v6.7 우선순위 — 위에서부터 엄격히 적용]
+
+★★★ 1순위 (절대 우선): 본문 어디든 (시작/중간/끝) 명시된 **발행일/입력일/작성일** 연도
+   발행일 패턴 — 다음 중 *어떤 것이라도* 발견되면 그 연도가 anchor_year:
+   · "입력 YYYY.MM.DD" / "입력 YYYY-MM-DD"  (예: "입력 2025.01.01 14:59")
+   · "발행 YYYY.MM.DD" / "게재 YYYY.MM.DD"
+   · "작성일 YYYY..." / "보도 YYYY..."
+   · 문서 위/아래에 떨어진 "YYYY-MM-DD" 또는 "YYYY.MM.DD" 단독 라인
+   · "YYYY년 MM월 DD일자" 형식
+   · 기자 이름과 함께 나오는 날짜
+   · 본문 맨 첫 줄/두 번째 줄에 있어도, **맨 끝에 있어도** 동일하게 우선.
+
+   ⚠️ 발행일은 본문 *어디든* 있을 수 있습니다. 위치 무관. 찾으면 그게 anchor.
+
+★★ 2순위: 발행일이 없을 때만 — "OOOO년은", "OOOO년 들어" 같은 본문 명시 표현
+   · 단, *발행일 패턴이 있으면 이 신호는 무시*.
+   · 예: 발행일="2025.01.01"이고 본문에 "2024년은 ~한 해"가 있어도 anchor=2025.
+     ("2024년은 ~한 해"는 anchor가 아니라 *2024년에 대한 서술*임)
+
+★ 3순위: "올해", "현재" 같은 표현의 참조 시점 추론
+   · 다른 단서 없으면 추론하지 말고 null
+
+본문에 명시된 단서가 없으면 anchor_year=null (추측 금지).
+
+⚠️ 매우 흔한 실수 1: 발행일이 "2025-06-25"인데 본문에서 "지난해 같은 달" 같은 표현을 보고
+   "지난해=2024"이니까 anchor도 2024라고 박는 실수. anchor는 *기준* 시점입니다.
+   "지난해"는 anchor에서 1 뺀 거고, anchor 자체는 발행일 연도(2025)입니다.
+
+⚠️ 매우 흔한 실수 2: 발행일이 "2025.01.01"인데 본문에 "2024년은 ~한 해"라는 강한 표현이
+   있어서 anchor=2024로 박는 실수. **발행일이 더 강한 신호입니다.**
+   "2024년은 ~한 해"는 2024년에 대한 *서술*이지 anchor가 아닙니다.
+   올바른 답: anchor_year=2025, "작년"=2024, "재작년"=2023.
+
+[구체 예시 — 그대로 따라하세요]
+예시 A:
+  본문: "# 작년 연평균기온 14.8도\n입력 2025.01.01 14:59\n2024년은 ... 뜨거웠던 해\n작년 평균기온은 14.8도..."
+  → 발행일 패턴 "입력 2025.01.01" 발견 → anchor_year=2025
+  → "작년" → 2024 (anchor - 1)
+  → "재작년" → 2023 (anchor - 2)
+  → "2024년"은 본문에 있어도 *절대 표현*이므로 그대로 2024 (anchor 결정에 사용 안 함)
+
+예시 B:
+  본문: "올해 4월 출생아 수 ... 6.7% 늘었다\n... [중간 생략] ...\n(2025-06-25 작성)"
+  → 본문 *맨 끝*에 "2025-06-25" → 발행일 패턴 → anchor_year=2025
+  → "올해" → 2025, "지난해" → 2024
+
+예시 C (발행일 없는 경우):
+  본문: "2024년은 압도적으로 뜨거웠던 해로 남았다. 작년 평균기온은 ..."
+  → 발행일 패턴 없음 → 2순위: "2024년은 ~ 해" → anchor_year=2024
+  → "작년" → 2023
+
+anchor_evidence에 어떤 문장/표현을 근거로 정했는지 짧게 적으세요.
+(예: "본문 2번째 줄 '입력 2025.01.01'", "본문 끝 '(2025-06-25 작성)'")
+
+[참고 — v6.5 이전 가이드 (위 우선순위가 적용 안 되면)]
 - 본문에 "OOOO년은", "지난 OOOO년", "발행일: OOOO" 등으로 명시된 연도/시점을 우선
 - 명시된 anchor가 여러 개라면 본문 서술 시점의 기준이 되는 것을 선택
 - 본문에 명시되지 않은 경우 anchor_year=null
@@ -89,7 +146,8 @@ _TEMPORAL_AGENT_PROMPT = """당신은 문서의 시간 정보를 정밀하게 �
 
 
 # Structured Outputs 강제 — JSON 파싱 실패 없음
-_TEMPORAL_OUTPUT_SCHEMA: dict[str, Any] = {
+# [v6.2] sent_id를 enum으로 동적 강제 → LLM이 prefix 누락 불가
+_TEMPORAL_OUTPUT_SCHEMA_TEMPLATE: dict[str, Any] = {
     "type": "object",
     "properties": {
         "anchor_year": {
@@ -105,11 +163,11 @@ _TEMPORAL_OUTPUT_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "sent_id": {"type": "string"},
+                    "sent_id": {"type": "string"},  # ← 빌드 시 enum으로 교체
                     "expression": {"type": "string"},
                     "resolved": {"type": ["string", "null"]},
                     "resolution_basis": {"type": "string"},
-                    "refers_to_sent_id": {"type": ["string", "null"]},
+                    "refers_to_sent_id": {"type": ["string", "null"]},  # ← 동일
                 },
                 "required": ["sent_id", "expression", "resolved", "resolution_basis"],
             },
@@ -117,6 +175,31 @@ _TEMPORAL_OUTPUT_SCHEMA: dict[str, Any] = {
     },
     "required": ["anchor_year", "anchor_evidence", "temporal_expressions"],
 }
+
+
+def _build_output_schema(valid_sent_ids: list[str]) -> dict[str, Any]:
+    """
+    [v6.2] 유효한 sent_id만 받도록 enum 강제하는 schema 동적 생성.
+
+    Structured Outputs(HCX-007)이 enum 위반 응답을 거부하므로,
+    LLM이 "b0001_s0003"을 "s0003"으로 줄여 답하는 것 자체가 불가능.
+    """
+    schema = copy.deepcopy(_TEMPORAL_OUTPUT_SCHEMA_TEMPLATE)
+    items_props = schema["properties"]["temporal_expressions"]["items"]["properties"]
+
+    # sent_id: 반드시 valid 값 중 하나
+    items_props["sent_id"] = {
+        "type": "string",
+        "enum": valid_sent_ids,
+        "description": "입력에 [...]로 표시된 sent_id 중 정확히 하나를 그대로 복사하세요.",
+    }
+    # refers_to_sent_id: valid 값 또는 null
+    items_props["refers_to_sent_id"] = {
+        "type": ["string", "null"],
+        "enum": valid_sent_ids + [None],
+        "description": "참조 대상 sent_id 또는 null",
+    }
+    return schema
 
 
 # ── 메인 빌더 ───────────────────────────────────────────────────────────────
@@ -128,19 +211,12 @@ async def build_document_temporal_graph(
     """
     문서 레벨 LLM agent 1회 호출 → 시간 그래프 빌드.
 
-    Args:
-        sir_doc: SIR Document (blocks/sentences 포함)
-        config: LLM 설정
+    [v6.2] sent_id를 Structured Outputs schema에서 enum으로 강제.
+           LLM이 잘못된 sent_id를 답할 수 없음.
 
     Returns:
         ([DocumentNode, TemporalExprNodes, ResolvedTimeNodes],
          [HAS_TEMPORAL, RELATIVE_TO, RESOLVES_TO, REFERS_TO 엣지])
-
-    Note:
-        - SentenceNode/BlockNode는 graph_builder.py가 만드는 기존 노드를 재사용
-          (sent.graph_anchor_id 그대로 참조)
-        - LLM 1회 호출만으로 전체 문서의 시간 정보 추출
-        - 실패 시 빈 리스트 반환 — 다운스트림은 anchor 정보 없이 작동
     """
     config = config or {}
     llm = LLMClient(config=config.get("llm", {}))
@@ -150,10 +226,23 @@ async def build_document_temporal_graph(
         logger.warning("temporal graph: 빈 문서 — skip")
         return [], []
 
+    # [v6.2] valid sent_id 목록을 추출하여 schema에 enum으로 박음
+    valid_sent_ids = [
+        sent.sent_id
+        for block in sir_doc.blocks
+        for sent in block.sentences
+        if sent.sent_id
+    ]
+    if not valid_sent_ids:
+        logger.warning("temporal graph: 유효한 sent_id 없음 — skip")
+        return [], []
+
+    output_schema = _build_output_schema(valid_sent_ids)
+
     try:
         result = await llm.generate_structured(
             prompt=_TEMPORAL_AGENT_PROMPT.format(document=doc_text),
-            schema=_TEMPORAL_OUTPUT_SCHEMA,
+            schema=output_schema,
             system_prompt=(
                 "문서 시간 분석 전문가. 모든 시간 표현을 빠짐없이 수집하고, "
                 "anchor와 문장 간 참조를 통해 가능한 한 절대 시점으로 풀어내세요. "

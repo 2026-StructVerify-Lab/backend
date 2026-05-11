@@ -40,22 +40,89 @@ logger = get_logger(__name__)
 # KOSIS 통합검색에서 국가통계만 (지역통계 제외)
 _KOSIS_SEARCH_VW_CD = "MT_ZTITLE"
 
+
+# [v6.2] LLM이 카테고리/검색어에 마크다운 마커를 섞어 반환하는 케이스 정제
+# 예: "**최고기온 기록**, **" → "최고기온 기록"
+_MARKDOWN_MARKER_RE = re.compile(r"[*_`#~]+")
+
+
+def _strip_markdown(text: str) -> str:
+    """LLM 응답에서 마크다운 마커 제거 + 양끝 따옴표/공백 정리."""
+    if not text:
+        return ""
+    cleaned = _MARKDOWN_MARKER_RE.sub("", text)
+    cleaned = cleaned.strip().strip("\"'").strip()
+    return cleaned
+
 # LLM 카테고리/검색어 추출 프롬프트
-_CATEGORY_EXTRACT_PROMPT = """다음 뉴스 수치 주장을 분석하여 두 가지를 추출하세요.
+_CATEGORY_EXTRACT_PROMPT = """다음 뉴스 수치 주장을 분석하여 KOSIS 검색용 정보를 추출하세요.
 
 indicator: {indicator}
 population: {population}
 원문: {claim_text}
 
-1) 이 통계가 속할 KOSIS 카테고리 경로 키워드 2~3개 (쉼표 구분)
-   KOSIS 주요 분야: 인구, 가구, 고용, 노동, 임금, 물가, 가계, 보건, 사회, 복지, 교육, 환경, 농림, 수산, 건설, 주택, 토지, 교통, 정보통신, 경제, 산업, 무역
-   이 수치가 나올 법한 통계조사명도 포함하세요.
+1) KOSIS 카테고리 키워드 (쉼표 구분, 2~3개)
+   ⚠️ 반드시 아래 KOSIS 공식 분야 명칭 *그대로* 사용. 자유롭게 풀어쓰지 마세요.
 
-2) KOSIS 통계표 이름에 들어갈 법한 검색어 2~3단어 (숫자/연도 금지)
+   [KOSIS 공식 분야 목록 — 이 단어들 중에서만 선택]
+   인구, 가구, 출생, 사망, 혼인, 이혼, 가족, 고령자,
+   고용, 노동, 임금, 일자리, 실업, 청년,
+   물가, 가계, 소득, 소비, 자산, 부채,
+   보건, 의료, 질병, 사망원인,
+   사회, 복지, 연금, 보육, 장애인,
+   교육, 학교, 대학, 학력,
+   환경, 기상, 기후, 날씨, 대기, 수질, 폐기물, 재해,
+   농림, 농업, 임업, 수산, 어업, 축산,
+   건설, 주택, 토지, 부동산, 임대,
+   교통, 자동차, 도로, 철도, 항공, 해운,
+   정보통신, 인터넷, 통신, 방송, ICT,
+   경제, GDP, 산업, 제조업, 서비스업, 무역, 수출입, 금융, 은행, 증권,
+   에너지, 전력, 가스, 석유, 재생에너지
+
+   [잘못된 예시 — 절대 이렇게 답하지 마세요]
+   "기후 변화", "기온 변화", "날씨 데이터" ← 자유 풀어쓰기 (금지)
+   "출생아수 통계", "혼인수 동향" ← 위 목록에 없는 표현 (금지)
+
+   [올바른 예시]
+   기온 14.8도 claim → 카테고리: 환경, 기상, 기후
+   출생아수 6.7% 증가 claim → 카테고리: 인구, 출생
+   혼인 건수 3.9% 증가 claim → 카테고리: 인구, 혼인
+   합계출산율 0.04 증가 claim → 카테고리: 인구, 출생
+
+2) KOSIS 통계표명에 들어갈 핵심 단어 2~3개 (쉼표 구분, 숫자/연도 금지)
+   stat_name에 실제로 등장하는 **공식 KOSIS 용어**. 형용사/수식어 빼고 핵심 명사만.
+
+   ⚠️ population (분류 축 — 대졸이상, 청년, 여성, 외국인 등)은 검색어에 넣지 마세요.
+      stat_name은 *지표 본체*로 매칭. 분류 축은 표 내부 분해 컬럼에 있음.
+
+   [KOSIS 자주 등장 공식 용어 (이걸 우선 사용)]
+   고용/노동: 쉬었음, 비경제활동인구, 경제활동인구, 취업자수, 실업률, 임금근로자, 일자리
+   인구: 출생아수, 사망자수, 혼인건수, 이혼건수, 합계출산율, 추계인구, 1인가구
+   가구/소득: 가구소득, 가처분소득, 경상소득, 가계지출, 소비지출
+   환경/기상: 평균기온, 최저기온, 최고기온, 강수량, 일조시간, 미세먼지, PM10, PM2.5
+   교육: 진학률, 졸업자수, 재학생수, 사교육비
+
+   [올바른 예시]
+   기온 14.8도 → 검색어: 기온, 평균기온
+   출생아수 6.7% 증가 → 검색어: 출생아수, 출생
+   혼인 건수 → 검색어: 혼인건수, 혼인
+   대졸이상 청년 쉬었음 비율 → 검색어: 쉬었음, 비경제활동인구
+                              (대졸이상, 청년은 분류 축 — 넣지 마세요)
+   여성 65세 1인가구 → 검색어: 1인가구, 가구
+
+   [잘못된 예시]
+   ❌ "대졸이상 청년 쉬었음 비율, 청년 교육 수준별 실업률"  (분류 축 + 합성어 + 너무 김)
+   ❌ "2024년 연평균 기온 통계"  (연도, 통계 같은 군더더기)
+   ❌ "월별 출생아수 변화 추이"   (수식어 "변화 추이")
+
+[중요 출력 규칙]
+- 마크다운 강조(*, _, `, #, ~) 절대 사용 금지. 일반 텍스트만.
+- "카테고리:"와 "검색어:" 두 줄, 각 줄에 실제 한국어 단어만.
+- indicator가 비어있어도 일반적 카테고리(예: 인구, 경제)로 답하세요.
 
 형식:
 카테고리: 키워드1, 키워드2, 키워드3
-검색어: 검색 키워드"""
+검색어: 키워드1, 키워드2"""
 
 
 class CatalogSearchTool:
@@ -112,27 +179,61 @@ class CatalogSearchTool:
         _add(kosis_recs)
 
         # 2+3) pgvector 검색
-        embedding_text = (query.extra_params or {}).get("embedding_text") or (
+        # [v6.6 변경] 임베딩 텍스트 포맷을 박재윤 factcheck_test.py v6 기준으로 강화
+        # KOSIS 카탈로그가 인덱싱될 때 사용된 포맷과 매칭되도록:
+        #   "{categories} > {indicator} | 항목: {indicator} | 분류: {kw} | 단위: {unit}"
+        # 카테고리는 catalog_search 내부 LLM이 방금 추출했으므로 여기서 합쳐줘야 함.
+        # query_builder는 indicator/population/unit만 넘김 → 여기서 cats + 분류(search_kw) 추가.
+        #
+        # [v6.5 기존 — 비교용으로 주석 보존]
+        # embedding_text = (query.extra_params or {}).get("embedding_text") or (
+        #     " ".join(filter(None, [query.indicator, query.population, search_kw]))
+        # )
+        base_emb = (query.extra_params or {}).get("embedding_text") or (
             " ".join(filter(None, [query.indicator, query.population, search_kw]))
         )
+        cats_str = " ".join(category_kws) if category_kws else ""
+        # 카테고리 + 분류 keyword를 base_emb에 결합 (KOSIS 카탈로그 포맷)
+        embedding_text = (
+            f"{cats_str} > {base_emb} | 분류: {search_kw}"
+        ).strip()
+
+        # [v6.6 추가] stat_name 토큰 추출 — pgvector WHERE에 stat_name ILIKE 필터로 활용
+        # 박재윤 factcheck_test.py의 field_terms와 동일한 로직.
+        # 출생아 수, 혼인 건수 같은 단어가 stat_name에 직접 매칭되는 표를 끌어와야 함.
+        stopwords = {"수", "명", "원", "건", "개", "만", "천", "억", "이상", "이하", "약", "총", "전체"}
+        field_terms: list[str] = []
+        if query.indicator:
+            for tok in re.split(r"[\s·,/]+", query.indicator):
+                if len(tok) >= 2 and tok not in stopwords and not re.match(r"^[\d.]+$", tok):
+                    field_terms.append(tok)
+
         embedding = await self._get_embedding(embedding_text)
 
         if embedding:
-            # 2) category 필터 + embedding
-            if category_kws:
+            # 2) category 필터 + (NEW) stat_name 필터 + embedding
+            if category_kws or field_terms:
                 cat_recs = await self._search_pgvector(
                     embedding,
                     category_keywords=category_kws,
+                    field_name_terms=field_terms,   # [v6.6 추가]
                     top_k=top_k,
                 )
                 _add(cat_recs)
 
-            # 3) 전체 embedding (폴백)
+            # 3) 전체 embedding (폴백) — 변경 없음
             all_recs = await self._search_pgvector(embedding, category_keywords=None, top_k=5)
             _add(all_recs)
 
+        final_results = results[:top_k]
         logger.info(f"CatalogSearch 완료: {len(results)}개 후보")
-        return results[:top_k]
+        # [v6.5 진단] 후보 stat_id 전체를 로그에 — 어떤 표가 검색되고 어떤 게 누락되는지 추적
+        if final_results:
+            stat_id_preview = ", ".join(
+                f"[{r.stat_id}]{r.stat_name[:20]}" for r in final_results
+            )
+            logger.info(f"CatalogSearch 후보들: {stat_id_preview}")
+        return final_results
 
     # ── LLM 카테고리/검색어 추출 ────────────────────────────────────────────
 
@@ -177,14 +278,30 @@ class CatalogSearchTool:
             if "카테고리" in line and ":" in line:
                 cats = line.split(":", 1)[1].strip()
                 category_keywords = [
-                    c.strip().strip("\"'") for c in cats.split(",") if c.strip()
+                    _strip_markdown(c) for c in cats.split(",") if c.strip()
                 ]
+                # 빈 문자열 제거 (markdown만 있던 항목 처리)
+                category_keywords = [c for c in category_keywords if c]
             elif "검색어" in line and ":" in line:
                 kw = line.split(":", 1)[1].strip().strip("\"'")
+                kw = _strip_markdown(kw)
                 kw = re.sub(r"\b\d{4}\b", "", kw).strip()
                 kw = re.sub(r"\s+", " ", kw)
                 if kw:
                     search_keyword = kw
+
+        # [v6.3] 모든 정제 후에도 키워드가 비어있거나 너무 짧으면 fallback
+        # 또한 한글/영문 글자가 하나도 없으면(특수문자만) fallback
+        clean_check = re.sub(r"[^\w가-힣]", "", search_keyword)
+        if not search_keyword.strip() or len(clean_check) < 2:
+            search_keyword = query.indicator or query.keyword or ""
+            logger.debug(f"검색어 추출 결과 부적합 → fallback: {search_keyword!r}")
+
+        # category도 같은 검사
+        category_keywords = [
+            c for c in category_keywords
+            if len(re.sub(r"[^\w가-힣]", "", c)) >= 2
+        ]
 
         return (category_keywords, search_keyword)
 
@@ -267,13 +384,19 @@ class CatalogSearchTool:
         self,
         embedding: list[float],
         category_keywords: list[str] | None = None,
+        field_name_terms: list[str] | None = None,   # [v6.6 추가]
         top_k: int = 5,
     ) -> list[StatRecord]:
         """
         kosis_stat_catalog pgvector 유사도 검색.
 
-        category_keywords 있으면: category_path ILIKE 필터 + embedding 정렬
-        없으면: 전체 embedding 정렬
+        [v6.6 변경] field_name_terms 옵션 추가 — stat_name ILIKE 필터.
+        category_path와 stat_name 양쪽에서 매칭되는 것을 모두 끌어옴 (OR).
+        박재윤 factcheck_test.py v6 search_pgvector 로직과 동일.
+
+        category_keywords + field_name_terms 둘 다 있으면: (cat OR stat_name) AND embedding 정렬
+        하나만 있으면: 그것 OR + embedding 정렬
+        둘 다 없으면: 전체 embedding 정렬
         """
         try:
             import asyncpg
@@ -290,11 +413,31 @@ class CatalogSearchTool:
             return []
 
         try:
+            # [v6.6] WHERE 절을 동적으로 구성 — category OR stat_name 둘 다 검사
+            # [v6.5 기존 — 비교용 주석]
+            # if category_keywords:
+            #     where_parts = [f"category_path ILIKE ${i+2}" for i in range(len(category_keywords))]
+            #     where_sql   = " OR ".join(where_parts)
+            #     params      = [vector_str] + [f"%{kw}%" for kw in category_keywords] + [top_k]
+            where_clauses: list[str] = []
+            ilike_params: list[str] = []
+            param_idx = 2  # $1은 vector
+
             if category_keywords:
-                # category_path ILIKE 필터 + embedding 거리 정렬
-                where_parts = [f"category_path ILIKE ${i+2}" for i in range(len(category_keywords))]
-                where_sql   = " OR ".join(where_parts)
-                params      = [vector_str] + [f"%{kw}%" for kw in category_keywords] + [top_k]
+                cat_parts = [f"category_path ILIKE ${param_idx + i}" for i in range(len(category_keywords))]
+                where_clauses.append("(" + " OR ".join(cat_parts) + ")")
+                ilike_params.extend([f"%{kw}%" for kw in category_keywords])
+                param_idx += len(category_keywords)
+
+            if field_name_terms:
+                name_parts = [f"stat_name ILIKE ${param_idx + i}" for i in range(len(field_name_terms))]
+                where_clauses.append("(" + " OR ".join(name_parts) + ")")
+                ilike_params.extend([f"%{t}%" for t in field_name_terms])
+                param_idx += len(field_name_terms)
+
+            if where_clauses:
+                where_sql = " OR ".join(where_clauses)
+                params = [vector_str] + ilike_params + [top_k]
                 sql = f"""
                     SELECT stat_id, stat_name, org_id, org_name, category_path, keywords,
                            1 - (embedding <-> $1::vector) AS similarity
@@ -342,7 +485,12 @@ class CatalogSearchTool:
                     },
                 ))
 
-            label = f"(category={category_keywords})" if category_keywords else "(전체)"
+            label_parts = []
+            if category_keywords:
+                label_parts.append(f"cat={category_keywords}")
+            if field_name_terms:
+                label_parts.append(f"name={field_name_terms}")
+            label = "(" + ", ".join(label_parts) + ")" if label_parts else "(전체)"
             logger.debug(f"pgvector 검색 {label}: {len(records)}개")
             return records
 
