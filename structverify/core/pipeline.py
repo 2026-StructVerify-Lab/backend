@@ -10,6 +10,10 @@
 # [TODO] DWHManager 초기화 (Snowflake)
 # [TODO] GraphStore 초기화 (Neo4j)
 # [TODO] save_document 구현 (db_manager.py)
+# [김예슬 - 2026-04-30 / v3]
+# - config 기본값 load_config() 적용
+# - feedback/학습: enable_feedback=false 이면 Step 11~12 skip
+# - runtime_agent에 kosis llm config 전달 (LLM Agent catalog 검색용)
 
 core/pipeline.py — v2.1 검증 파이프라인 (13단계)
 
@@ -37,6 +41,7 @@ from structverify.core.schemas import (
     SIRDocument,
     VerificationReport,
 )
+from structverify.core.config_loader import load_config
 from structverify.preprocessing.extractor import extract_text
 from structverify.preprocessing.sir_builder import build_sir
 from structverify.agent.runtime_agent import RuntimeAgent
@@ -63,11 +68,25 @@ class VerificationPipeline:
     즉, Claim Detection 앞단에 "Sentence Candidate Detection"이 추가되었다.
     """
     def __init__(self, config: dict | None = None):
-        self.config = config or {}
-        self.runtime_agent = RuntimeAgent(config=self.config)
+        # [v3 김예슬] config 없으면 default.yaml 자동 로드
+        self.config = config if config is not None else load_config()
+
+        # runtime_agent에 kosis + llm 설정 합쳐서 전달
+        # → KOSISConnector가 LLM Agent(catalog 검색)에 llm 설정 필요
+        agent_config = {
+            **self.config,
+            "kosis": {
+                **self.config.get("kosis", {}),
+                "llm": self.config.get("llm", {}),
+            },
+        }
+        self.runtime_agent = RuntimeAgent(config=agent_config)
 
         # [v1] - 박재윤: DBManager 초기화 연동
         self.db_manager = DBManager(config=self.config.get("database", {}))
+
+        # [v3 김예슬] 피드백/학습 활성화 여부 (false면 Step 11~12 skip)
+        self.enable_feedback = bool(self.config.get("enable_feedback", False))
 
         # TODO [김예슬]: BuilderAgent 초기화 (비동기 백그라운드 학습 루프)
         # self.builder_agent = BuilderAgent(config=self.config)
@@ -125,22 +144,29 @@ class VerificationPipeline:
 
         # [v1] - 박재윤: Claims → PostgreSQL 저장
         if claims:
-            await self.db_manager.save_claims(claims)
+            await self.db_manager.save_claims(claims, domain=sir_doc.detected_domain)
             logger.info(f"Claims 저장 완료: {len(claims)}건")
 
         # [v1] - 박재윤: Results → PostgreSQL 저장
         if results:
-            await self.db_manager.save_results(results)
+            await self.db_manager.save_results(results, claims)
             logger.info(f"Results 저장 완료: {len(results)}건")
 
         # TODO [박재윤]: Nodes/Edges → Neo4j 저장
         # await self.graph_store.merge_nodes(nodes)
         # await self.graph_store.merge_edges(edges)
 
-        # TODO [김예슬]: Step 10 — Human Review 인터페이스 연동
-        # TODO [김예슬]: Step 11 — Feedback Logging
-        # TODO [김예슬]: Step 12 — Adaptation Trigger
-        # TODO [김예슬]: Step 13 — Report 렌더링
+        # Step 10~13: 피드백/학습 루프 (enable_feedback=true 일 때만 활성화)
+        # [v3 김예슬] enable_feedback=false (기본값) → skip
+        # 활성화: config.yaml에서 enable_feedback: true
+        if self.enable_feedback:
+            pass
+            # TODO [김예슬]: Step 10 — Human Review 인터페이스 연동
+            # TODO [김예슬]: Step 11 — Feedback Logging
+            # TODO [김예슬]: Step 12 — Adaptation Trigger
+            # TODO [김예슬]: Step 13 — Report 렌더링
+        else:
+            logger.debug("Step 10~13 skip (enable_feedback=false)")
 
         # TODO [박재윤]: DWH 적재 (검증 로그, 모델 성능, LLM 비용)
         # await self.dwh_manager.load_verification_logs([...])

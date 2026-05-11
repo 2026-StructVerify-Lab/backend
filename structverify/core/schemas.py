@@ -1,7 +1,7 @@
 """
-core/schemas.py — v2.1 전체 파이프라인 데이터 모델
+core/schemas.py — v3 전체 파이프라인 데이터 모델
 
-v2.1 변경점
+v2 변경점
 - Sentence에 regex 중심 has_numeric 대신
   has_numeric_surface + candidate_score/candidate_label 추가
 - claim candidate detection을 독립 태스크로 다루기 위한 필드 추가
@@ -10,6 +10,14 @@ v2.1 변경점
 설계 의도
 - surface rule은 보조 신호로만 사용
 - 실제 검증 후보 여부는 candidate_score / candidate_label이 담당
+
+v3 변경점 [김예슬]
+- GraphEdgeType에 4개 추가
+- COMPARE 엣지: indicator가 같은 Claim 쌍을 전부 연결
+"쉬었음인구"를 indicator로 가진 C1과 C2가 COMPARE로 연결되면,
+"2.6배" 검증 시 MetricNode 2-hop으로 C1+C2를 함께 KOSIS에 조회해서 비율 계산이 가능
+- 문맥 엣지: sir_doc이 넘어오면 extract_context_edges()를 호출해서 NEXT_SENT/IN_BLOCK/IN_DOC를 GraphEdge로 변환해 반환값에 포함
+
 """
 from __future__ import annotations
 
@@ -74,6 +82,11 @@ class GraphNodeType(str, Enum):
     TIME = "time"
     EVIDENCE = "evidence"
     SOURCE = "source"
+    # ── 멀티홉 시간 그래프용 (document_graph.py) ──────────────────────────
+    DOCUMENT = "document"            # 문서 메타 (anchor_year property 보유)
+    SENTENCE = "sentence"            # 문장 (REFERS_TO 타겟, sir_doc 호환)
+    TEMPORAL_EXPR = "temporal_expr"  # "작년", "9월", "재작년 같은 기간"
+    RESOLVED_TIME = "resolved_time"  # 절대 시점 (2023, 2024-09 등)
 
 
 class GraphEdgeType(str, Enum):
@@ -83,6 +96,17 @@ class GraphEdgeType(str, Enum):
     SOURCED_FROM = "sourced_from"
     CONTRADICTS = "contradicts"
     SUPPORTS = "supports"
+    # GraphRAG 문맥 엣지 (sir_builder.extract_context_edges → graph_builder)
+    NEXT_SENT = "next_sent"    # 문장 → 다음 문장 (문맥 흐름)
+    IN_BLOCK  = "in_block"     # 문장 → 소속 문단
+    IN_DOC    = "in_doc"       # 문단 → 소속 문서
+    # 복합 주장 검증용 (같은 지표를 공유하는 Claim 간)
+    COMPARE   = "compare"      # C1 ↔ C2 (2.6배 같은 파생 주장 검증)
+    # ── 멀티홉 시간 그래프용 (document_graph.py) ──────────────────────────
+    HAS_TEMPORAL = "has_temporal"  # Sentence/Claim → TemporalExpr
+    RELATIVE_TO  = "relative_to"   # TemporalExpr → Document (anchor 의존)
+    RESOLVES_TO  = "resolves_to"   # TemporalExpr → ResolvedTime
+    REFERS_TO    = "refers_to"     # TemporalExpr → 다른 Sentence (coref)
 
 
 # ── SIR Tree ─────────────────────────────────────────────────
@@ -171,17 +195,22 @@ class ClaimSchema(BaseModel):
     graph_schema_candidates: list[dict[str, str]] = Field(default_factory=list)
 
 
+
 class Claim(BaseModel):
     claim_id: UUID = Field(default_factory=uuid4)
     doc_id: UUID
     block_id: str
     sent_id: str
     claim_text: str
-    claim_type: ClaimType | None = None
+    claim_type: str | None = None          # 자유 문자열
+    canonical_type: ClaimType | None = None
     schema: ClaimSchema | None = None
     source_offset: SourceOffset = Field(default_factory=SourceOffset)
     check_worthy_score: float = 0.0
     graph_anchor_id: str | None = None
+    # [v4 김예슬] 앞뒤 문맥 (SIR Tree에서 추출, runtime_agent가 부착)
+    # "이는 2.6배" 같은 대명사 참조 해소 + schema_inductor/query_builder에서 활용
+    context_text: str | None = None
 
 
 # ── Graph ────────────────────────────────────────────────────

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from structverify.core.schemas import DomainPack, FeedbackEvent
 from structverify.adaptation.feedback_store import FeedbackStore
-from structverify.adaptation.kosis_crawler import crawl_kosis_catalog, save_to_db
+from structverify.adaptation.kosis_crawler import crawl_kosis_catalog, save_to_db, is_catalog_ready
 from structverify.adaptation.sample_builder import build_training_samples
 from structverify.adaptation.synthetic_generator import generate_synthetic_pairs, save_synthetic_data
 from structverify.adaptation.adapter_trainer import AdapterTrainer
@@ -66,14 +66,43 @@ class BuilderAgent:
         logger.info(f"[Agent B] === 사전학습 시작: {domain} ===")
 
         # ── Step 0-1: KOSIS 메타데이터 수집 ──────────────────────────
-        logger.info("[Agent B] Step 0-1: KOSIS 메타데이터 수집")
-        catalog = await crawl_kosis_catalog(self.config)
-        if not catalog:
-            logger.error("[Agent B] 메타데이터 수집 실패 (KOSIS_API_KEY 확인 필요)")
-            return None
+        # [v2 김예슬 - 2026-04-30] catalog.rebuild=false이고 DB에 이미 데이터 있으면 skip
+        # config.yaml:
+        #   kosis.catalog.rebuild: false   # true이면 강제 재수집
+        #   kosis.catalog.min_rows: 1000   # 이 수 이상이면 구축됨으로 판단
+        catalog_cfg  = self.config.get("kosis", {}).get("catalog", {})
+        should_rebuild = catalog_cfg.get("rebuild", False)
+        min_rows       = int(catalog_cfg.get("min_rows", 1000))
 
-        await save_to_db(catalog, self.config)
-        logger.info(f"[Agent B] 메타데이터 {len(catalog)}건 수집 완료")
+        logger.info("[Agent B] Step 0-1: KOSIS 메타데이터 수집")
+
+        if not should_rebuild and await is_catalog_ready(self.config, min_rows):
+            logger.info(
+                f"[Agent B] kosis_stat_catalog 이미 구축됨 (min_rows={min_rows}) → "
+                f"수집 skip. 강제 재수집: config.kosis.catalog.rebuild=true"
+            )
+            # catalog가 이미 DB에 있으므로 합성 데이터 생성도 skip
+            # → Step 0-2~5는 이미 학습된 adapter가 있는 경우에만 의미있음
+            # → pretrain_domain은 여기서 종료하고 기존 adapter 경로 반환
+            import os
+            model_yaml = os.path.join("domain-packs", domain, "model.yaml")
+            if os.path.exists(model_yaml):
+                import yaml
+                with open(model_yaml, encoding="utf-8") as f:
+                    model_info = yaml.safe_load(f)
+                existing_path = model_info.get("adapter_path")
+                if existing_path:
+                    logger.info(f"[Agent B] 기존 adapter 사용: {existing_path}")
+                    return existing_path
+            logger.info("[Agent B] catalog 구축됨이나 adapter 없음 → 합성 데이터 생성 진행")
+            catalog = []  # save_to_db skip, 합성 데이터는 DB catalog 기반으로 진행
+        else:
+            catalog = await crawl_kosis_catalog(self.config)
+            if not catalog:
+                logger.error("[Agent B] 메타데이터 수집 실패 (KOSIS_API_KEY 확인 필요)")
+                return None
+            await save_to_db(catalog, self.config)
+            logger.info(f"[Agent B] 메타데이터 {len(catalog)}건 수집 완료")
 
         # ── Step 0-2: 합성 학습 데이터 생성 ──────────────────────────
         logger.info("[Agent B] Step 0-2: Self-Instruct 합성 데이터 생성")

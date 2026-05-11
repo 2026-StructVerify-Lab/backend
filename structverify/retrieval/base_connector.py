@@ -67,6 +67,7 @@ class BaseConnector(ABC):
     async def search_and_fetch(self, query: ConnectorQuery) -> StatData | None:
         records = await self.search(query)
         if not records:
+            
             return None
         best = max(records, key=lambda r: r.relevance_score)
         return await self.fetch(

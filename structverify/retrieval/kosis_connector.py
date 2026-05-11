@@ -1,11 +1,3 @@
-"""
-retrieval/kosis_connector.py — KOSIS Open API 커넥터 (과제 핵심)
-
-[참고] KOSIS Open API — https://kosis.kr/openapi/index/index.jsp
-  getList(통계표 목록 검색), getStatData(상세 데이터 조회) 엔드포인트 사용
-
-- 담당자: 신준수
-"""
 # 수정자: 신준수
 # 수정 날짜: 2026-04-22
 # 수정 내용: KOSIS API search() 실제 호출 구현
@@ -23,32 +15,235 @@ retrieval/kosis_connector.py — KOSIS Open API 커넥터 (과제 핵심)
 # [DONE] getMeta(PRD/CMMT) 보강
 # [DONE] KOSIS API fetch() Param/statisticsParameterData
 # [TODO] 응답 파싱·obj/itm 매칭 정교화
+"""
+retrieval/kosis_connector.py — KOSIS Open API 커넥터 (v3: CatalogSearchTool + LLM Agent)
 
+[신준수 - 기존]
+- KOSIS 통합검색 + getMeta(PRD/CMMT) 병렬 + Param fetch 구현
+
+[김예슬 - 2026-04-30 / v4]
+- search_and_fetch() 재설계 (v4: 후보 순회 retry):
+  · 1단계: CatalogSearchTool.search() → 후보 stat_id top_k
+  · 2단계: LLM Agent stat_id 선택 + 파라미터 결정 (HCX-DASH-002)
+  · 3단계: KOSIS Param/statisticsParameterData.do fetch
+  · 4단계: 실패 → tried_ids에 추가 → Agent에게 "이건 실패, 남은 후보에서 골라라"
+  · 5단계: 남은 후보에서 재선택 → fetch → 최대 _MAX_CANDIDATES(5)개 순회
+  · Agent가 "NONE" 답하거나 남은 후보 없으면 포기
+
+- fetch() 개선 (factcheck_test.py 참고):
+  · prd_se 순회: Y → M → Q (연간 없으면 월간 시도)
+  · objL 점진: err:20 시 objL2~8 순서로 추가
+  · newEstPrdCnt=3 폴백: 기간 지정 실패 시 최신 3건
+  · 단위 검증: is_same_unit_type으로 명↔개월 혼용 방지
+
+[모듈 분리]
+  CatalogSearchTool  ← catalog_search.py (pgvector 검색 전담)
+  KOSISConnector     ← kosis_connector.py (LLM Agent + KOSIS API fetch)
+
+
+[박재윤 - 2026-05-11]
+- tried_log UnboundLocalError 버그 수정
+  · candidates 없을 때 tried_ids, tried_log 초기화 누락 수정
+"""
 from __future__ import annotations
+
 import asyncio
 import json
 import os
 import re
 from typing import Any
+
 import httpx
-import json5  # type: ignore[import-untyped]  # PyPI json5, Apache-2.0; 비RFC 응답
+import json5  # type: ignore[import-untyped]
+
 from structverify.core.schemas import GraphNode, GraphNodeType, ProvenanceRecord
 from structverify.retrieval.base_connector import (
-    BaseConnector, ConnectorQuery, StatData, StatRecord)
+    BaseConnector, ConnectorQuery, StatData, StatRecord,
+)
+from structverify.retrieval.catalog_search import CatalogSearchTool
 from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# 통합검색 resultCount 기본값(한 페이지에 가져올 통계표 후보 개수; search_result_count로 덮기)
-_DEFAULT_SEARCH_COUNT = 5
-# getMeta/통계자료 GET 공통 헤더(일부 환경에서 User-Agent·Accept 없으면 HTML만 오는 경우 대비)
+_FETCH_MAX_RETRY  = 2    # 단일 stat_id 내 prd_se 순회 retry
+_MAX_CANDIDATES   = 5    # [v4] 후보 순회 최대 횟수
 _JSON_HEADERS: dict[str, str] = {
-    "Accept": "application/json, */*;q=0.1",
+    "Accept":     "application/json, */*;q=0.1",
     "User-Agent": "StructVerify/1.0 (KOSIS OpenAPI; +https://kosis.kr/openapi/)",
 }
 
+# ── LLM Agent 프롬프트 ──────────────────────────────────────────────────────
 
-# 역할: getMeta/Param 호출이 실패했을 때 metadata에 꽂을 작은 에러 dict 만들기
+_AGENT_SELECT_PROMPT = """당신은 한국 공식 통계 전문가입니다.
+아래 검증 주장에 가장 적합한 KOSIS 통계표를 선택하고 조회 파라미터를 결정하세요.
+
+검증 주장: "{claim_text}"
+indicator: {indicator}
+time_period: {time_period}
+population: {population}
+
+후보 통계표:
+{candidates}
+
+JSON으로만 답하세요:
+{{
+  "stat_id": "선택한 통계표 ID",
+  "stat_name": "통계표명",
+  "reason": "선택 이유 한 줄",
+  "prd_se": "Y(연간)/M(월간)/Q(분기)",
+  "start_prd_de": "시작 기간 (예: 2024, 202401)",
+  "end_prd_de": "종료 기간"
+}}"""
+
+_AGENT_RETRY_PROMPT = """KOSIS API 조회가 실패했습니다. 다른 후보 통계표를 선택하세요.
+
+검증 주장: "{claim_text}"
+
+이미 실패한 통계표 (다시 선택 금지):
+{tried_list}
+
+남은 후보 통계표:
+{remaining_candidates}
+
+[중요]
+- 이미 실패한 stat_id는 절대 다시 선택하지 마세요
+- 남은 후보 중에서 가장 적합한 통계표를 선택하세요
+- 남은 후보가 모두 부적합하면 stat_id를 "NONE"으로 답하세요
+
+JSON으로만 답하세요:
+{{
+  "stat_id": "선택한 통계표 ID 또는 NONE",
+  "prd_se": "Y/M/Q",
+  "start_prd_de": "기간",
+  "end_prd_de": "기간",
+  "reason": "선택 이유"
+}}"""
+
+
+# ── 단위 검증 유틸 (factcheck_test.py 참고) ──────────────────────────────────
+# 이 함수를 kosis_connector.py의 기존 _is_table_relevant 대신 넣으세요
+
+def _is_table_relevant(indicator: str, table_name: str) -> bool:
+    """
+    [v5] indicator와 테이블명이 같은 분야인지 키워드 검사.
+    LLM 미사용 — 키워드 겹침 + 도메인 그룹 매칭 (빠름).
+
+    "연평균기온" vs "기술개발 성과"      → False
+    "연평균기온" vs "종관기상 평년값"    → True
+    "평균 최저기온" vs "고온 일수 노출"  → True (기온 그룹)
+    "시가총액" vs "산업별 취업자"        → False
+    """
+    import re
+
+    if not indicator or not table_name:
+        return True
+
+    stopwords = {
+        "통계", "현황", "조사", "결과", "항목", "지표", "전체", "기타",
+        "관련", "변화", "추이", "비교", "분류", "지점별", "행정구역별",
+        "성별", "연령별", "시도별", "시도", "연도별", "월별",
+    }
+
+    def _tokens(text: str) -> set[str]:
+        words = set(re.split(r'[\s·,/()（）\-_]+', text.lower()))
+        return {w for w in words if len(w) >= 2 and w not in stopwords}
+
+    ind_tokens = _tokens(indicator)
+    tbl_tokens = _tokens(table_name)
+
+    # 1) 직접 키워드 겹침 (2글자 이상 토큰)
+    overlap = ind_tokens & tbl_tokens
+    if overlap:
+        return True
+
+    # 2) 부분 문자열 포함 (indicator 토큰이 테이블명에 포함)
+    tbl_lower = table_name.lower()
+    for tok in ind_tokens:
+        if len(tok) >= 3 and tok in tbl_lower:
+            return True
+
+    # 3) 도메인 키워드 그룹 — 같은 그룹이면 관련 있음
+    _GROUPS = [
+        # 기상/기후
+        {"기온", "기상", "기후", "날씨", "온도", "폭염", "한파", "평균기온",
+         "연평균", "최저기온", "최고기온", "강수", "강우", "습도", "종관"},
+        # 인구/가구
+        {"인구", "출산", "사망", "고령", "청년", "세대", "가구", "출생", "혼인"},
+        # 고용/노동
+        {"고용", "실업", "취업", "임금", "근로", "노동", "쉬었음", "경제활동",
+         "일자리", "실업률", "고용률"},
+        # 경제/산업
+        {"경제", "성장", "물가", "소비", "생산", "수출", "수입", "무역", "gdp"},
+        # 주식/금융
+        {"주가", "시총", "코스피", "코스닥", "시가총액", "금리", "환율", "주식"},
+        # 교육
+        {"교육", "학교", "학생", "진학", "졸업", "입학"},
+        # 보건/의료
+        {"의료", "건강", "질환", "사망률", "병원", "보건"},
+        # 환경
+        {"환경", "오염", "대기", "수질", "폐기물", "탄소", "에너지"},
+        # 농업
+        {"농업", "농가", "농림", "수확", "경작", "과수"},
+        # 부동산/건설
+        {"주택", "건설", "부동산", "아파트", "토지", "분양"},
+    ]
+
+    ind_lower = indicator.lower()
+    for group in _GROUPS:
+        ind_hit = any(kw in ind_lower for kw in group)
+        tbl_hit = any(kw in tbl_lower for kw in group)
+        if ind_hit and tbl_hit:
+            return True
+
+    return False
+
+def normalize_value(value: float, kosis_unit: str) -> float:
+    """KOSIS 단위 → 기본 단위로 변환 (천명 → 명 등)"""
+    u = kosis_unit.lower()
+    # [v4] 천명개월은 KOSIS 단위명 오류 — 실제로는 개월 단위, 변환 안 함
+    if "천명개월" in u:
+        return value
+    if "천" in u:
+        return value * 1000
+    if "백만" in u or "million" in u:
+        return value * 1_000_000
+    if "억" in u:
+        return value * 100_000_000
+    return value
+
+
+def is_same_unit_type(claim_unit: str, kosis_unit: str) -> bool:
+    """단위 타입이 같은지 확인 (명↔개월 혼용 방지)"""
+    claim_unit = (claim_unit or "").lower().strip()
+    kosis_unit = (kosis_unit or "").lower().strip()
+
+    if not claim_unit or not kosis_unit:
+        return True
+
+    # [v4] 천명개월은 KOSIS 단위명 오류 — 비교 자체를 통과
+    if "천명개월" in kosis_unit:
+        return True
+
+    _TYPES = {
+        "people":  ["명", "인구", "가구", "세대", "person"],
+        "time":    ["개월", "월", "month", "년", "일", "주"],
+        "ratio":   ["%", "퍼센트", "percent", "율", "비율"],
+        "money":   ["원", "won", "달러", "dollar", "usd"],
+    }
+
+    def _get_type(u: str) -> str:
+        for t, kws in _TYPES.items():
+            if any(kw in u for kw in kws):
+                return t
+        return "unknown"
+
+    ct = _get_type(claim_unit)
+    kt = _get_type(kosis_unit)
+    return (ct == "unknown" or kt == "unknown") or (ct == kt)
+
+
+# ── 기존 헬퍼 (신준수) ───────────────────────────────────────────────────────
+
 def _meta_error_payload(tag: str, exc: Exception | None = None) -> dict[str, Any]:
     d: dict[str, Any] = {"kosis_error": tag}
     if exc is not None:
@@ -56,7 +251,6 @@ def _meta_error_payload(tag: str, exc: Exception | None = None) -> dict[str, Any
     return d
 
 
-# 역할: HTTP 응답 본문 → JSON (통합검색·getMeta 응답 파싱 공용)
 def _kosis_text_to_json(text: str) -> Any | None:
     t = (text or "").strip()
     if not t or t.lstrip().startswith("<"):
@@ -70,15 +264,11 @@ def _kosis_text_to_json(text: str) -> Any | None:
             return None
 
 
-# 역할: KOSIS 셀 문자열 → StatData unit/time_period
 def _kosis_cell_str(v: Any) -> str | None:
-    if v is None:
-        return None
-    s = str(v).strip()
+    s = str(v).strip() if v is not None else ""
     return s or None
 
 
-# 역할: getMeta/Param JSON 본문(dict)에서 row[] 꺼내기 (에러-only dict면 [])
 def _rows_from_kosis_body(data: Any) -> list[dict[str, Any]]:
     if isinstance(data, dict) and data.get("kosis_error"):
         return []
@@ -89,28 +279,16 @@ def _rows_from_kosis_body(data: Any) -> list[dict[str, Any]]:
     return []
 
 
-# 역할: 통계표설명 getMeta 1회 호출. 060103(PRD)·060105(CMMT) 는 동일 URL(statisticsData.do),
-#       `meta_type` 이 PRD면 가이드 060103(주기/시점), CMMT면 060105(주석+분류·항목 id 힌트)
 async def kosis_get_meta(
-    client: httpx.AsyncClient,
-    base: str,
-    api_key: str,
-    org_id: str,
-    tbl_id: str,
-    meta_type: str,
-    timeout: float,
+    client: httpx.AsyncClient, base: str, api_key: str,
+    org_id: str, tbl_id: str, meta_type: str, timeout: float,
 ) -> Any:
     p: dict[str, Any] = {
-        "method": "getMeta",
-        "type": meta_type,
-        "apiKey": api_key,
-        "orgId": org_id,
-        "tblId": tbl_id,
-        "format": "json",
-        "content": "json",
+        "method": "getMeta", "type": meta_type, "apiKey": api_key,
+        "orgId": org_id, "tblId": tbl_id, "format": "json", "content": "json",
     }
     if meta_type == "PRD":
-        p["detail"] = "Y"  # PRD: 전체 시점 정보(가이드 선택)
+        p["detail"] = "Y"
     url = f"{base.rstrip('/')}/statisticsData.do"
     try:
         r = await client.get(url, params=p, headers=_JSON_HEADERS, timeout=timeout)
@@ -118,519 +296,684 @@ async def kosis_get_meta(
         data = _kosis_text_to_json(r.text or "")
         if data is None:
             return _meta_error_payload("parse")
-        if (
-            isinstance(data, dict)
-            and data.get("err") is not None
-            and "row" not in data
-        ):
-            return {
-                "kosis_error": "api_err",
-                "err": data.get("err"),
-                "errMsg": data.get("errMsg"),
-            }
+        if isinstance(data, dict) and data.get("err") is not None and "row" not in data:
+            return {"kosis_error": "api_err", "err": data.get("err"), "errMsg": data.get("errMsg")}
         return data
-    except Exception as e:  # noqa: BLE001
-        logger.debug("kosis getMeta %s %s/%s: %s", meta_type, org_id, tbl_id, e)
+    except Exception as e:
         return _meta_error_payload("http", e)
 
 
-# 역할: 통계 후보 1행(StatRecord)에 대해 060103+060105 를 동시에 때림(gather) → metadata 키에 저장
-async def _kosis_enrich_one(
-    client: httpx.AsyncClient,
-    base: str,
-    api_key: str,
-    rec: StatRecord,
-    sem: asyncio.Semaphore,
-    timeout: float,
-) -> None:
-    oid = (rec.org_id or (rec.metadata or {}).get("ORG_ID") or "")
-    if isinstance(oid, str):
-        oid = oid.strip() or None
-    tid = (rec.stat_id or "").strip()
-    if not oid or not tid:
-        err = _meta_error_payload("no_org_or_tbl")
-        rec.metadata["getMeta_PRD"] = err
-        rec.metadata["getMeta_CMMT"] = err
-        return
-    try:
-        # PRD·CMMT 각각 kosis_get_meta(060103/060105) — sem 으로 동시에 뜨는 getMeta 개수 제한
-        async def _g(meta: str) -> Any:
-            async with sem:
-                return await kosis_get_meta(
-                    client, base, api_key, oid, tid, meta, timeout,
-                )
-
-        prd, cmmt = await asyncio.gather(_g("PRD"), _g("CMMT"))
-    except Exception as e:  # noqa: BLE001
-        logger.warning("kosis getMeta gather: %s", e)
-        epl = _meta_error_payload("enrich", e)
-        prd, cmmt = epl, epl
-    rec.metadata["getMeta_PRD"] = prd
-    rec.metadata["getMeta_CMMT"] = cmmt
-
-
-# 역할: 통합검색으로 나온 "모든" 후보 행에 대해 _kosis_enrich_one 을 병렬 스케줄 + 세마포로 동시성 관리
 async def kosis_enrich_stat_records(
-    client: httpx.AsyncClient,
-    base: str,
-    api_key: str,
-    records: list[StatRecord],
-    *,
-    timeout: float,
-    record_concurrency: int = 5,
+    client: httpx.AsyncClient, base: str, api_key: str,
+    records: list[StatRecord], *, timeout: float, record_concurrency: int = 5,
 ) -> None:
     if not records:
         return
     sem = asyncio.Semaphore(max(1, min(record_concurrency * 2, 16)))
 
     async def _one(rec: StatRecord) -> None:
-        await _kosis_enrich_one(client, base, api_key, rec, sem, timeout)
+        oid = (rec.org_id or (rec.metadata or {}).get("ORG_ID") or "")
+        if isinstance(oid, str):
+            oid = oid.strip() or None
+        tid = (rec.stat_id or "").strip()
+        if not oid or not tid:
+            err = _meta_error_payload("no_org_or_tbl")
+            rec.metadata["getMeta_PRD"] = err
+            rec.metadata["getMeta_CMMT"] = err
+            return
+        try:
+            async def _g(meta: str) -> Any:
+                async with sem:
+                    return await kosis_get_meta(client, base, api_key, oid, tid, meta, timeout)
+            prd, cmmt = await asyncio.gather(_g("PRD"), _g("CMMT"))
+        except Exception as e:
+            epl = _meta_error_payload("enrich", e)
+            prd, cmmt = epl, epl
+        rec.metadata["getMeta_PRD"] = prd
+        rec.metadata["getMeta_CMMT"] = cmmt
 
     await asyncio.gather(*[_one(r) for r in records])
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+
 class KOSISConnector(BaseConnector):
-    """KOSIS Open API 커넥터"""
+    """
+    KOSIS Open API 커넥터 (v3)
+
+    search_and_fetch() 흐름:
+      CatalogSearchTool → 후보 top_k
+      LLM Agent → stat_id 선택 + 파라미터
+      fetch_with_retry() → KOSIS API + prd_se 순회 + objL 점진
+    """
+
     BASE_URL = "https://kosis.kr/openapi"
 
     def __init__(self, config: dict | None = None):
-        self.config = config or {}
-        self.api_key = os.environ.get(self.config.get("api_key_env", "KOSIS_API_KEY"), "")
-        self.timeout = self.config.get("timeout", 30)
+        self.config   = config or {}
+        self.api_key  = os.environ.get(self.config.get("api_key_env", "KOSIS_API_KEY"), "")
+        self.timeout  = self.config.get("timeout", 30)
+        self.catalog  = CatalogSearchTool(config=self.config)
 
-    async def search(self, query: ConnectorQuery) -> list[StatRecord]:
-        # [v0]
-        # """
-        # KOSIS 통계표 목록 검색 (getList)
-        # API 엔드포인트: GET /openapi/getList
-        # params: apiKey, format=json, vwCd=MT_ZTITLE, searchNm=query.keyword
-        # Args: query: 검색 쿼리 (keyword 필수)
-        # Returns: StatRecord 리스트 (통계표 ID, 이름, 기관명, 가용 기간 등)
-        # """
+    # ── search_and_fetch (v3 핵심) ────────────────────────────────────────────
+
+    async def search_and_fetch(self, query: ConnectorQuery) -> StatData | None:
         """
-        KOSIS 통계표 통합검색 (statisticsSearch.do, method=getList)
+        Catalog → LLM Agent → KOSIS fetch 파이프라인 (v4: 후보 순회 retry).
 
-        API 엔드포인트: GET <base_url>/statisticsSearch.do
-        params: method=getList, apiKey, searchNm=query.keyword, format=json, sort=RANK,
-            resultCount, startCount, (선택) orgId=query.extra_params
+        [v1] KOSIS 통합검색 직접 → err=30 다수
+        [v3] CatalogSearchTool(pgvector) → LLM Agent → fetch_with_retry
+        [v4 김예슬] 후보 순회 retry:
+          1) Agent가 1순위 stat_id 선택 → fetch
+          2) 실패 → tried_ids에 추가 → Agent에게 "이건 실패했다, 남은 후보에서 골라라"
+          3) 남은 후보에서 재선택 → fetch
+          4) 최대 _MAX_CANDIDATES(5)개까지 순회
+          5) Agent가 "NONE" 답하거나 남은 후보 없으면 포기
 
-        Args:
-            query: 검색 쿼리 (keyword 필수)
-
-        Returns:
-            StatRecord 리스트 (표 ID, 이름, 기관, 기간, relevance_score; 실패 시 [])
+        ReAct 패턴:
+          Thought: "이 주장을 검증하려면 어떤 통계표가 필요한가?"
+          Action:  stat_id 선택 + 파라미터 결정
+          Observation: fetch 결과 (성공/실패)
+          → 실패 시 Thought: "이 테이블은 안 됐다, 다른 후보에서 골라야 한다"
+          → Action: 다음 stat_id 선택
         """
-        # [v0] 초기 stub
-        # logger.warning(f"KOSIS search stub: {query.keyword}")
-        # return [StatRecord(stat_id="DT_1EA1019", stat_name="경영주 연령별 농가",
-        #                    org_name="통계청", available_periods=["2024"],
-        #                    relevance_score=0.95)]
+        # 1단계: Catalog 검색 (pgvector + KOSIS API)
+        candidates = await self.catalog.search(query, top_k=10)
 
-        # [v1] - 실제 HTTP: 통계표만 가져옴(셀 수치는 `fetch`에서)
-        if not self.api_key:
-            logger.error("KOSIS API 키가 설정되지 않았습니다. 환경변수 KOSIS_API_KEY를 확인하세요.")
-            return []
-        if not (query.keyword or "").strip():
-            # searchNm(검색어)이 비어 있으면 KOSIS에도 쓸 수 없고, `StatRecord`도 의미 없음
-            logger.warning("KOSIS 통합검색: keyword가 비어 있습니다.")
-            return []
-
-        # `base_url` 은 config로 바꾸기 쉬우라고(테스트/미러 대비). 없으면 클래스 상수
-        base = (self.config.get("base_url") or self.BASE_URL).rstrip("/")  # KOSIS OpenAPI 루트 URL
-        # 한 번에 몇 개까지 가져올지: 나중에 `search_and_fetch`가 relevance 높은 걸 골라도, 후보 풀은 이 개수(기본 5)
-        n_max = int(
-            self.config.get("search_result_count", _DEFAULT_SEARCH_COUNT),
-        )  # resultCount(한 페이지 상한)
-        extra = query.extra_params or {}  # orgId, content 덮어쓰기 등
-
-        # KOSIS "통합검색" 파라미터(가이드: statisticsSearch.do, method=getList)
-        # - searchNm: 사용자 키워드 → `ConnectorQuery.keyword`
-        # - format, content(헤더 유형 html|json) 등
-        # - orgId: (선택) extra_params
-        request_params: dict[str, Any] = {
-            "method": "getList",
-            "apiKey": self.api_key,
-            "searchNm": query.keyword.strip(),
-            "format": "json",
-            "content": str(extra.get("content") or "json"),  # 가이드: 헤더 유형 — json 쪽 권장
-            "sort": "RANK",  # 관련도순(위에 올수록 더 맞는 표라고 설명되어 있음)
-            "resultCount": str(n_max),
-            "startCount": "1",
-        }
-        if extra.get("orgId"):
-            request_params["orgId"] = str(extra["orgId"])  # 기관으로 검색 제한(선택)
-
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                # 일부 환경에서 User-Agent/Accept 없으면 HTML(안내/차단)만 오는 사례가 있어 JSON 요청에 맞게 둔다.
-                r = await client.get(  # httpx 응답(상태줄·헤더·본문)
-                    f"{base}/statisticsSearch.do",
-                    params=request_params,
-                    headers={
-                        "Accept": "application/json, */*;q=0.1",
-                        "User-Agent": "StructVerify/1.0 (KOSIS OpenAPI; +https://kosis.kr/openapi/)",
-                    },
+        if not candidates:
+            logger.warning(f"후보 없음: {query.keyword}")
+            # [v5] - 박재윤: tried_log 초기화 (candidates 없을 때 UnboundLocalError 수정)
+            tried_ids: set[str] = set()
+            tried_log: list[dict] = []
+            # ── [v6] LLM Agent 검색어 재생성 ─────────────────────────────────
+            simplified = await self._agent_simplify_keyword(query, tried_log)
+            if simplified and simplified != (query.indicator or query.keyword or ""):
+                logger.info(f"[재검색] Agent 검색어 변경: '{query.keyword}' → '{simplified}'")
+                from structverify.retrieval.base_connector import ConnectorQuery
+                retry_query = ConnectorQuery(
+                    keyword=simplified,
+                    indicator=simplified,
+                    time_period=query.time_period,
+                    population=query.population,
+                    extra_params=query.extra_params,
                 )
-                r.raise_for_status()  # 4xx/5xx면 예외
-                text = (r.text or "").strip()  # 응답 본문 문자열
-                ct = (r.headers.get("content-type") or "").lower()  # Content-Type(로그·판별용)
-                if not text:
-                    logger.error("KOSIS 응답 본문이 비어 있음 (status=%s content-type=%s)", r.status_code, ct)
-                    return []
-                # text/html 이어도 본문이 API 데이터일 수 있어 content-type에 "html"이 들어갔다고 HTML로 치지 않는다.
-                if text.lstrip().startswith("<"):
-                    logger.error(
-                        "KOSIS 응답이 마크업(HTML)로 보임(키/URL/서버 오류 HTML 등). status=%s content-type=%s head=%.400s",
-                        r.status_code,
-                        ct,
-                        text,
+                retry_candidates = await self.catalog.search(retry_query, top_k=5)
+                retry_candidates = [c for c in retry_candidates if c.stat_id not in tried_ids]
+
+                for rc in retry_candidates[:3]:
+                    if not _is_table_relevant(simplified, rc.stat_name):
+                        continue
+                    data = await self._fetch_with_retry(
+                        stat_id=rc.stat_id, stat_rec=rc, query=query,
+                        prd_se_hint="Y",
+                        start_prd_de=query.time_period or "",
+                        end_prd_de=query.time_period or "",
                     )
-                    return []
-                try:
-                    data = json.loads(text)  # 표준 JSON이면 dict 또는 list
-                except json.JSONDecodeError as e:
-                    m = re.search(  # {err, errMsg} 비표준 문자열(키 무따옴표) 대비
-                        r'err\s*:\s*"(\d+)"\s*,\s*errMsg\s*:\s*"([^"]*)"',
-                        text,
-                    )
-                    if m:
-                        logger.error(
-                            "KOSIS API 오류(비표준 응답): err=%s errMsg=%s (키·파라미터·발급 상태 확인)",
-                            m.group(1),
-                            m.group(2),
-                        )
-                        return []
-                    try:
-                        data = json5.loads(text)  # KOSIS식 느슨한 JSON
-                    except (ValueError, TypeError) as e2:
-                        logger.error(
-                            "KOSIS 본문 파싱 실패(json·json5): %s / %s | content-type=%s | 앞200자=%.200r",
-                            e,
-                            e2,
-                            ct,
-                            text,
-                        )
-                        return []
-        except httpx.HTTPStatusError as e:
-            logger.error(f"KOSIS API HTTP 에러: {e.response.status_code} - {e.response.text[:500]}")
-            return []
-        except httpx.TimeoutException:
-            logger.error(f"KOSIS API 타임아웃 ({self.timeout}초 초과)")
-            return []
-        except Exception as e:
-            logger.error(f"KOSIS API 호출 실패: {e}")
-            return []
+                    if data and data.official_value is not None:
+                        logger.info(f"[재검색] 성공: [{rc.stat_id}] {rc.stat_name}")
+                        return data
 
-        if (
-            isinstance(data, dict)
-            and data.get("err") is not None
-            and "row" not in data
-        ):
-            logger.error(
-                "KOSIS API 오류(파싱 후 dict): err=%s errMsg=%s",
-                data.get("err"),
-                data.get("errMsg"),
-            )
-            return []
+            logger.warning(f"최종 Evidence 없음 ({len(tried_ids)}개 시도): {query.keyword}")
+            return None
 
-        # JSON을 "행" 리스트로 맞춤: 통합검색 응답이 주로 { "row": [ {...}, ... ] } 형태
-        if isinstance(data, dict) and isinstance(data.get("row"), list):
-            rows = [x for x in data["row"] if isinstance(x, dict)]  # 래퍼 { row: [...] }
-        elif isinstance(data, list):
-            rows = [x for x in data if isinstance(x, dict)]  # 본문이 곧배열 [...]
-        else:
-            rows = []  # 예상 밖이면 빈 리스트(크래시보다 `[]` 반환이 상위 흐름에 안전)
-
-        n = len(rows)  # KOSIS가 돌려준 행 수(필터 전)
-        records: list[StatRecord] = []
-        for i, item in enumerate(rows):
-            tid = (item.get("TBL_ID") or "").strip()  # 통계표 ID(없으면 스킵)
-            if not tid:
-                continue
-            tnm = (item.get("TBL_NM") or "").strip() or tid  # 통계표명
-            org = item.get("ORG_NM")  # 기관명(없을 수 있음)
-            org_id = (item.get("ORG_ID") or "").strip() or None  # 기관코드(통계자료 fetch orgId)
-            # 기간 필드(있으면): 후보에 "어느 시점 자료인지" 힌트
-            periods: list[str] = []
-            for k in ("STRT_PRD_DE", "END_PRD_DE"):
-                v = item.get(k)  # 수록기간 시작/끝(가이드 필드명)
-                if v is not None and str(v).strip() and str(v).strip() not in periods:
-                    periods.append(str(v).strip())
-            # relevance_score: KOSIS가 RANK로 이미 정렬이므로, 앞 index일수록 점수 높게(1.0 → 내려감)
-            # `BaseConnector.search_and_fetch` 는 max(relevance_score)로 하나 고름
-            rel = 1.0 if n <= 1 else max(0.05, 1.0 - (i / (n - 1)) * 0.95)  # 순위→상대 점수 -> kosis 응답이 rank 순으로 정렬되어 있어 임시로 정렬해봄
-            records.append(StatRecord(
-                stat_id=tid, stat_name=tnm, org_name=org, org_id=org_id,
-                available_periods=periods, relevance_score=rel,
-                metadata=dict(item),
-            ))
-        if not records:
-            return []
-        # 통계표설명 getMeta(주기+주석/분류·항목 힌트). 통합검색 Http 클라이언트가 닫힌 뒤 별도 클라이언트(동일 base).
-        # 끄기: config enrich_get_meta=False. 동시 행 수: meta_record_concurrency(기본 5, 세마포=대략 2×이 값).
-        if self.config.get("enrich_get_meta", True) and (self.api_key or "").strip():
+        # 2단계: getMeta 보강 (PRD/CMMT)
+        if self.api_key and self.config.get("enrich_get_meta", True):
             try:
-                b = (self.config.get("base_url") or self.BASE_URL).rstrip("/")
+                base = (self.config.get("base_url") or self.BASE_URL).rstrip("/")
                 async with httpx.AsyncClient(timeout=self.timeout) as mclient:
                     await kosis_enrich_stat_records(
-                        mclient,
-                        b,
-                        self.api_key,
-                        records,
+                        mclient, base, self.api_key, candidates[:5],
                         timeout=float(self.timeout),
-                        record_concurrency=int(
-                            self.config.get("meta_record_concurrency", 5),
-                        ),
                     )
-            except Exception as e:  # noqa: BLE001
-                logger.warning(
-                    "getMeta PRD+CMMT 보강 실패(검색 StatRecord 는 유지): %s", e,
+            except Exception as e:
+                logger.debug(f"getMeta 보강 실패: {e}")
+
+        # ── [v4] 후보 순회 retry 루프 ────────────────────────────────────
+        tried_ids: set[str] = set()
+        tried_log: list[dict] = []   # Agent에게 보여줄 실패 이력
+
+        for round_idx in range(_MAX_CANDIDATES):
+            remaining = [c for c in candidates if c.stat_id not in tried_ids]
+            if not remaining:
+                logger.info("모든 후보 소진 → 종료")
+                break
+
+            # 3단계: stat_id 선택
+            if round_idx == 0:
+                # 첫 번째: LLM Agent가 최적 후보 선택
+                agent_decision = await self._agent_select_stat(query, candidates)
+            else:
+                # [v4]: Agent 재선택 대신 순차 순회 (factcheck_test.py 방식)
+                # Agent가 재선택해도 엉뚱한 테이블을 고르는 경우가 많아서
+                # relevance_score 순서대로 순차 시도하는 게 정확도 더 높음
+                agent_decision = {
+                    "stat_id":      remaining[0].stat_id,
+                    "prd_se":       "Y",
+                    "start_prd_de": query.time_period or "",
+                    "end_prd_de":   query.time_period or "",
+                }
+                logger.info(
+                    f"[순차 순회] 다음 후보: [{remaining[0].stat_id}] "
+                    f"{remaining[0].stat_name}"
                 )
-        logger.info(f"KOSIS API 검색+메타(옵션) 완료: {len(records)}개 (응답 {n}행)")
-        return records
 
-    async def fetch(self, stat_id: str, params: dict[str, Any]) -> StatData:
-        # [v0] - stub (고정 수치)
-        # logger.warning(f"KOSIS fetch stub: {stat_id}")
-        # return StatData(stat_id=stat_id, stat_name="경영주 연령별 농가",
-        #                 values={"total": 166558, "age_65_plus": 106877, "ratio": 64.2})
+            if agent_decision and agent_decision.get("stat_id"):
+                selected_id = agent_decision["stat_id"]
+                # "NONE" 답변 → Agent가 적합한 후보 없다고 판단
+                if selected_id.upper() == "NONE":
+                    logger.info("Agent: 적합한 후보 없음 → 종료")
+                    break
+                # 이미 시도한 stat_id를 다시 선택한 경우 → 강제로 다음 후보
+                if selected_id in tried_ids:
+                    selected_id = remaining[0].stat_id
+                prd_se       = agent_decision.get("prd_se", "Y")
+                start_prd_de = agent_decision.get("start_prd_de", "")
+                end_prd_de   = agent_decision.get("end_prd_de", "")
+            else:
+                # Agent 실패 → relevance_score 최고 후보 (시도 안 한 것 중)
+                selected_id  = remaining[0].stat_id
+                prd_se       = "Y"
+                start_prd_de = query.time_period or ""
+                end_prd_de   = query.time_period or ""
 
-        # 목적: 통계자료 API 통계표선택( devGuide_0201 ) — Param/statisticsParameterData.do?method=getList
-        cq: ConnectorQuery | None = params.get("query")
-        if not isinstance(cq, ConnectorQuery):
-            cq = None
-        rec: StatRecord | None = params.get("stat_record")
-        extra: dict[str, Any] = dict(cq.extra_params) if cq else {}
-        mdef: dict[str, Any] = dict(self.config.get("fetch_defaults", {}))
-        mdef.update(extra)
+            stat_rec = next(
+                (r for r in candidates if r.stat_id == selected_id),
+                remaining[0]
+            )
+            tried_ids.add(selected_id)
 
-        tnm = (getattr(rec, "stat_name", None) or stat_id) if rec else stat_id
-        tnm = str(tnm).strip() or stat_id
-
-        if not (self.api_key or "").strip():
-            logger.error("KOSIS fetch: API 키 없음")
-            return StatData(
-                stat_id=stat_id,
-                stat_name=tnm,
-                values={},
-                raw_response={"error": "no_api_key"},
+            logger.info(
+                f"[후보 {round_idx+1}/{_MAX_CANDIDATES}] "
+                f"시도: [{selected_id}] {stat_rec.stat_name}"
             )
 
-        org_id: str | None = None
-        if mdef.get("orgId") is not None and str(mdef.get("orgId", "")).strip() != "":
-            org_id = str(mdef["orgId"]).strip()
-        elif rec is not None and rec.org_id:
-            org_id = str(rec.org_id).strip()
-        if not org_id and rec is not None:
-            o = (rec.metadata or {}).get("ORG_ID")
-            if o is not None and str(o).strip() != "":
-                org_id = str(o).strip()
+            # 4단계: fetch (prd_se 순회 + objL 점진)
+            data = await self._fetch_with_retry(
+                stat_id=selected_id,
+                stat_rec=stat_rec,
+                query=query,
+                prd_se_hint=prd_se,
+                start_prd_de=start_prd_de,
+                end_prd_de=end_prd_de,
+            )
+
+            if data and data.official_value is not None:
+                # [v5] 가짜 match 방지 — 테이블 관련성 체크
+                indicator = query.indicator or query.keyword or ""
+                table_name = stat_rec.stat_name or ""
+                if not _is_table_relevant(indicator, table_name):
+                    logger.warning(
+                        f"테이블 관련성 없음 → skip: [{selected_id}] "
+                        f"{table_name} vs indicator={indicator}"
+                    )
+                    tried_ids.add(selected_id)
+                    tried_log.append({
+                        "stat_id":   selected_id,
+                        "stat_name": table_name,
+                        "error":     "테이블 관련성 없음",
+                    })
+                    continue
+
+                logger.info(
+                    f"Evidence 조회 성공 (후보 {round_idx+1}): [{selected_id}] "
+                    f"value={data.official_value} {data.unit or ''}"
+                )
+                return data
+
+            # 실패 이력 기록 → 다음 라운드에서 Agent에게 전달
+            last_error = "데이터 없음"
+            if data and data.raw_response:
+                err = data.raw_response.get("err") or data.raw_response.get("error", "")
+                last_error = f"err={err}"
+                if data.raw_response.get("errMsg"):
+                    last_error += f" {data.raw_response['errMsg']}"
+
+            tried_log.append({
+                "stat_id":   selected_id,
+                "stat_name": stat_rec.stat_name,
+                "error":     last_error,
+            })
+            logger.warning(
+                f"fetch 실패 (후보 {round_idx+1}): [{selected_id}] "
+                f"{stat_rec.stat_name} | {last_error}"
+            )
+
+        logger.warning(f"최종 Evidence 없음 ({len(tried_ids)}개 시도): {query.keyword}")
+        return None
+
+    # ── prd_se 순회 + objL 점진 fetch (factcheck_test.py 참고) ───────────────
+
+    async def _fetch_with_retry(
+        self,
+        stat_id: str,
+        stat_rec: StatRecord,
+        query: ConnectorQuery,
+        prd_se_hint: str = "Y",
+        start_prd_de: str = "",
+        end_prd_de: str = "",
+    ) -> StatData | None:
+        """
+        prd_se 순회(Y→M→Q) + objL 점진 + newEstPrdCnt 폴백.
+
+        factcheck_test.py의 fetch_kosis_data() 로직을 비동기로 재구현.
+        """
+        # 연도 추출
+        time_ref = query.time_period or ""
+        year_m = re.search(r"(\d{4})", start_prd_de or time_ref)
+        year = year_m.group(1) if year_m else "2024"
+
+        # prd_se 순회 전략
+        prd_strategies = [
+            {"prdSe": prd_se_hint, "startPrdDe": start_prd_de or year,
+             "endPrdDe": end_prd_de or year},
+        ]
+        # hint가 Y가 아니면 Y도 시도
+        if prd_se_hint != "Y":
+            prd_strategies.insert(0, {"prdSe": "Y", "startPrdDe": year, "endPrdDe": year})
+        # M, Q 추가
+        for prd, sp, ep in [("M", f"{year}01", f"{year}12"), ("Q", f"{year}01", f"{year}04")]:
+            if prd != prd_se_hint:
+                prd_strategies.append({"prdSe": prd, "startPrdDe": sp, "endPrdDe": ep})
+
+        # 기간 지정 실패 시 최신 데이터 폴백
+        fallbacks = [
+            {"prdSe": p, "newEstPrdCnt": "3"}
+            for p in ["Y", "M", "Q"]
+        ]
+
+        org_id = (
+            stat_rec.org_id
+            or (stat_rec.metadata or {}).get("ORG_ID")
+            or ""
+        )
         if not org_id:
-            logger.error("KOSIS fetch: orgId 없음 (StatRecord·extra_params·metadata.ORG_ID)")
-            return StatData(
-                stat_id=stat_id,
-                stat_name=tnm,
-                values={},
-                raw_response={"error": "missing_orgId", "tblId": stat_id},
-            )
+            logger.debug(f"org_id 없음: {stat_id}")
+            return None
 
-        prd_m = (rec.metadata or {}).get("getMeta_PRD") if rec else None
-        cmmt_m = (rec.metadata or {}).get("getMeta_CMMT") if rec else None
-        prd_rows = _rows_from_kosis_body(prd_m)
+        prd_m  = (stat_rec.metadata or {}).get("getMeta_PRD")
+        cmmt_m = (stat_rec.metadata or {}).get("getMeta_CMMT")
+        prd_rows  = _rows_from_kosis_body(prd_m)
         cmmt_rows = _rows_from_kosis_body(cmmt_m)
 
-        obj_l1: str = str(mdef.get("objL1") or "").strip()
-        itm_id: str = str(mdef.get("itmId") or "").strip()
-        if cmmt_rows and (not obj_l1 or not itm_id):
+        obj_l1 = "ALL"
+        itm_id = "ALL"
+        if cmmt_rows:
             r0 = cmmt_rows[0]
-            if not obj_l1:
-                obj_l1 = str(
-                    r0.get("OBJ_ID") or r0.get("C1") or "ALL",
-                ).strip() or "ALL"
-            if not itm_id:
-                itm_id = str(r0.get("ITM_ID") or "ALL").strip() or "ALL"
-        if not obj_l1:
-            obj_l1 = "ALL"
-        if not itm_id:
-            itm_id = "ALL"
-
-        prd_se = str(mdef.get("prdSe") or "").strip()
-        if not prd_se and prd_rows:
-            prd_se = str(prd_rows[0].get("PRD_SE") or "").strip() or "Y"
-        if not prd_se and cq and (cq.time_period or "").strip():
-            td = re.sub(r"\D", "", cq.time_period or "")
-            if len(td) == 4:
-                prd_se = "Y"
-            elif len(td) == 6:
-                prd_se = "M"
-            elif len(td) == 8:
-                prd_se = "D"
-        if not prd_se:
-            prd_se = "Y"
-
-        sp = str(mdef.get("startPrdDe") or "").strip()
-        ep = str(mdef.get("endPrdDe") or "").strip()
-        if not sp and not ep and cq and (cq.time_period or "").strip():
-            td = re.sub(r"\D", "", cq.time_period)
-            if len(td) in (4, 6, 8):
-                sp, ep = td, td
-        if not sp and not ep and prd_rows:
-            pde = (prd_rows[0].get("PRD_DE") or "")
-            pde = str(pde).strip()
-            if pde:
-                sp, ep = pde, pde
+            obj_l1 = str(r0.get("OBJ_ID") or r0.get("C1") or "ALL").strip() or "ALL"
+            itm_id = str(r0.get("ITM_ID") or "ALL").strip() or "ALL"
 
         base = (self.config.get("base_url") or self.BASE_URL).rstrip("/")
-        ncnt = str(mdef.get("newEstPrdCnt") or "").strip()
-        req: dict[str, Any] = {
-            "method": "getList",
-            "apiKey": self.api_key,
-            "format": "json",
-            "content": str(mdef.get("content") or "json"),
-            "orgId": org_id,
-            "tblId": stat_id,
-            "objL1": obj_l1,
-            "itmId": itm_id,
-            "prdSe": prd_se,
-        }
-        if mdef.get("objL2"):
-            req["objL2"] = str(mdef["objL2"]).strip()
-        if sp:
-            req["startPrdDe"] = sp
-        if ep:
-            req["endPrdDe"] = ep
-        if ncnt:
-            req["newEstPrdCnt"] = ncnt
-        if not sp and not ep and not ncnt:
-            req["newEstPrdCnt"] = "1"
-        pint = mdef.get("prdInterval")
-        if pint is not None and str(pint).strip() != "":
-            req["prdInterval"] = str(pint).strip()
-        of = mdef.get("outputFields")
-        if of is not None and str(of).strip() != "":
-            req["outputFields"] = str(of).strip()
 
-        public_req = {k: v for k, v in req.items() if k != "apiKey"}
-        err_body: dict[str, Any] = {}
+        for strategy in prd_strategies + fallbacks:
+            base_params: dict[str, Any] = {
+                "method":  "getList",
+                "apiKey":  self.api_key,
+                "format":  "json",
+                "content": "json",
+                "orgId":   org_id,
+                "tblId":   stat_id,
+                "objL1":   obj_l1,
+                "itmId":   itm_id,
+                "prdSe":   strategy["prdSe"],
+            }
+            if "startPrdDe" in strategy:
+                base_params["startPrdDe"] = strategy["startPrdDe"]
+                base_params["endPrdDe"]   = strategy.get("endPrdDe", strategy["startPrdDe"])
+            if "newEstPrdCnt" in strategy:
+                base_params["newEstPrdCnt"] = strategy["newEstPrdCnt"]
+
+            data = await self._try_with_objl_escalation(base, base_params, stat_id, stat_rec)
+            if data is not None:
+                return data
+
+        return None
+
+    async def _try_with_objl_escalation(
+        self,
+        base: str,
+        base_params: dict[str, Any],
+        stat_id: str,
+        stat_rec: StatRecord,
+    ) -> StatData | None:
+        """
+        objL 점진 추가 (err:20 → objL2~8 순서로 추가).
+        factcheck_test.py의 _try_with_objL_escalation 참고.
+        """
+        result = await self._call_kosis_param(base, base_params, stat_id, stat_rec)
+        if result is None:
+            return None
+
+        # err:20 = objL 부족 → 점진 추가
+        if result.raw_response.get("err") == "20":
+            for level in range(2, 9):
+                key = f"objL{level}"
+                if key not in base_params:
+                    base_params[key] = "ALL"
+                    result = await self._call_kosis_param(base, base_params, stat_id, stat_rec)
+                    if result is None:
+                        return None
+                    if result.raw_response.get("err") != "20":
+                        break
+
+        # 여전히 에러면 None
+        if result.raw_response.get("err"):
+            return None
+
+        return result if result.official_value is not None else None
+
+    async def _call_kosis_param(
+        self,
+        base: str,
+        params: dict[str, Any],
+        stat_id: str,
+        stat_rec: StatRecord,
+    ) -> StatData | None:
+        """KOSIS Param/statisticsParameterData.do 단일 호출"""
+        public_req = {k: v for k, v in params.items() if k != "apiKey"}
+        tnm = getattr(stat_rec, "stat_name", stat_id) or stat_id
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 r = await client.get(
                     f"{base}/Param/statisticsParameterData.do",
-                    params=req,
+                    params=params,
                     headers=_JSON_HEADERS,
                 )
                 r.raise_for_status()
                 text = (r.text or "").strip()
+
                 if not text or text.lstrip().startswith("<"):
-                    err_body = {
-                        "error": "empty_or_html",
-                        "request": public_req,
-                    }
-                    return StatData(
-                        stat_id=stat_id,
-                        stat_name=tnm,
-                        values={},
-                        raw_response=err_body,
-                    )
+                    return StatData(stat_id=stat_id, stat_name=tnm, values={},
+                                    raw_response={"error": "empty_or_html", "request": public_req})
+
                 j = _kosis_text_to_json(text)
                 if j is None:
-                    return StatData(
-                        stat_id=stat_id,
-                        stat_name=tnm,
-                        values={},
-                        raw_response={"error": "json_parse", "request": public_req},
-                    )
-                if (
-                    isinstance(j, dict)
-                    and j.get("err") is not None
-                    and "row" not in j
-                ):
-                    return StatData(
-                        stat_id=stat_id,
-                        stat_name=tnm,
-                        values={},
-                        raw_response={
-                            "err": j.get("err"),
-                            "errMsg": j.get("errMsg"),
-                            "request": public_req,
-                        },
-                    )
+                    return StatData(stat_id=stat_id, stat_name=tnm, values={},
+                                    raw_response={"error": "json_parse", "request": public_req})
+
+                if isinstance(j, dict) and j.get("err") is not None and "row" not in j:
+                    return StatData(stat_id=stat_id, stat_name=tnm, values={},
+                                    raw_response={
+                                        "err": j.get("err"),
+                                        "errMsg": j.get("errMsg"),
+                                        "request": public_req,
+                                    })
+
                 drows = _rows_from_kosis_body(j)
                 if not drows:
-                    return StatData(
-                        stat_id=stat_id,
-                        stat_name=tnm,
-                        values={},
-                        raw_response={**(j if isinstance(j, dict) else {}), "request": public_req},
-                    )
+                    return StatData(stat_id=stat_id, stat_name=tnm, values={},
+                                    raw_response={**(j if isinstance(j, dict) else {}),
+                                                  "request": public_req})
+
                 cell0 = drows[0]
-                tnm2 = (cell0.get("TBL_NM") or tnm) or stat_id
-                raw_out: dict[str, Any] = {**j, "request": public_req} if isinstance(
-                    j, dict) else {
-                    "row": drows,
-                    "request": public_req,
-                    "data": j,
-                }
-                dt_s = (cell0.get("DT") or "")
-                if isinstance(dt_s, (int, float)):
-                    dt_s = str(dt_s)
-                dt_s = str(dt_s).strip()
+                tnm2  = (cell0.get("TBL_NM") or tnm) or stat_id
+                raw_out = {**j, "request": public_req} if isinstance(j, dict) else {
+                    "row": drows, "request": public_req}
+
+                dt_s = str(cell0.get("DT") or "").strip()
                 val: float | None = None
                 if dt_s:
                     try:
                         val = float(dt_s.replace(",", ""))
                     except ValueError:
-                        val = None
-                # 반환값 구성: ratio=value(float) / DT=시점 / PRD_DE=주기 / ITM_NM=항목명 / ITM_ID=항목 ID / UNIT_NM=단위명
-                vmap: dict[str, Any] = {
-                    "value": val,
-                    "DT": cell0.get("DT"),
-                    "PRD_DE": cell0.get("PRD_DE"),
-                    "ITM_NM": cell0.get("ITM_NM"),
-                    "ITM_ID": cell0.get("ITM_ID"),
-                    "UNIT_NM": cell0.get("UNIT_NM"),
-                }
-                if val is not None:
-                    vmap["ratio"] = val
-                vmap = {k: v for k, v in vmap.items() if v is not None}
-                u = _kosis_cell_str(cell0.get("UNIT_NM"))
+                        pass
+
+                # 단위 타입 검증
+                kosis_unit = _kosis_cell_str(cell0.get("UNIT_NM")) or ""
+                # verifier.py에서 unit 타입 확인용으로 metadata에 저장
                 tp = _kosis_cell_str(cell0.get("PRD_DE"))
-                if not tp and cq and (cq.time_period or "").strip():
-                    tp = _kosis_cell_str(cq.time_period)
+
                 return StatData(
                     stat_id=stat_id,
                     stat_name=str(tnm2).strip() or stat_id,
-                    values=vmap,
+                    values={
+                        "value":   val,
+                        "DT":      cell0.get("DT"),
+                        "PRD_DE":  cell0.get("PRD_DE"),
+                        "ITM_NM":  cell0.get("ITM_NM"),
+                        "UNIT_NM": kosis_unit,
+                    },
                     raw_response=raw_out,
                     official_value=val,
-                    unit=u,
+                    unit=kosis_unit,
                     time_period=tp,
                 )
+
         except httpx.HTTPError as e:
-            logger.error("KOSIS Param fetch HTTP: %s", e)
-            return StatData(
-                stat_id=stat_id,
-                stat_name=tnm,
-                values={},
-                raw_response={"error": "http", "request": public_req, "detail": str(e)[:200]},
+            logger.error("KOSIS param HTTP: %s", e)
+            return None
+        except Exception as e:
+            logger.error("KOSIS param: %s", e)
+            return None
+
+    # ── LLM Agent ────────────────────────────────────────────────────────────
+
+    async def _agent_select_stat(
+        self, query: ConnectorQuery, candidates: list[StatRecord]
+    ) -> dict[str, Any] | None:
+        """HCX-DASH-002로 후보 중 최적 stat_id 선택"""
+        if not candidates:
+            return None
+        try:
+            from structverify.utils.llm_client import LLMClient
+            llm = LLMClient(config=self.config.get("llm", {}))
+        except ImportError:
+            return None
+
+        candidate_text = "\n".join([
+            f"  {i+1}. [{r.stat_id}] {r.stat_name} ({r.org_name}) "
+            f"[{r.metadata.get('category_path','')}]"
+            for i, r in enumerate(candidates[:10])
+        ])
+
+        raw_claim = (query.extra_params or {}).get("raw_claim", "")
+        prompt = _AGENT_SELECT_PROMPT.format(
+            claim_text=raw_claim[:200] or query.keyword,
+            indicator=query.indicator or "",
+            time_period=query.time_period or "",
+            population=query.population or "",
+            candidates=candidate_text,
+        )
+        try:
+            result = await llm.generate_json(
+                prompt=prompt,
+                system_prompt="한국 통계 전문가. JSON으로만 답하세요.",
+                model_tier="light",
             )
-        except Exception as e:  # noqa: BLE001
-            logger.error("KOSIS Param fetch: %s", e)
-            return StatData(
-                stat_id=stat_id,
-                stat_name=tnm,
-                values={},
-                raw_response={"error": "exception", "request": public_req, "detail": str(e)[:200]},
+            if result and result.get("stat_id"):
+                logger.info(
+                    f"Agent 선택: [{result['stat_id']}] {result.get('stat_name','')} "
+                    f"— {result.get('reason','')}"
+                )
+            return result
+        except Exception as e:
+            logger.debug(f"Agent 선택 실패: {e}")
+            return None
+
+    async def _agent_retry_params(
+        self,
+        query: ConnectorQuery,
+        candidates: list[StatRecord],
+        prev_stat_id: str,
+        prev_params: dict,
+        error: str,
+    ) -> dict[str, Any] | None:
+        """HCX-DASH-002로 fetch 실패 시 파라미터 수정"""
+        try:
+            from structverify.utils.llm_client import LLMClient
+            llm = LLMClient(config=self.config.get("llm", {}))
+        except ImportError:
+            return None
+
+        candidate_text = "\n".join([
+            f"  {i+1}. [{r.stat_id}] {r.stat_name} ({r.org_name})"
+            for i, r in enumerate(candidates[:10])
+        ])
+        raw_claim = (query.extra_params or {}).get("raw_claim", "")
+        prompt = _AGENT_RETRY_PROMPT.format(
+            claim_text=raw_claim[:200] or query.keyword,
+            stat_id=prev_stat_id,
+            prev_params=json.dumps(prev_params, ensure_ascii=False)[:300],
+            error=error[:200],
+            candidates=candidate_text,
+        )
+        try:
+            result = await llm.generate_json(
+                prompt=prompt,
+                system_prompt="한국 통계 전문가. JSON으로만 답하세요.",
+                model_tier="light",
             )
+            return result
+        except Exception as e:
+            logger.debug(f"Agent retry 실패: {e}")
+            return None
+
+    # ── 기존 search() 유지 (catalog_search 폴백용) ───────────────────────────
+
+    async def _agent_retry_with_rotation(
+        self,
+        query: ConnectorQuery,
+        remaining: list[StatRecord],
+        tried_log: list[dict],
+    ) -> dict[str, Any] | None:
+        """
+        [v4 김예슬] 실패한 후보 제외하고 남은 후보에서 재선택.
+
+        ReAct Observation:
+          "DT_1BC0501 → 데이터 없음"
+          "DT_705003 → err=30"
+        → Thought: "산업 취업자 통계는 안 됨, 경제활동인구 통계로 시도"
+        → Action: 다음 stat_id 선택
+        """
+        if not remaining:
+            return None
+
+        try:
+            from structverify.utils.llm_client import LLMClient
+            llm = LLMClient(config=self.config.get("llm", {}))
+        except ImportError:
+            return None
+
+        # 실패 이력 텍스트
+        tried_text = "\n".join([
+            f"  - [{t['stat_id']}] {t['stat_name']} → {t['error']}"
+            for t in tried_log
+        ]) or "  (없음)"
+
+        # 남은 후보 텍스트
+        remaining_text = "\n".join([
+            f"  {i+1}. [{r.stat_id}] {r.stat_name} ({r.org_name}) "
+            f"[{r.metadata.get('category_path', '')}]"
+            for i, r in enumerate(remaining[:10])
+        ])
+
+        raw_claim = (query.extra_params or {}).get("raw_claim", "")
+        prompt = _AGENT_RETRY_PROMPT.format(
+            claim_text=raw_claim[:200] or query.keyword,
+            tried_list=tried_text,
+            remaining_candidates=remaining_text,
+        )
+
+        try:
+            result = await llm.generate_json(
+                prompt=prompt,
+                system_prompt="한국 통계 전문가. 이미 실패한 통계표는 절대 다시 선택하지 마세요. JSON으로만 답하세요.",
+                model_tier="light",
+            )
+            if result and result.get("stat_id"):
+                logger.info(
+                    f"Agent 재선택: [{result['stat_id']}] "
+                    f"{result.get('reason', '')}"
+                )
+            return result
+        except Exception as e:
+            logger.debug(f"Agent 재선택 실패: {e}")
+            return None
+
+
+    async def _agent_simplify_keyword(
+            self, query: ConnectorQuery, tried_log: list[dict]
+        ) -> str | None:
+            """LLM Agent가 실패 이력을 보고 검색어를 재생성"""
+            try:
+                from structverify.utils.llm_client import LLMClient
+                llm = LLMClient(config=self.config.get("llm", {}))
+            except ImportError:
+                return None
+
+            tried_text = "\n".join([
+                f"  - {t['stat_name']} → {t['error']}"
+                for t in tried_log
+            ]) or "  (없음)"
+
+            raw_claim = (query.extra_params or {}).get("raw_claim", "")
+            prompt = f"""KOSIS 통계표 검색이 실패했습니다. 검색어를 바꿔서 재시도하려 합니다.
+
+    검증 주장: "{raw_claim[:200]}"
+    기존 검색어: "{query.keyword}"
+    실패한 테이블들:
+    {tried_text}
+
+    원래 검색어로는 관련 테이블을 찾지 못했습니다.
+    KOSIS 통계표 이름에 실제로 들어갈 법한 더 단순하고 핵심적인 검색어 1~2단어를 제안하세요.
+
+    예시:
+    "연평균 기온 순위" → "기온"
+    "청년 쉬었음 비율 변화" → "경제활동인구"
+    "평균 최저기온 및 평균 최고기온" → "기온"
+
+    검색어만 답하세요 (설명 없이):"""
+
+            try:
+                result = await llm.generate(
+                    prompt=prompt,
+                    system_prompt="KOSIS 통계 검색 전문가. 검색어만 답하세요.",
+                    model_tier="light",
+                )
+                keyword = result.strip().strip('"\'')
+                if keyword and len(keyword) >= 2:
+                    return keyword
+            except Exception as e:
+                logger.debug(f"Agent 검색어 재생성 실패: {e}")
+            return None
+    async def search(self, query: ConnectorQuery) -> list[StatRecord]:
+        return await self.catalog.search(query)
+
+    async def fetch(self, stat_id: str, params: dict[str, Any]) -> StatData:
+        """BaseConnector 인터페이스 유지 (search_and_fetch 내부에서 직접 사용)"""
+        stat_rec = params.get("stat_record") or StatRecord(
+            stat_id=stat_id, stat_name=stat_id
+        )
+        query = params.get("query") or ConnectorQuery(keyword=stat_id)
+        prd_se = params.get("prdSe", "Y")
+        sp     = params.get("startPrdDe", "")
+        ep     = params.get("endPrdDe", "")
+
+        result = await self._fetch_with_retry(
+            stat_id=stat_id,
+            stat_rec=stat_rec,
+            query=query,
+            prd_se_hint=prd_se,
+            start_prd_de=sp,
+            end_prd_de=ep,
+        )
+        return result or StatData(
+            stat_id=stat_id, stat_name=stat_id, values={},
+            raw_response={"error": "fetch_failed"},
+        )
 
     def to_graph_nodes(self, data: StatData) -> list[GraphNode]:
-        """KOSIS 결과 → Evidence 그래프 노드 변환"""
-        return [GraphNode(node_id=f"evidence:{data.stat_id}",
-                          node_type=GraphNodeType.EVIDENCE,
-                          label=data.stat_name, properties=data.values)]
+        return [GraphNode(
+            node_id=f"evidence:{data.stat_id}",
+            node_type=GraphNodeType.EVIDENCE,
+            label=data.stat_name,
+            properties=data.values,
+        )]
 
     def tag_provenance(self, data: StatData, query: ConnectorQuery) -> ProvenanceRecord:
-        """출처 이력 기록"""
-        return ProvenanceRecord(source_connector="KOSIS", source_id=data.stat_id,
-                                query_used=query.keyword, raw_snapshot=data.raw_response)
+        return ProvenanceRecord(
+            source_connector="KOSIS",
+            source_id=data.stat_id,
+            query_used=query.keyword,
+            raw_snapshot=data.raw_response,
+        )

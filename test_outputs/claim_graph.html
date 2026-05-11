@@ -1,0 +1,170 @@
+<html>
+    <head>
+        <meta charset="utf-8">
+        
+            <script src="lib/bindings/utils.js"></script>
+            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/dist/vis-network.min.css" integrity="sha512-WgxfT5LWjfszlPHXRmBWHkV2eceiWTOBvrKCNbdgDYTHrT2AeLCGbF4sZlZw3UMN3WtL0tGUoIAKsu8mllg/XA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.js" integrity="sha512-LnvoEWDFrqGHlHmDD2101OrLcbsfkrzoSpvtSQtxK3RMnRV0eOkhhBN2dXHKRrUU8p2DGRTk35n4O8nWSVe1mQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+            
+        
+<center>
+<h1></h1>
+</center>
+
+<!-- <link rel="stylesheet" href="../node_modules/vis/dist/vis.min.css" type="text/css" />
+<script type="text/javascript" src="../node_modules/vis/dist/vis.js"> </script>-->
+        <link
+          href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta3/dist/css/bootstrap.min.css"
+          rel="stylesheet"
+          integrity="sha384-eOJMYsd53ii+scO/bJGFsiCZc+5NDVN2yr8+0RDqr0Ql0h+rP48ckxlpbzKgwra6"
+          crossorigin="anonymous"
+        />
+        <script
+          src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta3/dist/js/bootstrap.bundle.min.js"
+          integrity="sha384-JEW9xMcG8R+pH31jmWH6WWP0WintQrMb4s7ZOdauHnUtxwoG2vI5DkLtS3qm9Ekf"
+          crossorigin="anonymous"
+        ></script>
+
+
+        <center>
+          <h1></h1>
+        </center>
+        <style type="text/css">
+
+             #mynetwork {
+                 width: 100%;
+                 height: 850px;
+                 background-color: #ffffff;
+                 border: 1px solid lightgray;
+                 position: relative;
+                 float: left;
+             }
+
+             
+
+             
+             #config {
+                 float: left;
+                 width: 400px;
+                 height: 600px;
+             }
+             
+
+             
+        </style>
+    </head>
+
+
+    <body>
+        <div class="card" style="width: 100%">
+            
+            
+            <div id="mynetwork" class="card-body"></div>
+        </div>
+
+        
+        
+            <div id="config"></div>
+        
+
+        <script type="text/javascript">
+
+              // initialize global variables.
+              var edges;
+              var nodes;
+              var allNodes;
+              var allEdges;
+              var nodeColors;
+              var originalNodes;
+              var network;
+              var container;
+              var options, data;
+              var filter = {
+                  item : '',
+                  property : '',
+                  value : []
+              };
+
+              
+
+              
+
+              // This method is responsible for drawing the graph, returns the drawn network
+              function drawGraph() {
+                  var container = document.getElementById('mynetwork');
+
+                  
+
+                  // parsing and collecting nodes and edges from the python
+                  nodes = new vis.DataSet([{"group": "claim", "id": "claim:f73dc786", "label": "\uc0b0\uc5c5\ubd80 \ube0c\ub9ac\ud551\u2026\ud55c\uad6d \uacbd\uc733\uac12 25% \uc624\ub97c \ub54c \uc77c\ubcf8 9.4% \uc0c1\uc2b9 \uadf8\uccd0\n(\uc11c", "shape": "dot", "title": "\nID: claim:f73dc786\nTYPE: claim\nLABEL: \uc0b0\uc5c5\ubd80 \ube0c\ub9ac\ud551\u2026\ud55c\uad6d \uacbd\uc733\uac12 25% \uc624\ub97c \ub54c \uc77c\ubcf8 9.4% \uc0c1\uc2b9 \uadf8\uccd0\n(\uc11c\uc6b8=\uc5f0\ud569\ub274\uc2a4) \uae40\ub3d9\uaddc \uae30\uc790 = \uc815\ubd80\uac00\nPROPERTIES: {\u0027claim_text\u0027: \u0027\uc0b0\uc5c5\ubd80 \ube0c\ub9ac\ud551\u2026\ud55c\uad6d \uacbd\uc733\uac12 25% \uc624\ub97c \ub54c \uc77c\ubcf8 9.4% \uc0c1\uc2b9 \uadf8\uccd0\\n(\uc11c\uc6b8=\uc5f0\ud569\ub274\uc2a4) \uae40\ub3d9\uaddc \uae30\uc790 = \uc815\ubd80\uac00 \uc11d\uc720 \ucd5c\uace0\uac00\uaca9\uc81c\ub85c \ud718\ubc1c\uc720\u00b7\uacbd\uc733\uac12\uc744 \uc9c0\ub098\uce58\uac8c \ub20c\ub7ec \uc218\uc694 \uc5b5\uc81c\uac00 \ub418\uc9c0 \uc54a\uace0 \uc788\ub2e4\ub294 \uc77c\uac01\uc758 \uc9c0\uc801\uc5d0 \uc77c\ubcf8\uacfc \uc720\ub7fd \ub4f1 \uc0ac\ub840\ub97c \ub4e4\uc5b4 \ubc18\ubc15\ud588\ub2e4.\u0027, \u0027value\u0027: 25.0, \u0027claim_type\u0027: \u0027comparison\u0027, \u0027canonical_type\u0027: None}\n"}, {"group": "metric", "id": "metric:\uacbd\uc733\uac12 \uc0c1\uc2b9\ub960", "label": "\uacbd\uc733\uac12 \uc0c1\uc2b9\ub960", "shape": "dot", "title": "\nID: metric:\uacbd\uc733\uac12 \uc0c1\uc2b9\ub960\nTYPE: metric\nLABEL: \uacbd\uc733\uac12 \uc0c1\uc2b9\ub960\nPROPERTIES: {\u0027unit\u0027: \u0027%\u0027}\n"}, {"group": "entity", "id": "entity:\ud55c\uad6d \ubc0f \uc77c\ubcf8", "label": "\ud55c\uad6d \ubc0f \uc77c\ubcf8", "shape": "dot", "title": "\nID: entity:\ud55c\uad6d \ubc0f \uc77c\ubcf8\nTYPE: entity\nLABEL: \ud55c\uad6d \ubc0f \uc77c\ubcf8\nPROPERTIES: {}\n"}, {"group": "claim", "id": "claim:a3e06080", "label": "\uc0b0\uc5c5\ubd80\uc5d0 \ub530\ub974\uba74 \uc774\ub0a0 \ud55c\uad6d\uc758 \uc11d\uc720\uc81c\ud488 \uac00\uaca9\uc740 \uc911\ub3d9\uc804\uc7c1 \ubc1c\ubc1c \uc9c1\uc804\uc778 2\uc6d4 ", "shape": "dot", "title": "\nID: claim:a3e06080\nTYPE: claim\nLABEL: \uc0b0\uc5c5\ubd80\uc5d0 \ub530\ub974\uba74 \uc774\ub0a0 \ud55c\uad6d\uc758 \uc11d\uc720\uc81c\ud488 \uac00\uaca9\uc740 \uc911\ub3d9\uc804\uc7c1 \ubc1c\ubc1c \uc9c1\uc804\uc778 2\uc6d4 27\uc77c\uacfc \ube44\uad50\ud574 \ud718\ubc1c\uc720\ub294 18.4%,\nPROPERTIES: {\u0027claim_text\u0027: \u0027\uc0b0\uc5c5\ubd80\uc5d0 \ub530\ub974\uba74 \uc774\ub0a0 \ud55c\uad6d\uc758 \uc11d\uc720\uc81c\ud488 \uac00\uaca9\uc740 \uc911\ub3d9\uc804\uc7c1 \ubc1c\ubc1c \uc9c1\uc804\uc778 2\uc6d4 27\uc77c\uacfc \ube44\uad50\ud574 \ud718\ubc1c\uc720\ub294 18.4%, \uacbd\uc720\ub294 25.0% \uac01\uac01 \uc62c\ub790\ub2e4.\u0027, \u0027value\u0027: 18.4, \u0027claim_type\u0027: \u0027price_increase\u0027, \u0027canonical_type\u0027: None}\n"}, {"group": "metric", "id": "metric:\uc11d\uc720\uc81c\ud488 \uac00\uaca9 \ubcc0\ub3d9\ub960", "label": "\uc11d\uc720\uc81c\ud488 \uac00\uaca9 \ubcc0\ub3d9\ub960", "shape": "dot", "title": "\nID: metric:\uc11d\uc720\uc81c\ud488 \uac00\uaca9 \ubcc0\ub3d9\ub960\nTYPE: metric\nLABEL: \uc11d\uc720\uc81c\ud488 \uac00\uaca9 \ubcc0\ub3d9\ub960\nPROPERTIES: {\u0027unit\u0027: \u0027%\u0027}\n"}, {"group": "time", "id": "time:\uc911\ub3d9\uc804\uc7c1 \ubc1c\ubc1c \uc9c1\uc804(2\uc6d4 27\uc77c)", "label": "\uc911\ub3d9\uc804\uc7c1 \ubc1c\ubc1c \uc9c1\uc804(2\uc6d4 27\uc77c)", "shape": "dot", "title": "\nID: time:\uc911\ub3d9\uc804\uc7c1 \ubc1c\ubc1c \uc9c1\uc804(2\uc6d4 27\uc77c)\nTYPE: time\nLABEL: \uc911\ub3d9\uc804\uc7c1 \ubc1c\ubc1c \uc9c1\uc804(2\uc6d4 27\uc77c)\nPROPERTIES: {}\n"}, {"group": "entity", "id": "entity:\ud55c\uad6d\uc758 \ud718\ubc1c\uc720 \ubc0f \uacbd\uc720", "label": "\ud55c\uad6d\uc758 \ud718\ubc1c\uc720 \ubc0f \uacbd\uc720", "shape": "dot", "title": "\nID: entity:\ud55c\uad6d\uc758 \ud718\ubc1c\uc720 \ubc0f \uacbd\uc720\nTYPE: entity\nLABEL: \ud55c\uad6d\uc758 \ud718\ubc1c\uc720 \ubc0f \uacbd\uc720\nPROPERTIES: {}\n"}, {"group": "claim", "id": "claim:8233f0d2", "label": "\uc774\ub294 \ubbf8\uad6d\uc774 \uac19\uc740 \uae30\uac04 \ud718\ubc1c\uc720\ub294 35.6%, \uacbd\uc720\ub294 47.1% \uc624\ub978 \uac83\uacfc", "shape": "dot", "title": "\nID: claim:8233f0d2\nTYPE: claim\nLABEL: \uc774\ub294 \ubbf8\uad6d\uc774 \uac19\uc740 \uae30\uac04 \ud718\ubc1c\uc720\ub294 35.6%, \uacbd\uc720\ub294 47.1% \uc624\ub978 \uac83\uacfc \ube44\uad50\ud558\uba74 \ub0ae\uc740 \uc0c1\uc2b9\ub960\uc774\uc9c0\ub9cc, \uc77c\ubcf8\uc758\nPROPERTIES: {\u0027claim_text\u0027: \u0027\uc774\ub294 \ubbf8\uad6d\uc774 \uac19\uc740 \uae30\uac04 \ud718\ubc1c\uc720\ub294 35.6%, \uacbd\uc720\ub294 47.1% \uc624\ub978 \uac83\uacfc \ube44\uad50\ud558\uba74 \ub0ae\uc740 \uc0c1\uc2b9\ub960\uc774\uc9c0\ub9cc, \uc77c\ubcf8\uc758 \ud718\ubc1c\uc733\uac12\uc774 \uac19\uc740 \uae30\uac04 7.28%, \uacbd\uc733\uac12\uc774 9.40% \uc624\ub978 \uac83\uc5d0 \ube44\ud574\uc11c\ub294 \uc0c1\uc2b9\ub960\uc774 \ud06c\uac8c \ub192\uc740 \uac83\uc774\ub2e4.\u0027, \u0027value\u0027: 35.6, \u0027claim_type\u0027: \u0027comparative\u0027, \u0027canonical_type\u0027: None}\n"}, {"group": "metric", "id": "metric:\ud718\ubc1c\uc720 \ubc0f \uacbd\uc720 \uac00\uaca9 \uc0c1\uc2b9\ub960", "label": "\ud718\ubc1c\uc720 \ubc0f \uacbd\uc720 \uac00\uaca9 \uc0c1\uc2b9\ub960", "shape": "dot", "title": "\nID: metric:\ud718\ubc1c\uc720 \ubc0f \uacbd\uc720 \uac00\uaca9 \uc0c1\uc2b9\ub960\nTYPE: metric\nLABEL: \ud718\ubc1c\uc720 \ubc0f \uacbd\uc720 \uac00\uaca9 \uc0c1\uc2b9\ub960\nPROPERTIES: {\u0027unit\u0027: \u0027%\u0027}\n"}, {"group": "time", "id": "time:\uac19\uc740 \uae30\uac04", "label": "\uac19\uc740 \uae30\uac04", "shape": "dot", "title": "\nID: time:\uac19\uc740 \uae30\uac04\nTYPE: time\nLABEL: \uac19\uc740 \uae30\uac04\nPROPERTIES: {}\n"}, {"group": "entity", "id": "entity:\ubbf8\uad6d, \uc77c\ubcf8", "label": "\ubbf8\uad6d, \uc77c\ubcf8", "shape": "dot", "title": "\nID: entity:\ubbf8\uad6d, \uc77c\ubcf8\nTYPE: entity\nLABEL: \ubbf8\uad6d, \uc77c\ubcf8\nPROPERTIES: {}\n"}, {"group": "claim", "id": "claim:af520915", "label": "\uc77c\ubcf8 \uc815\ubd80 \uc5ed\uc2dc \ubb3c\uac00 \uc548\uc815\uc744 \uc704\ud574 \uc815\uc720\uc0ac \ub4f1 \ub3c4\ub9e4\ub2e8\uacc4\uc5d0\uc11c \ubcf4\uc870\uae08\uc744 \uc9c0\uae09\ud558", "shape": "dot", "title": "\nID: claim:af520915\nTYPE: claim\nLABEL: \uc77c\ubcf8 \uc815\ubd80 \uc5ed\uc2dc \ubb3c\uac00 \uc548\uc815\uc744 \uc704\ud574 \uc815\uc720\uc0ac \ub4f1 \ub3c4\ub9e4\ub2e8\uacc4\uc5d0\uc11c \ubcf4\uc870\uae08\uc744 \uc9c0\uae09\ud558\ub294 \ubc29\uc2dd\uc73c\ub85c \ud718\ubc1c\uc720\u00b7\uacbd\uc720 \ub4f1 \uac00\uaca9 \uc778\nPROPERTIES: {\u0027claim_text\u0027: \u0027\uc77c\ubcf8 \uc815\ubd80 \uc5ed\uc2dc \ubb3c\uac00 \uc548\uc815\uc744 \uc704\ud574 \uc815\uc720\uc0ac \ub4f1 \ub3c4\ub9e4\ub2e8\uacc4\uc5d0\uc11c \ubcf4\uc870\uae08\uc744 \uc9c0\uae09\ud558\ub294 \ubc29\uc2dd\uc73c\ub85c \ud718\ubc1c\uc720\u00b7\uacbd\uc720 \ub4f1 \uac00\uaca9 \uc778\uc0c1\uc744 \uc5b5\uc81c\ud558\uace0 \uc788\ub2e4.\u0027, \u0027value\u0027: 0.0, \u0027claim_type\u0027: \u0027policy\u0027, \u0027canonical_type\u0027: None}\n"}, {"group": "metric", "id": "metric:\ud718\ubc1c\uc720 \ubc0f \uacbd\uc720 \uac00\uaca9 \uc778\uc0c1 \uc5b5\uc81c \uc815\ub3c4", "label": "\ud718\ubc1c\uc720 \ubc0f \uacbd\uc720 \uac00\uaca9 \uc778\uc0c1 \uc5b5\uc81c \uc815\ub3c4", "shape": "dot", "title": "\nID: metric:\ud718\ubc1c\uc720 \ubc0f \uacbd\uc720 \uac00\uaca9 \uc778\uc0c1 \uc5b5\uc81c \uc815\ub3c4\nTYPE: metric\nLABEL: \ud718\ubc1c\uc720 \ubc0f \uacbd\uc720 \uac00\uaca9 \uc778\uc0c1 \uc5b5\uc81c \uc815\ub3c4\nPROPERTIES: {\u0027unit\u0027: None}\n"}, {"group": "entity", "id": "entity:\uc77c\ubcf8 \ub0b4 \uc815\uc720\uc0ac \ubc0f \uad00\ub828 \ub3c4\ub9e4 \ub2e8\uacc4", "label": "\uc77c\ubcf8 \ub0b4 \uc815\uc720\uc0ac \ubc0f \uad00\ub828 \ub3c4\ub9e4 \ub2e8\uacc4", "shape": "dot", "title": "\nID: entity:\uc77c\ubcf8 \ub0b4 \uc815\uc720\uc0ac \ubc0f \uad00\ub828 \ub3c4\ub9e4 \ub2e8\uacc4\nTYPE: entity\nLABEL: \uc77c\ubcf8 \ub0b4 \uc815\uc720\uc0ac \ubc0f \uad00\ub828 \ub3c4\ub9e4 \ub2e8\uacc4\nPROPERTIES: {}\n"}, {"group": "claim", "id": "claim:ba217a77", "label": "\uc601\uad6d, \ud504\ub791\uc2a4, \ub3c5\uc77c \ub4f1 \uc720\ub7fd \uad6d\uac00\uc758 \uacbd\uc6b0 \uac19\uc740 \uae30\uac04 \ud718\ubc1c\uc733\uac12\uc740 17% ", "shape": "dot", "title": "\nID: claim:ba217a77\nTYPE: claim\nLABEL: \uc601\uad6d, \ud504\ub791\uc2a4, \ub3c5\uc77c \ub4f1 \uc720\ub7fd \uad6d\uac00\uc758 \uacbd\uc6b0 \uac19\uc740 \uae30\uac04 \ud718\ubc1c\uc733\uac12\uc740 17% \uc548\ud30e\uc73c\ub85c \uc0c1\uc2b9\ud574 \ud55c\uad6d\uacfc \ube44\uc2b7\ud55c \uc0c1\uc2b9 \nPROPERTIES: {\u0027claim_text\u0027: \u0027\uc601\uad6d, \ud504\ub791\uc2a4, \ub3c5\uc77c \ub4f1 \uc720\ub7fd \uad6d\uac00\uc758 \uacbd\uc6b0 \uac19\uc740 \uae30\uac04 \ud718\ubc1c\uc733\uac12\uc740 17% \uc548\ud30e\uc73c\ub85c \uc0c1\uc2b9\ud574 \ud55c\uad6d\uacfc \ube44\uc2b7\ud55c \uc0c1\uc2b9 \ud3ed\uc744 \ubcf4\uc600\ub2e4.\u0027, \u0027value\u0027: 17.0, \u0027claim_type\u0027: \u0027comparative\u0027, \u0027canonical_type\u0027: None}\n"}, {"group": "metric", "id": "metric:\ud718\ubc1c\uc720 \uac00\uaca9 \uc0c1\uc2b9\ub960", "label": "\ud718\ubc1c\uc720 \uac00\uaca9 \uc0c1\uc2b9\ub960", "shape": "dot", "title": "\nID: metric:\ud718\ubc1c\uc720 \uac00\uaca9 \uc0c1\uc2b9\ub960\nTYPE: metric\nLABEL: \ud718\ubc1c\uc720 \uac00\uaca9 \uc0c1\uc2b9\ub960\nPROPERTIES: {\u0027unit\u0027: \u0027%\u0027}\n"}, {"group": "entity", "id": "entity:\uc601\uad6d, \ud504\ub791\uc2a4, \ub3c5\uc77c \ub4f1 \uc720\ub7fd \uad6d\uac00 \ubc0f \ud55c\uad6d", "label": "\uc601\uad6d, \ud504\ub791\uc2a4, \ub3c5\uc77c \ub4f1 \uc720\ub7fd \uad6d\uac00 \ubc0f \ud55c\uad6d", "shape": "dot", "title": "\nID: entity:\uc601\uad6d, \ud504\ub791\uc2a4, \ub3c5\uc77c \ub4f1 \uc720\ub7fd \uad6d\uac00 \ubc0f \ud55c\uad6d\nTYPE: entity\nLABEL: \uc601\uad6d, \ud504\ub791\uc2a4, \ub3c5\uc77c \ub4f1 \uc720\ub7fd \uad6d\uac00 \ubc0f \ud55c\uad6d\nPROPERTIES: {}\n"}, {"group": "claim", "id": "claim:200d49f1", "label": "\uacbd\uc733\uac12\uc740 30% \uc774\uc0c1 \uc0c1\uc2b9\ud574 \ud55c\uad6d\ubcf4\ub2e4 5%\ud3ec\uc778\ud2b8 \ub0b4\uc678\ub85c \uc0c1\uc2b9 \ud3ed\uc774 \ucef8\ub2e4.", "shape": "dot", "title": "\nID: claim:200d49f1\nTYPE: claim\nLABEL: \uacbd\uc733\uac12\uc740 30% \uc774\uc0c1 \uc0c1\uc2b9\ud574 \ud55c\uad6d\ubcf4\ub2e4 5%\ud3ec\uc778\ud2b8 \ub0b4\uc678\ub85c \uc0c1\uc2b9 \ud3ed\uc774 \ucef8\ub2e4.\nPROPERTIES: {\u0027claim_text\u0027: \u0027\uacbd\uc733\uac12\uc740 30% \uc774\uc0c1 \uc0c1\uc2b9\ud574 \ud55c\uad6d\ubcf4\ub2e4 5%\ud3ec\uc778\ud2b8 \ub0b4\uc678\ub85c \uc0c1\uc2b9 \ud3ed\uc774 \ucef8\ub2e4.\u0027, \u0027value\u0027: 30.0, \u0027claim_type\u0027: \u0027comparison\u0027, \u0027canonical_type\u0027: None}\n"}, {"group": "entity", "id": "entity:\ud55c\uad6d \ubc0f \ube44\uad50 \ub300\uc0c1 \uad6d\uac00\ub4e4", "label": "\ud55c\uad6d \ubc0f \ube44\uad50 \ub300\uc0c1 \uad6d\uac00\ub4e4", "shape": "dot", "title": "\nID: entity:\ud55c\uad6d \ubc0f \ube44\uad50 \ub300\uc0c1 \uad6d\uac00\ub4e4\nTYPE: entity\nLABEL: \ud55c\uad6d \ubc0f \ube44\uad50 \ub300\uc0c1 \uad6d\uac00\ub4e4\nPROPERTIES: {}\n"}, {"group": "claim", "id": "claim:70e9995a", "label": "\uc0b0\uc5c5\ubd80\ub294 \ud604\uc7ac \uad6d\ub0b4 4\ub300 \uc815\uc720\uc0ac\uc758 \ube44\ucd95\uc720 \uc2a4\uc640\ud504(SWAP\u00b7\uad50\ud658) \uc2e0\uccad \ubb3c", "shape": "dot", "title": "\nID: claim:70e9995a\nTYPE: claim\nLABEL: \uc0b0\uc5c5\ubd80\ub294 \ud604\uc7ac \uad6d\ub0b4 4\ub300 \uc815\uc720\uc0ac\uc758 \ube44\ucd95\uc720 \uc2a4\uc640\ud504(SWAP\u00b7\uad50\ud658) \uc2e0\uccad \ubb3c\ub7c9\uc774 \uc57d 3\ucc9c200\ub9cc\ubc30\ub7f4\ub85c \uc9d1\uacc4\ub410\ub2e4\uace0\nPROPERTIES: {\u0027claim_text\u0027: \u0027\uc0b0\uc5c5\ubd80\ub294 \ud604\uc7ac \uad6d\ub0b4 4\ub300 \uc815\uc720\uc0ac\uc758 \ube44\ucd95\uc720 \uc2a4\uc640\ud504(SWAP\u00b7\uad50\ud658) \uc2e0\uccad \ubb3c\ub7c9\uc774 \uc57d 3\ucc9c200\ub9cc\ubc30\ub7f4\ub85c \uc9d1\uacc4\ub410\ub2e4\uace0 \ubc1d\ud614\ub2e4.\u0027, \u0027value\u0027: 3200000.0, \u0027claim_type\u0027: \u0027statistic\u0027, \u0027canonical_type\u0027: None}\n"}, {"group": "metric", "id": "metric:\ube44\ucd95\uc720 \uc2a4\uc640\ud504 \uc2e0\uccad \ubb3c\ub7c9", "label": "\ube44\ucd95\uc720 \uc2a4\uc640\ud504 \uc2e0\uccad \ubb3c\ub7c9", "shape": "dot", "title": "\nID: metric:\ube44\ucd95\uc720 \uc2a4\uc640\ud504 \uc2e0\uccad \ubb3c\ub7c9\nTYPE: metric\nLABEL: \ube44\ucd95\uc720 \uc2a4\uc640\ud504 \uc2e0\uccad \ubb3c\ub7c9\nPROPERTIES: {\u0027unit\u0027: \u0027\ubc30\ub7f4\u0027}\n"}, {"group": "time", "id": "time:\ud604\uc7ac", "label": "\ud604\uc7ac", "shape": "dot", "title": "\nID: time:\ud604\uc7ac\nTYPE: time\nLABEL: \ud604\uc7ac\nPROPERTIES: {}\n"}, {"group": "entity", "id": "entity:\uad6d\ub0b4 4\ub300 \uc815\uc720\uc0ac", "label": "\uad6d\ub0b4 4\ub300 \uc815\uc720\uc0ac", "shape": "dot", "title": "\nID: entity:\uad6d\ub0b4 4\ub300 \uc815\uc720\uc0ac\nTYPE: entity\nLABEL: \uad6d\ub0b4 4\ub300 \uc815\uc720\uc0ac\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0001_s0009", "label": "node:b0001_s0009", "shape": "dot", "title": "\nID: node:b0001_s0009\nTYPE: source\nLABEL: node:b0001_s0009\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0001_s0016", "label": "node:b0001_s0016", "shape": "dot", "title": "\nID: node:b0001_s0016\nTYPE: source\nLABEL: node:b0001_s0016\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0001_s0007", "label": "node:b0001_s0007", "shape": "dot", "title": "\nID: node:b0001_s0007\nTYPE: source\nLABEL: node:b0001_s0007\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:doc:ea9ce981", "label": "node:doc:ea9ce981", "shape": "dot", "title": "\nID: node:doc:ea9ce981\nTYPE: source\nLABEL: node:doc:ea9ce981\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0001_s0018", "label": "node:b0001_s0018", "shape": "dot", "title": "\nID: node:b0001_s0018\nTYPE: source\nLABEL: node:b0001_s0018\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0001_s0005", "label": "node:b0001_s0005", "shape": "dot", "title": "\nID: node:b0001_s0005\nTYPE: source\nLABEL: node:b0001_s0005\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0001_s0003", "label": "node:b0001_s0003", "shape": "dot", "title": "\nID: node:b0001_s0003\nTYPE: source\nLABEL: node:b0001_s0003\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0001_s0011", "label": "node:b0001_s0011", "shape": "dot", "title": "\nID: node:b0001_s0011\nTYPE: source\nLABEL: node:b0001_s0011\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0001_s0014", "label": "node:b0001_s0014", "shape": "dot", "title": "\nID: node:b0001_s0014\nTYPE: source\nLABEL: node:b0001_s0014\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0001_s0017", "label": "node:b0001_s0017", "shape": "dot", "title": "\nID: node:b0001_s0017\nTYPE: source\nLABEL: node:b0001_s0017\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0001_s0010", "label": "node:b0001_s0010", "shape": "dot", "title": "\nID: node:b0001_s0010\nTYPE: source\nLABEL: node:b0001_s0010\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0001_s0004", "label": "node:b0001_s0004", "shape": "dot", "title": "\nID: node:b0001_s0004\nTYPE: source\nLABEL: node:b0001_s0004\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0001_s0015", "label": "node:b0001_s0015", "shape": "dot", "title": "\nID: node:b0001_s0015\nTYPE: source\nLABEL: node:b0001_s0015\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0000_s0000", "label": "node:b0000_s0000", "shape": "dot", "title": "\nID: node:b0000_s0000\nTYPE: source\nLABEL: node:b0000_s0000\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0001_s0000", "label": "node:b0001_s0000", "shape": "dot", "title": "\nID: node:b0001_s0000\nTYPE: source\nLABEL: node:b0001_s0000\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0001_s0012", "label": "node:b0001_s0012", "shape": "dot", "title": "\nID: node:b0001_s0012\nTYPE: source\nLABEL: node:b0001_s0012\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0001_s0013", "label": "node:b0001_s0013", "shape": "dot", "title": "\nID: node:b0001_s0013\nTYPE: source\nLABEL: node:b0001_s0013\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0001_s0001", "label": "node:b0001_s0001", "shape": "dot", "title": "\nID: node:b0001_s0001\nTYPE: source\nLABEL: node:b0001_s0001\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0001", "label": "node:b0001", "shape": "dot", "title": "\nID: node:b0001\nTYPE: source\nLABEL: node:b0001\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0000", "label": "node:b0000", "shape": "dot", "title": "\nID: node:b0000\nTYPE: source\nLABEL: node:b0000\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0001_s0006", "label": "node:b0001_s0006", "shape": "dot", "title": "\nID: node:b0001_s0006\nTYPE: source\nLABEL: node:b0001_s0006\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0001_s0008", "label": "node:b0001_s0008", "shape": "dot", "title": "\nID: node:b0001_s0008\nTYPE: source\nLABEL: node:b0001_s0008\nPROPERTIES: {}\n"}, {"group": "source", "id": "node:b0001_s0002", "label": "node:b0001_s0002", "shape": "dot", "title": "\nID: node:b0001_s0002\nTYPE: source\nLABEL: node:b0001_s0002\nPROPERTIES: {}\n"}]);
+                  edges = new vis.DataSet([{"arrows": "to", "from": "claim:f73dc786", "label": "belongs_to", "title": "\nTYPE: belongs_to\nPROPERTIES: {}\n", "to": "metric:\uacbd\uc733\uac12 \uc0c1\uc2b9\ub960"}, {"arrows": "to", "from": "claim:f73dc786", "label": "belongs_to", "title": "\nTYPE: belongs_to\nPROPERTIES: {}\n", "to": "entity:\ud55c\uad6d \ubc0f \uc77c\ubcf8"}, {"arrows": "to", "from": "claim:a3e06080", "label": "belongs_to", "title": "\nTYPE: belongs_to\nPROPERTIES: {}\n", "to": "metric:\uc11d\uc720\uc81c\ud488 \uac00\uaca9 \ubcc0\ub3d9\ub960"}, {"arrows": "to", "from": "claim:a3e06080", "label": "measured_at", "title": "\nTYPE: measured_at\nPROPERTIES: {}\n", "to": "time:\uc911\ub3d9\uc804\uc7c1 \ubc1c\ubc1c \uc9c1\uc804(2\uc6d4 27\uc77c)"}, {"arrows": "to", "from": "claim:a3e06080", "label": "belongs_to", "title": "\nTYPE: belongs_to\nPROPERTIES: {}\n", "to": "entity:\ud55c\uad6d\uc758 \ud718\ubc1c\uc720 \ubc0f \uacbd\uc720"}, {"arrows": "to", "from": "claim:8233f0d2", "label": "belongs_to", "title": "\nTYPE: belongs_to\nPROPERTIES: {}\n", "to": "metric:\ud718\ubc1c\uc720 \ubc0f \uacbd\uc720 \uac00\uaca9 \uc0c1\uc2b9\ub960"}, {"arrows": "to", "from": "claim:8233f0d2", "label": "measured_at", "title": "\nTYPE: measured_at\nPROPERTIES: {}\n", "to": "time:\uac19\uc740 \uae30\uac04"}, {"arrows": "to", "from": "claim:8233f0d2", "label": "belongs_to", "title": "\nTYPE: belongs_to\nPROPERTIES: {}\n", "to": "entity:\ubbf8\uad6d, \uc77c\ubcf8"}, {"arrows": "to", "from": "claim:af520915", "label": "belongs_to", "title": "\nTYPE: belongs_to\nPROPERTIES: {}\n", "to": "metric:\ud718\ubc1c\uc720 \ubc0f \uacbd\uc720 \uac00\uaca9 \uc778\uc0c1 \uc5b5\uc81c \uc815\ub3c4"}, {"arrows": "to", "from": "claim:af520915", "label": "belongs_to", "title": "\nTYPE: belongs_to\nPROPERTIES: {}\n", "to": "entity:\uc77c\ubcf8 \ub0b4 \uc815\uc720\uc0ac \ubc0f \uad00\ub828 \ub3c4\ub9e4 \ub2e8\uacc4"}, {"arrows": "to", "from": "claim:ba217a77", "label": "belongs_to", "title": "\nTYPE: belongs_to\nPROPERTIES: {}\n", "to": "metric:\ud718\ubc1c\uc720 \uac00\uaca9 \uc0c1\uc2b9\ub960"}, {"arrows": "to", "from": "claim:ba217a77", "label": "measured_at", "title": "\nTYPE: measured_at\nPROPERTIES: {}\n", "to": "time:\uac19\uc740 \uae30\uac04"}, {"arrows": "to", "from": "claim:ba217a77", "label": "belongs_to", "title": "\nTYPE: belongs_to\nPROPERTIES: {}\n", "to": "entity:\uc601\uad6d, \ud504\ub791\uc2a4, \ub3c5\uc77c \ub4f1 \uc720\ub7fd \uad6d\uac00 \ubc0f \ud55c\uad6d"}, {"arrows": "to", "from": "claim:200d49f1", "label": "belongs_to", "title": "\nTYPE: belongs_to\nPROPERTIES: {}\n", "to": "metric:\uacbd\uc733\uac12 \uc0c1\uc2b9\ub960"}, {"arrows": "to", "from": "claim:200d49f1", "label": "belongs_to", "title": "\nTYPE: belongs_to\nPROPERTIES: {}\n", "to": "entity:\ud55c\uad6d \ubc0f \ube44\uad50 \ub300\uc0c1 \uad6d\uac00\ub4e4"}, {"arrows": "to", "from": "claim:70e9995a", "label": "belongs_to", "title": "\nTYPE: belongs_to\nPROPERTIES: {}\n", "to": "metric:\ube44\ucd95\uc720 \uc2a4\uc640\ud504 \uc2e0\uccad \ubb3c\ub7c9"}, {"arrows": "to", "from": "claim:70e9995a", "label": "measured_at", "title": "\nTYPE: measured_at\nPROPERTIES: {}\n", "to": "time:\ud604\uc7ac"}, {"arrows": "to", "from": "claim:70e9995a", "label": "belongs_to", "title": "\nTYPE: belongs_to\nPROPERTIES: {}\n", "to": "entity:\uad6d\ub0b4 4\ub300 \uc815\uc720\uc0ac"}, {"arrows": "to", "from": "claim:f73dc786", "label": "compare", "title": "\nTYPE: compare\nPROPERTIES: {\u0027shared_indicator\u0027: \u0027\uacbd\uc733\uac12 \uc0c1\uc2b9\ub960\u0027}\n", "to": "claim:200d49f1"}, {"arrows": "to", "from": "node:b0000", "label": "in_doc", "title": "\nTYPE: in_doc\nPROPERTIES: {}\n", "to": "node:doc:ea9ce981"}, {"arrows": "to", "from": "node:b0000_s0000", "label": "in_block", "title": "\nTYPE: in_block\nPROPERTIES: {}\n", "to": "node:b0000"}, {"arrows": "to", "from": "node:b0001", "label": "in_doc", "title": "\nTYPE: in_doc\nPROPERTIES: {}\n", "to": "node:doc:ea9ce981"}, {"arrows": "to", "from": "node:b0001_s0000", "label": "in_block", "title": "\nTYPE: in_block\nPROPERTIES: {}\n", "to": "node:b0001"}, {"arrows": "to", "from": "node:b0001_s0000", "label": "next_sent", "title": "\nTYPE: next_sent\nPROPERTIES: {}\n", "to": "node:b0001_s0001"}, {"arrows": "to", "from": "node:b0001_s0001", "label": "in_block", "title": "\nTYPE: in_block\nPROPERTIES: {}\n", "to": "node:b0001"}, {"arrows": "to", "from": "node:b0001_s0001", "label": "next_sent", "title": "\nTYPE: next_sent\nPROPERTIES: {}\n", "to": "node:b0001_s0002"}, {"arrows": "to", "from": "node:b0001_s0002", "label": "in_block", "title": "\nTYPE: in_block\nPROPERTIES: {}\n", "to": "node:b0001"}, {"arrows": "to", "from": "node:b0001_s0002", "label": "next_sent", "title": "\nTYPE: next_sent\nPROPERTIES: {}\n", "to": "node:b0001_s0003"}, {"arrows": "to", "from": "node:b0001_s0003", "label": "in_block", "title": "\nTYPE: in_block\nPROPERTIES: {}\n", "to": "node:b0001"}, {"arrows": "to", "from": "node:b0001_s0003", "label": "next_sent", "title": "\nTYPE: next_sent\nPROPERTIES: {}\n", "to": "node:b0001_s0004"}, {"arrows": "to", "from": "node:b0001_s0004", "label": "in_block", "title": "\nTYPE: in_block\nPROPERTIES: {}\n", "to": "node:b0001"}, {"arrows": "to", "from": "node:b0001_s0004", "label": "next_sent", "title": "\nTYPE: next_sent\nPROPERTIES: {}\n", "to": "node:b0001_s0005"}, {"arrows": "to", "from": "node:b0001_s0005", "label": "in_block", "title": "\nTYPE: in_block\nPROPERTIES: {}\n", "to": "node:b0001"}, {"arrows": "to", "from": "node:b0001_s0005", "label": "next_sent", "title": "\nTYPE: next_sent\nPROPERTIES: {}\n", "to": "node:b0001_s0006"}, {"arrows": "to", "from": "node:b0001_s0006", "label": "in_block", "title": "\nTYPE: in_block\nPROPERTIES: {}\n", "to": "node:b0001"}, {"arrows": "to", "from": "node:b0001_s0006", "label": "next_sent", "title": "\nTYPE: next_sent\nPROPERTIES: {}\n", "to": "node:b0001_s0007"}, {"arrows": "to", "from": "node:b0001_s0007", "label": "in_block", "title": "\nTYPE: in_block\nPROPERTIES: {}\n", "to": "node:b0001"}, {"arrows": "to", "from": "node:b0001_s0007", "label": "next_sent", "title": "\nTYPE: next_sent\nPROPERTIES: {}\n", "to": "node:b0001_s0008"}, {"arrows": "to", "from": "node:b0001_s0008", "label": "in_block", "title": "\nTYPE: in_block\nPROPERTIES: {}\n", "to": "node:b0001"}, {"arrows": "to", "from": "node:b0001_s0008", "label": "next_sent", "title": "\nTYPE: next_sent\nPROPERTIES: {}\n", "to": "node:b0001_s0009"}, {"arrows": "to", "from": "node:b0001_s0009", "label": "in_block", "title": "\nTYPE: in_block\nPROPERTIES: {}\n", "to": "node:b0001"}, {"arrows": "to", "from": "node:b0001_s0009", "label": "next_sent", "title": "\nTYPE: next_sent\nPROPERTIES: {}\n", "to": "node:b0001_s0010"}, {"arrows": "to", "from": "node:b0001_s0010", "label": "in_block", "title": "\nTYPE: in_block\nPROPERTIES: {}\n", "to": "node:b0001"}, {"arrows": "to", "from": "node:b0001_s0010", "label": "next_sent", "title": "\nTYPE: next_sent\nPROPERTIES: {}\n", "to": "node:b0001_s0011"}, {"arrows": "to", "from": "node:b0001_s0011", "label": "in_block", "title": "\nTYPE: in_block\nPROPERTIES: {}\n", "to": "node:b0001"}, {"arrows": "to", "from": "node:b0001_s0011", "label": "next_sent", "title": "\nTYPE: next_sent\nPROPERTIES: {}\n", "to": "node:b0001_s0012"}, {"arrows": "to", "from": "node:b0001_s0012", "label": "in_block", "title": "\nTYPE: in_block\nPROPERTIES: {}\n", "to": "node:b0001"}, {"arrows": "to", "from": "node:b0001_s0012", "label": "next_sent", "title": "\nTYPE: next_sent\nPROPERTIES: {}\n", "to": "node:b0001_s0013"}, {"arrows": "to", "from": "node:b0001_s0013", "label": "in_block", "title": "\nTYPE: in_block\nPROPERTIES: {}\n", "to": "node:b0001"}, {"arrows": "to", "from": "node:b0001_s0013", "label": "next_sent", "title": "\nTYPE: next_sent\nPROPERTIES: {}\n", "to": "node:b0001_s0014"}, {"arrows": "to", "from": "node:b0001_s0014", "label": "in_block", "title": "\nTYPE: in_block\nPROPERTIES: {}\n", "to": "node:b0001"}, {"arrows": "to", "from": "node:b0001_s0014", "label": "next_sent", "title": "\nTYPE: next_sent\nPROPERTIES: {}\n", "to": "node:b0001_s0015"}, {"arrows": "to", "from": "node:b0001_s0015", "label": "in_block", "title": "\nTYPE: in_block\nPROPERTIES: {}\n", "to": "node:b0001"}, {"arrows": "to", "from": "node:b0001_s0015", "label": "next_sent", "title": "\nTYPE: next_sent\nPROPERTIES: {}\n", "to": "node:b0001_s0016"}, {"arrows": "to", "from": "node:b0001_s0016", "label": "in_block", "title": "\nTYPE: in_block\nPROPERTIES: {}\n", "to": "node:b0001"}, {"arrows": "to", "from": "node:b0001_s0016", "label": "next_sent", "title": "\nTYPE: next_sent\nPROPERTIES: {}\n", "to": "node:b0001_s0017"}, {"arrows": "to", "from": "node:b0001_s0017", "label": "in_block", "title": "\nTYPE: in_block\nPROPERTIES: {}\n", "to": "node:b0001"}, {"arrows": "to", "from": "node:b0001_s0017", "label": "next_sent", "title": "\nTYPE: next_sent\nPROPERTIES: {}\n", "to": "node:b0001_s0018"}, {"arrows": "to", "from": "node:b0001_s0018", "label": "in_block", "title": "\nTYPE: in_block\nPROPERTIES: {}\n", "to": "node:b0001"}]);
+
+                  nodeColors = {};
+                  allNodes = nodes.get({ returnType: "Object" });
+                  for (nodeId in allNodes) {
+                    nodeColors[nodeId] = allNodes[nodeId].color;
+                  }
+                  allEdges = edges.get({ returnType: "Object" });
+                  // adding nodes and edges to the graph
+                  data = {nodes: nodes, edges: edges};
+
+                  var options = {
+    "configure": {
+        "enabled": true,
+        "filter": [
+            "physics"
+        ]
+    },
+    "edges": {
+        "color": {
+            "inherit": true
+        },
+        "smooth": {
+            "enabled": true,
+            "type": "dynamic"
+        }
+    },
+    "interaction": {
+        "dragNodes": true,
+        "hideEdgesOnDrag": false,
+        "hideNodesOnDrag": false
+    },
+    "physics": {
+        "enabled": true,
+        "stabilization": {
+            "enabled": true,
+            "fit": true,
+            "iterations": 1000,
+            "onlyDynamicEdges": false,
+            "updateInterval": 50
+        }
+    }
+};
+
+                  
+
+
+                  
+                  // if this network requires displaying the configure window,
+                  // put it in its div
+                  options.configure["container"] = document.getElementById("config");
+                  
+
+                  network = new vis.Network(container, data, options);
+
+                  
+
+                  
+
+                  
+
+
+                  
+
+                  return network;
+
+              }
+              drawGraph();
+        </script>
+    </body>
+</html>

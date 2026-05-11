@@ -31,52 +31,57 @@ logger = get_logger(__name__)
 MATCH_PROMPT = """당신은 팩트체크 전문 작가입니다.
 아래 검증 결과를 독자가 이해하기 쉽게 한국어로 설명하세요.
 
-[검증 결과: 일치 (MATCH)]
+[판정: ✅ 일치 (MATCH) — 이 판정은 확정입니다. 절대 "사실이 아니다"라고 쓰지 마세요.]
 주장: "{claim_text}"
 기사 수치: {claimed_value} {unit}
 공식 수치: {official_value} {unit}
 오차: {diff_pct:.1f}%
+신뢰도: {confidence:.0%}
 근거 통계: {stat_source}
 출처: {provenance}
 
 [작성 규칙]
 - 2~3문장으로 간결하게
+- 판정이 "일치"이므로 "사실입니다", "확인됩니다" 등 긍정적 표현 사용
 - "KOSIS {{통계명}}에 따르면" 형식으로 출처 명시
-- 독자가 수치를 직접 확인할 수 있도록 통계표 ID 포함
-- 판정 이유를 명확히"""
+- 기사 수치와 공식 수치를 나란히 비교
+- 통계표 ID 포함
+- ⚠️ "사실이 아닙니다", "틀렸습니다" 등 부정 표현 절대 금지"""
 
 MISMATCH_PROMPT = """당신은 팩트체크 전문 작가입니다.
 아래 검증 결과를 독자가 이해하기 쉽게 한국어로 설명하세요.
 
-[검증 결과: 불일치 (MISMATCH)]
+[판정: 불일치 (MISMATCH) — 기사 수치와 공식 수치가 다릅니다.]
 주장: "{claim_text}"
 기사 수치: {claimed_value} {unit}
 공식 수치: {official_value} {unit}
 차이: {diff} {unit} ({diff_pct:.1f}%)
 불일치 유형: {mismatch_reason}
+신뢰도: {confidence:.0%}
 근거 통계: {stat_source}
 출처: {provenance}
 
 [작성 규칙]
 - 3~4문장으로 작성
-- 기사 수치와 공식 수치를 나란히 제시
+- 기사 수치({claimed_value})와 공식 수치({official_value})를 반드시 정확히 인용
+- 위에 적힌 수치만 사용하세요. 새로운 수치를 만들어내지 마세요.
 - 불일치 유형({mismatch_reason})에 맞는 원인 설명 포함
-- 독자가 직접 확인할 수 있도록 KOSIS 출처 포함
-- 과장/축소인 경우 독자 주의 안내"""
+- KOSIS 출처 포함"""
 
 UNVERIFIABLE_PROMPT = """당신은 팩트체크 전문 작가입니다.
 아래 검증 결과를 독자가 이해하기 쉽게 한국어로 설명하세요.
 
-[검증 결과: 검증 불가 (UNVERIFIABLE)]
+[판정: 검증 불가 (UNVERIFIABLE) — 공식 통계를 찾지 못했습니다.]
 주장: "{claim_text}"
 검증 불가 이유: {reason}
 시도한 검색어: {search_hint}
 
 [작성 규칙]
 - 2~3문장으로 작성
-- 왜 공식 통계를 찾지 못했는지 설명
-- 독자가 직접 확인할 수 있는 방법 제시 (KOSIS 직접 검색 등)
-- 단정적 판정 없이 중립적 톤 유지"""
+- "사실입니다" 또는 "사실이 아닙니다"라고 단정하지 마세요
+- 왜 공식 통계를 찾지 못했는지만 설명
+- 독자가 직접 KOSIS에서 확인할 방법 제시
+- 수치를 새로 만들어내지 마세요. "100.0°C" 같은 거짓 수치 생성 금지"""
 
 
 # ── 메인 함수 ─────────────────────────────────────────────────────────────
@@ -153,6 +158,7 @@ def _build_prompt(
             official_value=official_value,
             unit=unit,
             diff_pct=diff_pct,
+            confidence=result.confidence,
             stat_source=stat_source,
             provenance=prov_text,
         )
@@ -169,6 +175,7 @@ def _build_prompt(
             diff=diff,
             diff_pct=diff_pct,
             mismatch_reason=mismatch_reason,
+            confidence=result.confidence,
             stat_source=stat_source,
             provenance=prov_text,
         )

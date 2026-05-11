@@ -5,11 +5,16 @@
 
 # [DONE] __init__ DB 연결 초기화
 # [DONE] save_claims 배치 INSERT 구현
+# [DONE] save_results 배치 INSERT 구현 (claimed_value, true_value, deviation 계산 포함)
+# [DONE] save_claims ON CONFLICT (claim_id) DO NOTHING 추가 (중복 실행 방지)
+# [DONE] save_claims/save_results 매번 새 연결로 변경 (long-running 연결 끊김 방지)
+# [DONE] save_claims domain 파라미터 추가
+# [DONE] save_claims/save_results 재실행 시 기존 데이터 삭제 후 재삽입
 # [TODO] save_document 구현
-# [TODO] save_results 구현
 # [TODO] save_feedback 구현
 """
 from __future__ import annotations
+import os
 from structverify.core.schemas import SIRDocument, Claim, VerificationResult
 from structverify.utils.logger import get_logger
 
@@ -18,19 +23,19 @@ logger = get_logger(__name__)
 
 class DBManager:
     def __init__(self, config: dict | None = None):
-      self.config = config or {}
-       
-      import psycopg2
-      from dotenv import load_dotenv
-      load_dotenv()
-      
-      self.conn = psycopg2.connect(
-          host=os.getenv("POSTGRES_HOST"),
-          port=os.getenv("POSTGRES_PORT"),
-          dbname=os.getenv("POSTGRES_DB"),
-          user=os.getenv("POSTGRES_USER"),
-          password=os.getenv("POSTGRES_PASSWORD")
-      )
+        self.config = config or {}
+        from dotenv import load_dotenv
+        load_dotenv()
+
+    def _get_conn(self):
+        import psycopg2
+        return psycopg2.connect(
+            host=os.getenv("POSTGRES_HOST"),
+            port=os.getenv("POSTGRES_PORT"),
+            dbname=os.getenv("POSTGRES_DB"),
+            user=os.getenv("POSTGRES_USER"),
+            password=os.getenv("POSTGRES_PASSWORD")
+        )
 
     async def save_document(self, doc: SIRDocument) -> None:
         """
@@ -48,42 +53,93 @@ class DBManager:
         """
         logger.warning(f"DB 저장 stub: doc {doc.doc_id}")
 
-    async def save_claims(self, claims: list[Claim]) -> None:
-      cur = self.conn.cursor()
-      
-      for claim in claims:
-          cur.execute("""
-              INSERT INTO claims (claim_id, request_id, field_name, field_value,
-                                unit, is_approximate, modifier, parent_path,
-                                time_reference, context)
-              VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-          """, (
-              str(claim.claim_id),
-              str(claim.doc_id),
-              claim.schema.indicator,
-              claim.schema.value,
-              claim.schema.unit,
-              False,
-              None,
-              None,
-              claim.schema.time_period,
-              claim.claim_text
-          ))
-      
-      self.conn.commit()
-      cur.close()
+    async def save_claims(self, claims: list[Claim], domain: str = None) -> None:
+        # [v3] - 박재윤: 매번 새 연결 + 재실행 시 기존 데이터 삭제 후 재삽입
+        conn = self._get_conn()
+        cur = conn.cursor()
 
-    async def save_results(self, results: list[VerificationResult]) -> None:
-        """
-        TODO [박재윤]: verification_results 테이블 배치 INSERT 구현
-          INSERT INTO verification_results
-            (result_id, claim_id, verdict, confidence, mismatch_type,
-             evidence_json, explanation, created_at)
-          VALUES ...
-          - verdict: result.verdict.value
-          - evidence_json: result.evidence.model_dump() if result.evidence else None
-        """
-        logger.warning(f"DB 저장 stub: {len(results)} results")
+        if claims:
+            request_id = str(claims[0].doc_id)
+            # 기존 claims 삭제 (재실행 시 중복 방지)
+            cur.execute("DELETE FROM claims WHERE request_id = %s", (request_id,))
+            # requests 테이블 INSERT
+            cur.execute(
+                "INSERT INTO requests (request_id, domain, submitted_at) VALUES (%s, %s, NOW()) ON CONFLICT (request_id) DO NOTHING",
+                (request_id, domain)
+            )
+
+        for claim in claims:
+            indicator = claim.schema.indicator if claim.schema else None
+            value     = claim.schema.value     if claim.schema else None
+            unit      = claim.schema.unit      if claim.schema else None
+            time_ref  = claim.schema.time_period if claim.schema else None
+
+            cur.execute("""
+                INSERT INTO claims (claim_id, request_id, field_name, field_value,
+                                  unit, is_approximate, modifier, parent_path,
+                                  time_reference, context)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                str(claim.claim_id), str(claim.doc_id),
+                indicator, value, unit,
+                False, None, None,
+                time_ref, claim.claim_text
+            ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        logger.info(f"Claims 저장 완료: {len(claims)}건")
+
+    async def save_results(self, results: list[VerificationResult], claims: list[Claim] = None) -> None:
+        # [v3] - 박재윤: 매번 새 연결 + 재실행 시 기존 데이터 삭제 후 재삽입
+        conn = self._get_conn()
+        cur = conn.cursor()
+
+        if results:
+            # 기존 results 삭제 (재실행 시 중복 방지)
+            claim_ids = [str(r.claim_id) for r in results]
+            cur.execute(
+                "DELETE FROM results WHERE claim_id = ANY(%s)", (claim_ids,)
+            )
+
+        claim_value_map = {}
+        if claims:
+            for c in claims:
+                if c.schema and c.schema.value is not None:
+                    claim_value_map[str(c.claim_id)] = c.schema.value
+
+        for result in results:
+            ev = result.evidence
+            claimed_value = claim_value_map.get(str(result.claim_id))
+            true_value = ev.official_value if ev else None
+
+            deviation = None
+            if claimed_value and true_value and true_value != 0:
+                deviation = abs(claimed_value - true_value) / abs(true_value)
+
+            cur.execute("""
+                INSERT INTO results (result_id, claim_id, truth_id,
+                                    claimed_value, true_value, deviation,
+                                    match_status, reason, explanation, judged_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                str(result.result_id),
+                str(result.claim_id),
+                None,
+                claimed_value,
+                true_value,
+                deviation,
+                result.verdict.value,
+                result.mismatch_type.value if result.mismatch_type else None,
+                result.explanation,
+                result.created_at,
+            ))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        logger.info(f"Results 저장 완료: {len(results)}건")
 
     async def save_feedback(self, event) -> None:
         """

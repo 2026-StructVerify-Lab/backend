@@ -46,6 +46,11 @@ CANDIDATE_PROMPT = """당신은 수치 기반 팩트체크 시스템의 1차 후
 
 문장: "{sentence}"
 
+중요:
+- candidate_label이 true이면 candidate_score는 반드시 0.5 이상이어야 합니다.
+- candidate_label이 false이면 candidate_score는 반드시 0.5 미만이어야 합니다.
+- JSON 앞뒤에 설명 문장을 절대 붙이지 마세요.
+
 JSON으로만 답하세요:
 {{
   "candidate_score": 0.0,
@@ -106,10 +111,22 @@ async def score_candidate(
                 prompt=CANDIDATE_PROMPT.format(sentence=sentence),
                 system_prompt="팩트체크 candidate detector. JSON으로만 답하세요.",
             )
-            score = float(result.get("candidate_score", 0.0))
+            # score = float(result.get("candidate_score", 0.0))
+            # label = bool(result.get("candidate_label", score >= threshold))
+            # signals = result.get("signals", {}) or {}
+            # signals["reason"] = result.get("reason")
+            # return score, label, "teacher_llm", signals
+            score = float(result.get("candidate_score", 0.0) or 0.0)
             label = bool(result.get("candidate_label", score >= threshold))
+
+            # LLM이 label=true인데 score를 0으로 주는 경우 방어
+            if label and score < threshold:
+                score = max(score, 0.75)
+
             signals = result.get("signals", {}) or {}
             signals["reason"] = result.get("reason")
+            signals["raw_llm_result"] = result
+
             return score, label, "teacher_llm", signals
         except Exception as e:
             logger.warning(f"candidate LLM 판별 실패 — heuristic fallback 사용: {e}")
