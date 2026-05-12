@@ -41,10 +41,21 @@ def build_query(claim: Claim) -> ConnectorQuery:
     parts = [p for p in [s.source_reference, s.indicator, s.population] if p]
     keyword = " ".join(parts) or claim.claim_text[:50]
 
-    # embedding_text: indicator + population + time_period
-    # pgvector 유사도 검색에 사용 (source_reference 제외 — 기관명 편향 방지)
-    emb_parts = [p for p in [s.indicator, s.population, s.time_period] if p]
-    embedding_text = " ".join(emb_parts) or keyword
+    #   "카테고리 > indicator | 항목: indicator | 분류: population | 단위: unit"
+    # KOSIS catalog의 임베딩 인덱싱 포맷과 정렬되어 유사도 검색 정확도 향상.
+    emb_cat = s.parent_path or ""
+    emb_indicator = s.indicator or ""
+    emb_population = s.population or ""
+    emb_unit = s.unit or ""
+    if emb_indicator:
+        embedding_text = (
+            f"{emb_cat} > {emb_indicator} | "
+            f"항목: {emb_indicator} | "
+            f"분류: {emb_population} | "
+            f"단위: {emb_unit}"
+        ).strip()
+    else:
+        embedding_text = keyword
 
     return ConnectorQuery(
         keyword=keyword,
@@ -52,9 +63,10 @@ def build_query(claim: Claim) -> ConnectorQuery:
         time_period=s.time_period,
         population=s.population,
         extra_params={
-            "raw_claim":      context,       # [v3] context 포함
+            "raw_claim":      context,
             "embedding_text": embedding_text,
-            # source_reference가 있으면 KOSIS org_name 필터로 활용
             "source_org":     s.source_reference,
+            # [v6.11] parent_path 전달 → catalog_search가 LLM 호출 없이 활용
+            "parent_path":    s.parent_path,
         },
     )

@@ -19,8 +19,10 @@ venv/
 *.csv
 
 # Example 제외
-!.env.example
-
+*.env.example
+# 모든 폴더 안에 있는 env.example 제외
+*/*.env.example
+**.env.example
 # [TODO-all]
 # 본인 개인 개발 환경 env 를 추가했다면 여기 밑에 추가해주세요.
 
@@ -48,3 +50,15 @@ config/default.yaml
 
 kosis_catalog_cache.json
 /*.csv
+
+# result files
+*.csv
+*.zip
+
+# python
+__pycache__/
+*.pyc
+
+# env
+.env
+venv/

@@ -193,6 +193,9 @@ class ClaimSchema(BaseModel):
     comparison_type: ClaimType | None = None
     source_reference: str | None = None
     graph_schema_candidates: list[dict[str, str]] = Field(default_factory=list)
+    parent_path: str | None         # "노동 > 청년 > 쉬었음 인구" (계층 카테고리)
+    is_approximate: bool = False    # "안팎" 인지
+    modifier: str | None            # 근사 표현 원문
 
 
 
