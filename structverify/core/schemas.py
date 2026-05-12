@@ -196,6 +196,9 @@ class ClaimSchema(BaseModel):
     parent_path: str | None         # "노동 > 청년 > 쉬었음 인구" (계층 카테고리)
     is_approximate: bool = False    # "안팎" 인지
     modifier: str | None            # 근사 표현 원문
+    prev_value: float | None = None
+    prev_time_period: str | None = None
+    prev_phrase: str | None = None
 
 
 
