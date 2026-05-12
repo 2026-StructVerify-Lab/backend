@@ -40,22 +40,32 @@ logger = get_logger(__name__)
 # KOSIS 통합검색에서 국가통계만 (지역통계 제외)
 _KOSIS_SEARCH_VW_CD = "MT_ZTITLE"
 
-# LLM 카테고리/검색어 추출 프롬프트
-_CATEGORY_EXTRACT_PROMPT = """다음 뉴스 수치 주장을 분석하여 두 가지를 추출하세요.
+# LLM 카테고리/검색어 추출 프롬프트 (parent_path 없을 때만 fallback으로 사용)
+_CATEGORY_EXTRACT_PROMPT = """다음 뉴스 수치 주장을 KOSIS 검색에 적합한 형태로 분석하세요.
 
 indicator: {indicator}
 population: {population}
 원문: {claim_text}
 
-1) 이 통계가 속할 KOSIS 카테고리 경로 키워드 2~3개 (쉼표 구분)
-   KOSIS 주요 분야: 인구, 가구, 고용, 노동, 임금, 물가, 가계, 보건, 사회, 복지, 교육, 환경, 농림, 수산, 건설, 주택, 토지, 교통, 정보통신, 경제, 산업, 무역
-   이 수치가 나올 법한 통계조사명도 포함하세요.
+[추출 항목]
+1) 카테고리 키워드: 이 통계가 속할 KOSIS 분야 키워드 1~3개 (쉼표 구분)
+   KOSIS 대분류: 인구, 가구, 고용, 노동, 임금, 물가, 가계, 보건, 사회, 복지,
+                교육, 환경, 농림, 수산, 건설, 주택, 토지, 교통, 정보통신, 경제, 산업, 무역
 
-2) KOSIS 통계표 이름에 들어갈 법한 검색어 2~3단어 (숫자/연도 금지)
+2) 검색 키워드: KOSIS 통계표 이름에 들어갈 *핵심 명사* 2~3 단어
+   - 숫자/연도/월/일 절대 포함 금지
+   - "증가율/변화/차이/상승/하락" 같은 측정 행위 단어 *제외*
+   - "출생아 수" "혼인 건수" "쉬었음 인구" 같이 측정 대상 자체만
 
-형식:
-카테고리: 키워드1, 키워드2, 키워드3
-검색어: 검색 키워드"""
+[좋은 예]
+indicator="출생아 수 증가율" → 검색어="출생아 수"
+indicator="혼인 건수 증가율" → 검색어="혼인 건수"
+indicator="연평균 기온" → 검색어="연평균 기온"
+indicator="쉬었음 청년" → 검색어="쉬었음 인구"
+
+[형식 — 이 두 줄만 출력]
+카테고리: 키워드1, 키워드2
+검색어: 핵심 명사 두세개"""
 
 
 class CatalogSearchTool:
@@ -134,14 +144,39 @@ class CatalogSearchTool:
         logger.info(f"CatalogSearch 완료: {len(results)}개 후보")
         return results[:top_k]
 
-    # ── LLM 카테고리/검색어 추출 ────────────────────────────────────────────
+    # ── 카테고리/검색어 추출 ────────────────────────────────────────────
 
     async def _extract_category_and_keyword(
         self, query: ConnectorQuery
     ) -> tuple[list[str], str]:
-        """LLM이 indicator → KOSIS category 키워드 + 검색어 추출"""
+        """
+        ConnectorQuery → (category_keywords, search_keyword) 추출.
+
+        [v6.11] schema에 parent_path가 있으면 *LLM 호출 없이* 그대로 분해.
+        없을 때만 LLM 호출 (박재유 방식의 fallback).
+
+          · 4자리 연도 제거
+          · 공백 정리
+        """
+        # 1) schema의 parent_path가 있으면 우선 사용 (LLM 호출 절약)
+        parent_path = (query.extra_params or {}).get("parent_path")
+        if parent_path:
+            # "노동 > 청년 > 쉬었음 인구" → category=["노동", "청년"], keyword="쉬었음 인구"
+            parts = [p.strip() for p in re.split(r"\s*>\s*", parent_path) if p.strip()]
+            if parts:
+                # 마지막 노드(소분류)를 검색어로
+                search_kw = parts[-1]
+                # 앞 1-2개 노드를 카테고리로
+                category_kws = parts[:-1] if len(parts) > 1 else parts
+                # 박재유 정제 (연도 + 공백)
+                search_kw = _minimal_clean(search_kw)
+                if search_kw:
+                    logger.debug(f"parent_path 활용: category={category_kws}, kw={search_kw}")
+                    return (category_kws, search_kw)
+
+        # 2) parent_path 없으면 LLM 호출 (fallback)
         if not self.hcx_key:
-            return ([], query.indicator or query.keyword or "")
+            return ([], _minimal_clean(query.indicator or query.keyword or ""))
 
         raw_claim = (query.extra_params or {}).get("raw_claim", "")
         prompt = _CATEGORY_EXTRACT_PROMPT.format(
@@ -167,7 +202,7 @@ class CatalogSearchTool:
                 content = resp.json()["result"]["message"]["content"].strip()
         except Exception as e:
             logger.debug(f"카테고리 추출 실패: {e}")
-            return ([], query.indicator or query.keyword or "")
+            return ([], _minimal_clean(query.indicator or query.keyword or ""))
 
         category_keywords: list[str] = []
         search_keyword = query.indicator or query.keyword or ""
@@ -181,10 +216,12 @@ class CatalogSearchTool:
                 ]
             elif "검색어" in line and ":" in line:
                 kw = line.split(":", 1)[1].strip().strip("\"'")
-                kw = re.sub(r"\b\d{4}\b", "", kw).strip()
-                kw = re.sub(r"\s+", " ", kw)
+                kw = _minimal_clean(kw)
                 if kw:
                     search_keyword = kw
+
+        # fallback도 최소 정제
+        search_keyword = _minimal_clean(search_keyword)
 
         return (category_keywords, search_keyword)
 
@@ -353,3 +390,16 @@ class CatalogSearchTool:
             except Exception:
                 pass
             return []
+
+
+# 룰베이스 stopword/action-word 매핑은 *제거*함 (사용자 원칙: LLM이 정제 책임).
+#     kw = re.sub(r'\b\d{4}\b', '', kw).strip()
+#     kw = re.sub(r'\s+', ' ', kw)
+
+def _minimal_clean(kw: str) -> str:
+    """LLM 응답에서 명백한 노이즈만 제거 (연도 + 공백). 의미 정제는 LLM 책임."""
+    if not kw:
+        return ""
+    s = re.sub(r"\b\d{4}\b", "", kw).strip()
+    s = re.sub(r"\s+", " ", s)
+    return s.strip(",·\"' ")
