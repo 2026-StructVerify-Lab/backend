@@ -76,10 +76,13 @@ cd backend
 python -m venv .venv && source .venv/bin/activate
 
 # 라이브러리 의존성 (기존)
+pip install -e ".[dev]" (처음 이용이면 이거 하세요.)
+
 pip install -r structverify/requirements.txt   # 또는 그쪽 설정대로
 
 # 플랫폼 의존성 (신규)
 pip install -r sv_platform/requirements.txt
+
 ```
 
 ### 2. PostgreSQL 준비
