@@ -60,11 +60,14 @@ class DBManager:
 
         if claims:
             request_id = str(claims[0].doc_id)
-            # 기존 claims 삭제 (재실행 시 중복 방지)
-            cur.execute("DELETE FROM claims WHERE request_id = %s", (request_id,))
-            # requests 테이블 INSERT
+            # [v3] - 박재윤: 같은 기사 재실행 시 기존 데이터 삭제 후 재삽입
             cur.execute(
-                "INSERT INTO requests (request_id, domain, submitted_at) VALUES (%s, %s, NOW()) ON CONFLICT (request_id) DO NOTHING",
+                "DELETE FROM results WHERE claim_id IN (SELECT claim_id FROM claims WHERE request_id = %s)",
+                (request_id,)
+            )
+            cur.execute("DELETE FROM claims WHERE request_id = %s", (request_id,))
+            cur.execute(
+                "INSERT INTO requests (request_id, domain, submitted_at) VALUES (%s, %s, NOW()) ON CONFLICT (request_id) DO UPDATE SET domain = EXCLUDED.domain, submitted_at = NOW()",
                 (request_id, domain)
             )
 
