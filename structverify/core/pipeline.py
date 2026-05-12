@@ -6,6 +6,7 @@
 # [DONE] DBManager 초기화 연동
 # [DONE] save_claims 파이프라인 연결
 # [DONE] save_results 파이프라인 연결
+# [DONE] 기사 텍스트 해시로 doc_id 고정 (재실행 시 중복 방지)
 # [TODO] RawStorage 초기화 (MinIO/S3 업로드)
 # [TODO] DWHManager 초기화 (Snowflake)
 # [TODO] GraphStore 초기화 (Neo4j)
@@ -131,6 +132,11 @@ class VerificationPipeline:
             src,
             source_uri=source if src == SourceType.URL else None,
         )
+        # [v2] - 박재윤: 기사 텍스트 해시로 doc_id 고정 (재실행 시 중복 방지)
+        import hashlib
+        from uuid import UUID
+        text_hash = hashlib.md5(raw_text.encode()).hexdigest()
+        sir_doc.doc_id = UUID(text_hash)
         logger.info(f"SIR Tree: {len(sir_doc.blocks)} blocks")
 
         # TODO [박재윤]: Step 1.5 — 원본 텍스트 → Raw Storage(S3/MinIO) 저장

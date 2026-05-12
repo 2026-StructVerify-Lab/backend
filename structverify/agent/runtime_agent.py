@@ -41,6 +41,12 @@ Thought → Action(Tool Call) → Observation 순환을 통해 파이프라인 �
     generate_explain  → HCX-003 (v1, 중량)
 
 [참고] ReAct (Yao et al., ICLR 2023) — https://github.com/ysymyth/ReAct
+
+
+# [박재윤 - 2026-05-12]
+# - Step 7~9 asyncio.gather + Semaphore(3)으로 병렬화 (직렬 → 병렬)
+
+# [DONE] Step 7~9 병렬화 (asyncio.gather + Semaphore 3)
 """
 from __future__ import annotations
 
@@ -157,39 +163,44 @@ class RuntimeAgent:
         # [v6] 전체 그래프로 ClaimGraph 재생성 (verifier/explainer가 사용)
         full_graph = ClaimGraph(all_nodes, all_edges)
 
-        # ── 각 주장별 Step 7~9 ──────────────────────────────────────
-        results: list[VerificationResult] = []
+        # ── 각 주장별 Step 7~9 (병렬 처리) ─────────────────────────
+        # [박재윤 - 2026-05-12]: asyncio.gather + Semaphore(3)으로 병렬화
+        import asyncio
+        sem = asyncio.Semaphore(3)
 
-        for claim in claims:
+        async def process_one_claim(claim):
             claim_nid = f"claim:{claim.claim_id.hex[:8]}"
+            async with sem:
+                # Action: retrieve_evidence (KOSIS API)
+                # Tool: KOSIS Open API — pgvector 검색 → LLM 리랭킹 → 실제 수치 조회
+                # Thought: "KOSIS에서 공식 수치를 가져와야 한다"
+                # Observation: Evidence {official_value, stat_table_id, ...}
+                # TODO [신준수]: kosis_connector.py 실제 HTTP 호출 구현
+                # TODO [신준수]: query_builder.py ClaimSchema → KOSIS 파라미터 변환
+                query = build_query(claim)
+                evidence, ev_nodes, ev_edges = await build_evidence_subgraph(
+                    self.kosis, query, claim_nid,
+                )
+                all_nodes.extend(ev_nodes)
+                all_edges.extend(ev_edges)
+                logger.info(f"[Agent A] Step 7 retrieve_evidence → {str(evidence)[:80] if evidence else None}")
 
-            # Action: retrieve_evidence (KOSIS API)
-            # Tool: KOSIS Open API — pgvector 검색 → LLM 리랭킹 → 실제 수치 조회
-            # Thought: "KOSIS에서 공식 수치를 가져와야 한다"
-            # Observation: Evidence {official_value, stat_table_id, ...}
-            # TODO [신준수]: kosis_connector.py 실제 HTTP 호출 구현
-            # TODO [신준수]: query_builder.py ClaimSchema → KOSIS 파라미터 변환
-            query = build_query(claim)
-            evidence, ev_nodes, ev_edges = await build_evidence_subgraph(
-                self.kosis, query, claim_nid,
-            )
-            all_nodes.extend(ev_nodes)
-            all_edges.extend(ev_edges)
-            logger.info(f"[Agent A] Step 7 retrieve_evidence → {str(evidence)[:80] if evidence else None}")
-            # Action: verify_claim (Deterministic, LLM 미개입)
-            # [v6] graph 전달 → schema.time_period가 "작년"이어도
-            #      그래프에서 멀티홉 traverse로 "2023" 찾아서 KOSIS row 매칭
-            result = verify_claim(claim, evidence, self.config, graph=full_graph)
-            logger.info(f"[Agent A] Step 8 verify_claim → {result.verdict.value}")
+                # Action: verify_claim (Deterministic, LLM 미개입)
+                # [v6] graph 전달 → schema.time_period가 "작년"이어도
+                #      그래프에서 멀티홉 traverse로 "2023" 찾아서 KOSIS row 매칭
+                result = verify_claim(claim, evidence, self.config, graph=full_graph)
+                logger.info(f"[Agent A] Step 8 verify_claim → {result.verdict.value}")
 
-            # Action: generate_explanation (LLM)
-            # Tool: HCX-003 (v1, 중량) — verdict별 전용 프롬프트 사용
-            # Thought: "판정 결과를 독자가 이해할 수 있는 설명으로 생성해야 한다"
-            # Observation: 자연어 설명 문자열 + provenance_summary 세팅
-            result.explanation = await generate_explanation(claim, result, self.config)
-            logger.info(f"[Agent A] Step 9 generate_explanation → {len(result.explanation or '')}자")
+                # Action: generate_explanation (LLM)
+                # Tool: HCX-003 (v1, 중량) — verdict별 전용 프롬프트 사용
+                # Thought: "판정 결과를 독자가 이해할 수 있는 설명으로 생성해야 한다"
+                # Observation: 자연어 설명 문자열 + provenance_summary 세팅
+                result.explanation = await generate_explanation(claim, result, self.config)
+                logger.info(f"[Agent A] Step 9 generate_explanation → {len(result.explanation or '')}자")
 
-            results.append(result)
+                return result
+
+        results = list(await asyncio.gather(*[process_one_claim(c) for c in claims]))
 
         logger.info(f"[Agent A] 완료: claims={len(claims)}, results={len(results)}, "
                     f"nodes={len(all_nodes)}, edges={len(all_edges)}")
