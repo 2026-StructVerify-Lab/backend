@@ -187,7 +187,12 @@ class LLMClient:
         model: str,
     ) -> str:
         """
-       
+        NCP CLOVA Studio Chat Completions v1 API.
+        엔드포인트: POST /v1/chat-completions/{model}
+        대상 모델: HCX-003
+
+        [박재윤 - 2026-05-14]
+        - 429 rate limit 시 exponential backoff 재시도 (최대 3회)
         """
         url = f"{HCX_V1_BASE}/{model}"
         messages = []
@@ -249,7 +254,14 @@ class LLMClient:
         temperature: float | None,
         model: str,
     ) -> str:
+        """
+        NCP CLOVA Studio Chat Completions v3 API.
+        엔드포인트: POST /v3/chat-completions/{model}
+        대상 모델: HCX-005 (비전), HCX-DASH-002 (경량)
 
+        [박재윤 - 2026-05-14]
+        - 429 rate limit 시 exponential backoff 재시도 (최대 3회)
+        """
         url = f"{HCX_V3_BASE}/{model}"
         messages = []
         if system_prompt:
