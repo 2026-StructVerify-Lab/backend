@@ -15,6 +15,10 @@
 # [DONE] getMeta(PRD/CMMT) 보강
 # [DONE] KOSIS API fetch() Param/statisticsParameterData
 # [TODO] 응답 파싱·obj/itm 매칭 정교화
+# [2026-05-14 | 이수민] memory/v1: category_path 보강 로직 추가
+#   - _lookup_category_path(): kosis_stat_catalog 테이블에서 stat_id로 직접 조회
+#   - search_and_fetch 성공 시 stat_rec.metadata 우선, 없으면 DB 조회로 보강
+#   - working memory 도메인 가드(verifier)에서 활용
 """
 retrieval/kosis_connector.py — KOSIS Open API 커넥터 (v3: CatalogSearchTool + LLM Agent)
 
@@ -240,6 +244,30 @@ def is_same_unit_type(claim_unit: str, kosis_unit: str) -> bool:
     ct = _get_type(claim_unit)
     kt = _get_type(kosis_unit)
     return (ct == "unknown" or kt == "unknown") or (ct == kt)
+
+
+# ── [이수민 2026-05-14] category_path DB 직접 조회 헬퍼 ─────────────────────
+# stat_rec.metadata에 category_path가 없는 경우 (KOSIS API 검색 결과 등)
+# kosis_stat_catalog 테이블에서 직접 조회. 도메인 가드용.
+async def _lookup_category_path(stat_id: str) -> str | None:
+    try:
+        import asyncpg
+        dsn = os.environ.get(
+            "PGVECTOR_DSN",
+            "postgresql://postgres:1234@localhost:5432/factcheck",
+        )
+        conn = await asyncpg.connect(dsn)
+        try:
+            row = await conn.fetchrow(
+                "SELECT category_path FROM kosis_stat_catalog WHERE stat_id = $1",
+                stat_id,
+            )
+            return row["category_path"] if row else None
+        finally:
+            await conn.close()
+    except Exception as e:
+        logger.debug(f"category_path 조회 실패 ({stat_id}): {e}")
+        return None
 
 
 # ── 기존 헬퍼 (신준수) ───────────────────────────────────────────────────────
@@ -514,9 +542,17 @@ class KOSISConnector(BaseConnector):
                     })
                     continue
 
+                # [이수민 2026-05-14] working memory 도메인 가드용
+                # stat_rec.metadata에 있으면 사용, 없으면 DB 직접 조회로 보강
+                if data.category_path is None:
+                    data.category_path = (stat_rec.metadata or {}).get("category_path")
+                if data.category_path is None:
+                    data.category_path = await _lookup_category_path(selected_id)
+
                 logger.info(
                     f"Evidence 조회 성공 (후보 {round_idx+1}): [{selected_id}] "
-                    f"value={data.official_value} {data.unit or ''}"
+                    f"value={data.official_value} {data.unit or ''} "
+                    f"category={data.category_path}"
                 )
                 return data
 

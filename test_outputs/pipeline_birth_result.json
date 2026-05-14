@@ -1,0 +1,125 @@
+{
+  "domain": "population",
+  "verdict_distribution": {
+    "unverifiable": 5,
+    "match": 2,
+    "mismatch": 1
+  },
+  "mismatch_distribution": {
+    "time_period": 1
+  },
+  "results": [
+    {
+      "sent_id": "b0000_s0000",
+      "indicator": null,
+      "value": null,
+      "time_period": null,
+      "verdict": "unverifiable",
+      "mismatch_type": null,
+      "confidence": 0.2,
+      "evidence": {
+        "stat_id": "DT_1B8000G",
+        "category_path": "MT_ZTITLE > 인구동향조사",
+        "official_value": 238317.0
+      }
+    },
+    {
+      "sent_id": "b0002_s0000",
+      "indicator": "출생아 수",
+      "value": 20717.0,
+      "time_period": "2025-04",
+      "verdict": "match",
+      "mismatch_type": null,
+      "confidence": 0.95,
+      "evidence": {
+        "stat_id": "DT_1B8000G",
+        "category_path": "MT_ZTITLE > 인구동향조사",
+        "official_value": 20787.0
+      }
+    },
+    {
+      "sent_id": "b0002_s0000",
+      "indicator": "출생아 수 증가율",
+      "value": 8.7,
+      "time_period": "2025-04",
+      "verdict": "unverifiable",
+      "mismatch_type": null,
+      "confidence": 0.3,
+      "evidence": {
+        "stat_id": "DT_1B8000G",
+        "category_path": "MT_ZTITLE > 인구동향조사",
+        "official_value": 18919.0
+      }
+    },
+    {
+      "sent_id": "b0002_s0001",
+      "indicator": "출생아 수 증가율",
+      "value": 8.7,
+      "time_period": "2025-04",
+      "verdict": "unverifiable",
+      "mismatch_type": null,
+      "confidence": 0.3,
+      "evidence": {
+        "stat_id": "DT_1B8000G",
+        "category_path": "MT_ZTITLE > 인구동향조사",
+        "official_value": 24099.0
+      }
+    },
+    {
+      "sent_id": "b0002_s0002",
+      "indicator": "합계출산율",
+      "value": 0.79,
+      "time_period": "2025-04",
+      "verdict": "match",
+      "mismatch_type": null,
+      "confidence": 0.9291139240506329,
+      "evidence": {
+        "stat_id": "DT_2KAA207",
+        "category_path": null,
+        "official_value": 0.734
+      }
+    },
+    {
+      "sent_id": "b0002_s0002",
+      "indicator": "합계출산율 차이",
+      "value": 0.06,
+      "time_period": "2025-04",
+      "verdict": "unverifiable",
+      "mismatch_type": null,
+      "confidence": 0.3,
+      "evidence": {
+        "stat_id": "DT_1BPA101",
+        "category_path": "MT_ZTITLE > 장래인구추계 > 전국(2022년 기준)",
+        "official_value": 0.67
+      }
+    },
+    {
+      "sent_id": "b0002_s0003",
+      "indicator": "혼인 건수",
+      "value": 18921.0,
+      "time_period": "2025-04",
+      "verdict": "mismatch",
+      "mismatch_type": "time_period",
+      "confidence": 0.7924213667430966,
+      "evidence": {
+        "stat_id": "DT_1B8000F",
+        "category_path": "MT_ZTITLE > 인구동향조사 > 인구동태건수 및 동태율(출생, 사망, 혼인, 이혼)",
+        "official_value": 91151.0
+      }
+    },
+    {
+      "sent_id": "b0002_s0003",
+      "indicator": "혼인 건수 증가율",
+      "value": 4.9,
+      "time_period": "2025-04",
+      "verdict": "unverifiable",
+      "mismatch_type": null,
+      "confidence": 0.3,
+      "evidence": {
+        "stat_id": "DT_1B8000F",
+        "category_path": "MT_ZTITLE > 인구동향조사 > 인구동태건수 및 동태율(출생, 사망, 혼인, 이혼)",
+        "official_value": 91151.0
+      }
+    }
+  ]
+}

@@ -9,6 +9,8 @@ v2: to_graph_nodes(), tag_provenance() 메서드 추가
 # 수정자: 신준수
 # 수정 날짜: 2026-04-27
 # 수정 내용: StatData에 official_value·unit·time_period(증거 정규화; 출처 API 키는 커넥터가 채움)
+# [2026-05-14 | 이수민] memory/v1: StatData.category_path 추가
+#   - KOSIS catalog의 카테고리 경로를 evidence까지 전달해 verifier 도메인 가드에 활용
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -41,6 +43,8 @@ class StatData:
     official_value: float | None = None
     unit: str | None = None
     time_period: str | None = None
+    # [이수민 2026-05-14] working memory 도메인 가드용 — KOSIS catalog category_path
+    category_path: str | None = None
 
 
 class BaseConnector(ABC):
