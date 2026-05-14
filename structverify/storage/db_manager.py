@@ -10,6 +10,7 @@
 # [DONE] save_claims/save_results 매번 새 연결로 변경 (long-running 연결 끊김 방지)
 # [DONE] save_claims domain 파라미터 추가
 # [DONE] save_claims/save_results 재실행 시 기존 데이터 삭제 후 재삽입
+# [DONE] save_claims source_type 파라미터 추가
 # [TODO] save_document 구현
 # [TODO] save_feedback 구현
 """
@@ -53,8 +54,9 @@ class DBManager:
         """
         logger.warning(f"DB 저장 stub: doc {doc.doc_id}")
 
-    async def save_claims(self, claims: list[Claim], domain: str = None) -> None:
+    async def save_claims(self, claims: list[Claim], domain: str = None, source_type: str = None) -> None:
         # [v3] - 박재윤: 매번 새 연결 + 재실행 시 기존 데이터 삭제 후 재삽입
+        # [v4] - 박재윤: source_type 파라미터 추가
         conn = self._get_conn()
         cur = conn.cursor()
 
@@ -67,8 +69,8 @@ class DBManager:
             )
             cur.execute("DELETE FROM claims WHERE request_id = %s", (request_id,))
             cur.execute(
-                "INSERT INTO requests (request_id, domain, submitted_at) VALUES (%s, %s, NOW()) ON CONFLICT (request_id) DO UPDATE SET domain = EXCLUDED.domain, submitted_at = NOW()",
-                (request_id, domain)
+                "INSERT INTO requests (request_id, source_type, domain, submitted_at) VALUES (%s, %s, %s, NOW()) ON CONFLICT (request_id) DO UPDATE SET source_type = EXCLUDED.source_type, domain = EXCLUDED.domain, submitted_at = NOW()",
+                (request_id, source_type, domain)
             )
 
         for claim in claims:
@@ -79,8 +81,8 @@ class DBManager:
 
             cur.execute("""
                 INSERT INTO claims (claim_id, request_id, field_name, field_value,
-                                  unit, is_approximate, modifier, parent_path,
-                                  time_reference, context)
+                                unit, is_approximate, modifier, parent_path,
+                                time_reference, context)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 str(claim.claim_id), str(claim.doc_id),

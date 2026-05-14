@@ -26,6 +26,14 @@ Runtime Agent와 Builder Agent가 공유하는 LLM 호출 인터페이스.
 
 [참고] CLOVA Studio Structured Outputs
   https://api.ncloud-docs.com/docs/en/clovastudio-chatcompletionsv3-so
+   
+
+# [박재윤 - 2026-05-14]: _call_hcx_v1, _call_hcx_v3 429 retry backoff 추가
+ - 429 rate limit 시 exponential backoff 재시도{V1,V3} (최대 3회)
+
+    NCP CLOVA Studio Chat Completions v1,V3 API.
+    엔드포인트: POST /v1/chat-completions/{model}
+    대상 모델: HCX-003
 """
 from __future__ import annotations
 
@@ -179,9 +187,7 @@ class LLMClient:
         model: str,
     ) -> str:
         """
-        NCP CLOVA Studio Chat Completions v1 API.
-        엔드포인트: POST /v1/chat-completions/{model}
-        대상 모델: HCX-003
+       
         """
         url = f"{HCX_V1_BASE}/{model}"
         messages = []
@@ -206,24 +212,33 @@ class LLMClient:
             "Accept": "application/json",
         }
 
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(url, json=payload, headers=headers)
-                resp.raise_for_status()
-                data = resp.json()
-            status_code = data.get("status", {}).get("code", "")
-            if status_code != "20000":
-                msg = data.get("status", {}).get("message", "unknown")
-                raise RuntimeError(f"HCX v1 API 오류: {status_code} {msg}")
-            content = data["result"]["message"]["content"]
-            logger.debug(f"HCX v1 응답 ({model}): {content[:80]}...")
-            return content
-        except httpx.HTTPStatusError as e:
-            logger.error(f"HCX v1 HTTP 오류: {e.response.status_code} — {e.response.text[:200]}")
-            raise
-        except httpx.TimeoutException:
-            logger.error(f"HCX v1 타임아웃: {url}")
-            raise
+        # [박재윤 - 2026-05-14]: 429 exponential backoff (1초 → 2초 → 4초)
+        import asyncio
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    resp = await client.post(url, json=payload, headers=headers)
+                    resp.raise_for_status()
+                    data = resp.json()
+                status_code = data.get("status", {}).get("code", "")
+                if status_code != "20000":
+                    msg = data.get("status", {}).get("message", "unknown")
+                    raise RuntimeError(f"HCX v1 API 오류: {status_code} {msg}")
+                content = data["result"]["message"]["content"]
+                logger.debug(f"HCX v1 응답 ({model}): {content[:80]}...")
+                return content
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429 and attempt < max_retries - 1:
+                    wait = 2 ** attempt
+                    logger.warning(f"HCX v1 429 rate limit — {wait}초 후 재시도 ({attempt+1}/{max_retries})")
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error(f"HCX v1 HTTP 오류: {e.response.status_code} — {e.response.text[:200]}")
+                    raise
+            except httpx.TimeoutException:
+                logger.error(f"HCX v1 타임아웃: {url}")
+                raise
 
     # ── HCX v3 (HCX-005, HCX-DASH-002) ─────────────────────────────────────
 
@@ -234,11 +249,7 @@ class LLMClient:
         temperature: float | None,
         model: str,
     ) -> str:
-        """
-        NCP CLOVA Studio Chat Completions v3 API.
-        엔드포인트: POST /v3/chat-completions/{model}
-        대상 모델: HCX-005 (비전), HCX-DASH-002 (경량)
-        """
+
         url = f"{HCX_V3_BASE}/{model}"
         messages = []
         if system_prompt:
@@ -261,21 +272,30 @@ class LLMClient:
             "Accept": "application/json",
         }
 
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(url, json=payload, headers=headers)
-                resp.raise_for_status()
-                data = resp.json()
-            status_code = data.get("status", {}).get("code", "")
-            if status_code != "20000":
-                msg = data.get("status", {}).get("message", "unknown")
-                raise RuntimeError(f"HCX v3 API 오류: {status_code} {msg}")
-            content = data["result"]["message"]["content"]
-            logger.debug(f"HCX v3 응답 ({model}): {content[:80]}...")
-            return content
-        except httpx.HTTPStatusError as e:
-            logger.error(f"HCX v3 HTTP 오류: {e.response.status_code} — {e.response.text[:200]}")
-            raise
+        # [박재윤 - 2026-05-14]: 429 exponential backoff (1초 → 2초 → 4초)
+        import asyncio
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    resp = await client.post(url, json=payload, headers=headers)
+                    resp.raise_for_status()
+                    data = resp.json()
+                status_code = data.get("status", {}).get("code", "")
+                if status_code != "20000":
+                    msg = data.get("status", {}).get("message", "unknown")
+                    raise RuntimeError(f"HCX v3 API 오류: {status_code} {msg}")
+                content = data["result"]["message"]["content"]
+                logger.debug(f"HCX v3 응답 ({model}): {content[:80]}...")
+                return content
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429 and attempt < max_retries - 1:
+                    wait = 2 ** attempt
+                    logger.warning(f"HCX v3 429 rate limit — {wait}초 후 재시도 ({attempt+1}/{max_retries})")
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error(f"HCX v3 HTTP 오류: {e.response.status_code} — {e.response.text[:200]}")
+                    raise
 
     # ── HCX Structured Outputs (HCX-007 전용) ───────────────────────────────
 
