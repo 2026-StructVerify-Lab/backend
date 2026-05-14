@@ -220,8 +220,12 @@ def _try_trafilatura(url: str) -> str:
         )
         if not result:
             return ""
-        parsed_result = json.loads(result)   # JSON 문자열을 파이썬 딕셔너리로 변환
-        markdown = f"# {parsed_result.get('title', '')}\n\n{parsed_result.get('text', '')}"  # 제목과 본문을 마크다운 형식으로 결합
+        parsed_result = json.loads(result)
+        title = parsed_result.get('title', '')
+        date  = parsed_result.get('date', '')
+        text  = parsed_result.get('text', '')
+        header = f"# {title}\n날짜: {date}" if date else f"# {title}"
+        markdown = f"{header}\n\n{text}"
         return markdown
     except Exception as e:
         logger.debug(f"trafilatura 예외: {e}")
