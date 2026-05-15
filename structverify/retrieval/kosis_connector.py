@@ -44,6 +44,10 @@ retrieval/kosis_connector.py — KOSIS Open API 커넥터 (v3: CatalogSearchTool
 [박재윤 - 2026-05-11]
 - tried_log UnboundLocalError 버그 수정
   · candidates 없을 때 tried_ids, tried_log 초기화 누락 수정
+
+[박재윤 - 2026-05-14]: _is_table_relevant 국가 불일치 체크 추가
+  · indicator에 외국 국가명 있고 테이블이 국내 통계면 → False
+  · 미국 소비자물가 → 한국 소비자물가 테이블 매칭 방지
 """
 from __future__ import annotations
 
@@ -132,11 +136,25 @@ def _is_table_relevant(indicator: str, table_name: str) -> bool:
     "연평균기온" vs "종관기상 평년값"    → True
     "평균 최저기온" vs "고온 일수 노출"  → True (기온 그룹)
     "시가총액" vs "산업별 취업자"        → False
+
+    [박재윤 - 2026-05-14]: 국가 불일치 체크 추가
+    indicator에 외국 국가명 있는데 테이블이 국내 통계면 → False
     """
     import re
 
     if not indicator or not table_name:
         return True
+
+    ind_lower = indicator.lower()
+    tbl_lower = table_name.lower()
+
+    # [박재윤 - 2026-05-14]: 국가 불일치 체크
+    _FOREIGN_COUNTRIES = {"미국", "일본", "중국", "독일", "영국", "유럽", "프랑스", "캐나다"}
+    _FOREIGN_TABLE_MARKERS = {"국제", "해외", "외국", "세계"}
+    foreign_in_indicator = any(c in ind_lower for c in _FOREIGN_COUNTRIES)
+    foreign_in_table = any(c in tbl_lower for c in _FOREIGN_COUNTRIES | _FOREIGN_TABLE_MARKERS)
+    if foreign_in_indicator and not foreign_in_table:
+        return False
 
     stopwords = {
         "통계", "현황", "조사", "결과", "항목", "지표", "전체", "기타",
