@@ -56,8 +56,22 @@ Thought → Action(Tool Call) → Observation 순환을 통해 파이프라인 �
 #   - Step 8: verify_claim()에 memory 전달 → 도메인 가드 활성화
 #            성공한 stat_id는 memory.record_stat_id_used()로 캐시
 #   - 종료 시 memory.stats() 로깅
+
+# [신준수 - 2026-05-15] 에이전틱 리팩토링 v2
+#   - process_one_claim 클로저 → _run_claim_loop 메서드로 교체
+#   - Planner / Executor / Critic 루프 적용
+#   - local_nodes/local_edges 버퍼 패턴 도입 (T1 해결):
+#       공유 리스트에 즉시 append 대신 RunContext 버퍼에 쌓고 성공 시 merge
+#   - DocumentWorkingMemory 연동 유지 (변경 없음)
+
+# [DONE] Step 7~9 병렬화 (asyncio.gather + Semaphore 3)
+# [DONE] DocumentWorkingMemory 통합
+# [DONE] _run_claim_loop: Planner→Executor→Critic 루프
+# [DONE] local 버퍼 패턴 (T1 해결)
 """
 from __future__ import annotations
+
+import asyncio
 
 from structverify.core.schemas import (
     Claim, SIRDocument, VerificationResult, GraphNode, GraphEdge,
@@ -68,12 +82,13 @@ from structverify.detection.schema_inductor import induce_schemas
 from structverify.graph.graph_builder import build_claim_graph
 from structverify.graph.document_graph import build_document_temporal_graph
 from structverify.graph.claim_graph import ClaimGraph
-from structverify.retrieval.query_builder import build_query
-from structverify.retrieval.evidence_subgraph import build_evidence_subgraph
 from structverify.retrieval.kosis_connector import KOSISConnector
-from structverify.verification.verifier import verify_claim
-from structverify.explanation.explainer import generate_explanation
 from structverify.memory import DocumentWorkingMemory  # [이수민 2026-05-14]
+# [신준수 2026-05-15] 에이전틱 루프 모듈
+from structverify.agent.context import RunContext, CriticVerdict
+from structverify.agent.executor import execute_step
+from structverify.agent.critic import evaluate as critic_evaluate
+from structverify.agent.planner import plan_step, plan_rollback
 from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -197,57 +212,49 @@ class RuntimeAgent:
         # [v6] 전체 그래프로 ClaimGraph 재생성 (verifier/explainer가 사용)
         full_graph = ClaimGraph(all_nodes, all_edges)
 
-        # ── 각 주장별 Step 7~9 (병렬 처리) ─────────────────────────
-        # [박재윤 - 2026-05-12]: asyncio.gather + Semaphore(3)으로 병렬화
-        import asyncio
+        # ── 각 주장별 Step 7~9 (병렬 처리 + 에이전틱 루프) ──────────────
+        # [v1 박재윤 2026-05-12]: asyncio.gather + Semaphore(3)으로 병렬화
+        # [v2 신준수 2026-05-15]: process_one_claim → _run_claim_loop으로 교체
+        #   · Planner → Executor → Critic 루프 적용
+        #   · local 버퍼 패턴으로 T1(공유 리스트 오염) 해결
         sem = asyncio.Semaphore(3)
 
-        async def process_one_claim(claim):
-            claim_nid = f"claim:{claim.claim_id.hex[:8]}"
-            async with sem:
-                # Action: retrieve_evidence (KOSIS API)
-                # Tool: KOSIS Open API — pgvector 검색 → LLM 리랭킹 → 실제 수치 조회
-                # Thought: "KOSIS에서 공식 수치를 가져와야 한다"
-                # Observation: Evidence {official_value, stat_table_id, ...}
-                # TODO [신준수]: kosis_connector.py 실제 HTTP 호출 구현
-                # TODO [신준수]: query_builder.py ClaimSchema → KOSIS 파라미터 변환
-                query = build_query(claim)
-                evidence, ev_nodes, ev_edges = await build_evidence_subgraph(
-                    self.kosis, query, claim_nid,
-                )
-                all_nodes.extend(ev_nodes)
-                all_edges.extend(ev_edges)
-                logger.info(f"[Agent A] Step 7 retrieve_evidence → {str(evidence)[:80] if evidence else None}")
+        # [v1 박재윤 2026-05-12] — 기존 직렬 클로저 (에이전틱 루프로 교체됨)
+        # async def process_one_claim(claim):
+        #     claim_nid = f"claim:{claim.claim_id.hex[:8]}"
+        #     async with sem:
+        #         query = build_query(claim)
+        #         evidence, ev_nodes, ev_edges = await build_evidence_subgraph(
+        #             self.kosis, query, claim_nid,
+        #         )
+        #         all_nodes.extend(ev_nodes)   # ← T1: 공유 리스트 즉시 append 문제
+        #         all_edges.extend(ev_edges)
+        #         result = verify_claim(claim, evidence, self.config,
+        #                               graph=full_graph, memory=memory)
+        #         if (result.verdict.value == "match"
+        #                 and evidence and evidence.stat_table_id
+        #                 and claim.schema and claim.schema.indicator):
+        #             memory.record_stat_id_used(
+        #                 indicator=claim.schema.indicator,
+        #                 stat_id=evidence.stat_table_id,
+        #                 category_path=evidence.category_path,
+        #                 time_period=evidence.time_period,
+        #             )
+        #         result.explanation = await generate_explanation(claim, result, self.config)
+        #         return result
 
-                # Action: verify_claim (Deterministic, LLM 미개입)
-                # [v6] graph 전달 → schema.time_period가 "작년"이어도
-                #      그래프에서 멀티홉 traverse로 "2023" 찾아서 KOSIS row 매칭
-                # [v7 이수민 2026-05-14] memory 전달 → 도메인 가드 활성화
-                #      evidence.category_path와 memory.domain 불일치 시 UNVERIFIABLE
-                result = verify_claim(claim, evidence, self.config,
-                                      graph=full_graph, memory=memory)
-                # [이수민 2026-05-14] 성공한 stat_id를 memory에 캐시
-                if (result.verdict.value == "match"
-                        and evidence and evidence.stat_table_id
-                        and claim.schema and claim.schema.indicator):
-                    memory.record_stat_id_used(
-                        indicator=claim.schema.indicator,
-                        stat_id=evidence.stat_table_id,
-                        category_path=evidence.category_path,
-                        time_period=evidence.time_period,
-                    )
-                logger.info(f"[Agent A] Step 8 verify_claim → {result.verdict.value}")
+        # [v2 신준수 2026-05-15] 에이전틱 루프 — 각 claim별 Planner/Executor/Critic
+        loop_results = list(await asyncio.gather(*[
+            self._run_claim_loop(c, full_graph, memory, sem) for c in claims
+        ]))
 
-                # Action: generate_explanation (LLM)
-                # Tool: HCX-003 (v1, 중량) — verdict별 전용 프롬프트 사용
-                # Thought: "판정 결과를 독자가 이해할 수 있는 설명으로 생성해야 한다"
-                # Observation: 자연어 설명 문자열 + provenance_summary 세팅
-                result.explanation = await generate_explanation(claim, result, self.config)
-                logger.info(f"[Agent A] Step 9 generate_explanation → {len(result.explanation or '')}자")
-
-                return result
-
-        results = list(await asyncio.gather(*[process_one_claim(c) for c in claims]))
+        # 목적: 성공한 claim의 local 버퍼만 공유 리스트에 merge (T1 해결)
+        results = []
+        for verdict_result, local_nodes, local_edges in loop_results:
+            if verdict_result is not None:
+                results.append(verdict_result)
+                all_nodes.extend(local_nodes)
+                all_edges.extend(local_edges)
 
         # [이수민 2026-05-14] working memory 최종 통계 로깅
         logger.info(f"[Agent A] working_memory stats: {memory.stats()}")
@@ -257,6 +264,134 @@ class RuntimeAgent:
         logger.info(f"[Agent A] 완료: claims={len(claims)}, results={len(results)}, "
                     f"nodes={len(all_nodes)}, edges={len(all_edges)}")
         return claims, results, all_nodes, all_edges
+
+    # ── [신준수 2026-05-15] 에이전틱 claim 루프 ──────────────────────────────
+    async def _run_claim_loop(
+        self,
+        claim: Claim,
+        full_graph: ClaimGraph,
+        memory: DocumentWorkingMemory,
+        sem: "asyncio.Semaphore",
+    ) -> tuple[VerificationResult | None, list[GraphNode], list[GraphEdge]]:
+        """
+        단일 claim에 대해 Planner → Executor → Critic 루프를 실행한다.
+
+        Step 5에서 시작해 Step 9까지 진행하며, Critic 판단에 따라:
+          OK         → 다음 스텝으로
+          RETRY_SAME → 같은 스텝 재실행
+          ROLLBACK   → Planner에게 복구 방향 결정 후 상위 스텝으로
+          STOP       → 롤백 없이 현재 결과로 종료
+          GIVE_UP    → UNVERIFIABLE 확정 후 종료
+
+        local_nodes/local_edges는 성공 시에만 반환하여 공유 리스트 오염 방지.
+
+        Returns:
+            (VerificationResult | None, local_nodes, local_edges)
+        """
+        ctx = RunContext(claim=claim)
+        current_step = 5  # schema 재유도부터 시작 (롤백 가능한 최소 스텝)
+
+        async with sem:
+            while current_step <= 9 and not ctx.is_exhausted():
+
+                # ── Planner: 스텝 진입 전 전략 수립 (Step 5, 7만) ──────────
+                if current_step in (5, 7):
+                    strategy = await plan_step(current_step, ctx, self.config)
+                    if strategy.get("hint"):
+                        ctx.hints[current_step] = strategy["hint"]
+                else:
+                    strategy = {}
+
+                # ── Executor: 스텝 실행 ────────────────────────────────────
+                try:
+                    output = await execute_step(
+                        current_step, ctx,
+                        kosis=self.kosis,
+                        full_graph=full_graph,
+                        memory=memory,
+                        config=self.config,
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"[Agent A] _run_claim_loop step={current_step} "
+                        f"claim={claim.sent_id} 예외: {e}"
+                    )
+                    output = None
+
+                # ── Snapshot 기록 ──────────────────────────────────────────
+                ctx.record_snapshot(
+                    step=current_step,
+                    output=output,
+                    strategy=strategy,
+                    success=(output is not None),
+                )
+
+                # ── Critic: 결과 평가 ──────────────────────────────────────
+                verdict = critic_evaluate(current_step, output, ctx)
+                logger.info(
+                    f"[Agent A] step={current_step} claim={claim.sent_id} "
+                    f"verdict={verdict.value}"
+                )
+
+                if verdict == CriticVerdict.OK:
+                    current_step += 1
+
+                elif verdict == CriticVerdict.RETRY_SAME:
+                    # 같은 스텝 재실행 — rollback_log에 retry 기록
+                    ctx.rollback_log.append({
+                        "rollback_to": current_step,
+                        "reason": "RETRY_SAME",
+                        "hint": ctx.hints.get(current_step, ""),
+                        "give_up": False,
+                    })
+                    # 목적: 로컬 버퍼 초기화 (이전 시도 결과 오염 방지)
+                    ctx.clear_local_buffers()
+
+                elif verdict == CriticVerdict.ROLLBACK:
+                    # Planner에게 복구 방향 결정 요청
+                    ctx.record_snapshot(
+                        step=current_step, output=output,
+                        strategy=strategy, success=False,
+                        failed_reason=f"ROLLBACK at step {current_step}",
+                    )
+                    rollback_plan = await plan_rollback(ctx, current_step, self.config)
+                    if rollback_plan["give_up"]:
+                        logger.info(
+                            f"[Agent A] GIVE_UP claim={claim.sent_id} "
+                            f"reason={rollback_plan['reason']}"
+                        )
+                        break
+                    ctx.record_rollback(rollback_plan)
+                    ctx.clear_local_buffers()
+                    current_step = rollback_plan["rollback_to"]
+
+                elif verdict == CriticVerdict.STOP:
+                    # 롤백 없이 종료 (MISMATCH 등)
+                    logger.info(
+                        f"[Agent A] STOP claim={claim.sent_id} step={current_step}"
+                    )
+                    break
+
+                elif verdict == CriticVerdict.GIVE_UP:
+                    logger.info(
+                        f"[Agent A] GIVE_UP claim={claim.sent_id} step={current_step}"
+                    )
+                    break
+
+            # ── 최종 결과 반환 ──────────────────────────────────────────────
+            result = None
+            if 8 in ctx.snapshots and ctx.snapshots[8].output is not None:
+                result = ctx.snapshots[8].output
+                # Step 9 explanation 부착
+                if 9 in ctx.snapshots and ctx.snapshots[9].output:
+                    result.explanation = ctx.snapshots[9].output
+
+            logger.info(
+                f"[Agent A] _run_claim_loop 완료 claim={claim.sent_id} "
+                f"verdict={result.verdict.value if result else 'None'} "
+                f"attempts={ctx.attempt_count}"
+            )
+            return result, ctx.local_nodes, ctx.local_edges
 
 # ── [v4 김예슬] Context Window 헬퍼 ─────────────────────────────────────────
 
