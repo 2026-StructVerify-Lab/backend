@@ -45,9 +45,20 @@ retrieval/kosis_connector.py — KOSIS Open API 커넥터 (v3: CatalogSearchTool
 - tried_log UnboundLocalError 버그 수정
   · candidates 없을 때 tried_ids, tried_log 초기화 누락 수정
 
-[박재윤 - 2026-05-14]: _is_table_relevant 국가 불일치 체크 추가
+[박재윤 - 2026-05-14 ]_is_table_relevant 국가 불일치 체크 추가
   · indicator에 외국 국가명 있고 테이블이 국내 통계면 → False
   · 미국 소비자물가 → 한국 소비자물가 테이블 매칭 방지
+
+_is_table_relevant 해외 지역명 체크 추가
+   · indicator에 국가명 없는데 테이블에 해외 지역명 있으면 → False
+   · 합계출산율 → 합계출산율 남부·동남아시아 테이블 매칭 방지
+
+_AGENT_SELECT_PROMPT 개선
+   · 국가 일치 규칙 추가 (외국 지표 → 국내 테이블 선택 방지)
+   · 지표/시점 일치 규칙 명시
+   · 부적합 후보 NONE 반환 조건 추가
+
+
 """
 from __future__ import annotations
 
@@ -77,6 +88,7 @@ _JSON_HEADERS: dict[str, str] = {
 }
 
 # ── LLM Agent 프롬프트 ──────────────────────────────────────────────────────
+# [박재윤 - 2026-05-14]: _AGENT_SELECT_PROMPT 국가/지표/시점 일치 규칙 추가
 
 _AGENT_SELECT_PROMPT = """당신은 한국 공식 통계 전문가입니다.
 아래 검증 주장에 가장 적합한 KOSIS 통계표를 선택하고 조회 파라미터를 결정하세요.
@@ -89,11 +101,19 @@ population: {population}
 후보 통계표:
 {candidates}
 
+[선택 규칙 — 반드시 준수]
+1. 국가 일치: indicator에 미국/일본/중국 등 외국이 명시되면 반드시 국제/해외 통계표 선택.
+   한국 국내 통계표(예: 소비자물가등락률, 경제활동인구) 절대 선택 금지.
+2. 지표 일치: indicator와 테이블명의 측정 대상이 같아야 함.
+   예: indicator=출생아수 → 출생 관련 테이블, indicator=고용률 → 고용 관련 테이블.
+3. 시점 일치: time_period가 "YYYY-MM"이면 prd_se=M(월간), "YYYY"이면 prd_se=Y(연간).
+4. 부적합 후보: 위 조건 불만족 시 stat_id를 "NONE"으로 답하세요.
+
 JSON으로만 답하세요:
 {{
-  "stat_id": "선택한 통계표 ID",
+  "stat_id": "선택한 통계표 ID 또는 NONE",
   "stat_name": "통계표명",
-  "reason": "선택 이유 한 줄",
+  "reason": "선택 이유 한 줄 (국가/지표/시점 일치 여부 포함)",
   "prd_se": "Y(연간)/M(월간)/Q(분기)",
   "start_prd_de": "시작 기간 (예: 2024, 202401)",
   "end_prd_de": "종료 기간"
@@ -154,6 +174,14 @@ def _is_table_relevant(indicator: str, table_name: str) -> bool:
     foreign_in_indicator = any(c in ind_lower for c in _FOREIGN_COUNTRIES)
     foreign_in_table = any(c in tbl_lower for c in _FOREIGN_COUNTRIES | _FOREIGN_TABLE_MARKERS)
     if foreign_in_indicator and not foreign_in_table:
+        return False
+
+    # [박재윤 - 2026-05-14]: 해외 지역명 체크 추가
+    # indicator에 국가명 없는데 테이블에 해외 지역명 있으면 → 해외 지역 통계 → False
+    _REGION_MARKERS = {"남부·동남아시아", "동남아시아", "동북아시아", "중앙아시아",
+                       "아프리카", "중동", "남미", "북미", "오세아니아", "서남아시아"}
+    region_in_table = any(r in tbl_lower for r in _REGION_MARKERS)
+    if not foreign_in_indicator and region_in_table:
         return False
 
     stopwords = {
