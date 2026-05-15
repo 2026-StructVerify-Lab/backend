@@ -289,7 +289,11 @@ class RuntimeAgent:
             (VerificationResult | None, local_nodes, local_edges)
         """
         ctx = RunContext(claim=claim)
-        current_step = 5  # schema 재유도부터 시작 (롤백 가능한 최소 스텝)
+        # [v3 신준수 2026-05-15] 첫 실행은 Step 7부터 시작 (Step 5는 process()에서 이미 완료)
+        # Step 5(schema 재유도)는 Critic ROLLBACK 판정 시에만 거슬러 올라감
+        # [v2 버그] current_step = 5 → Step 5가 두 번 실행되어 schema 재유도 중복 발생
+        # current_step = 5
+        current_step = 7  # Step 7: KOSIS 검색부터 시작
 
         async with sem:
             while current_step <= 9 and not ctx.is_exhausted():

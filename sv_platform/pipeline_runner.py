@@ -328,6 +328,19 @@ def _build_response(report: Any) -> dict[str, Any]:
 
         merged_claims.append(merged)
 
+    # 진단 로그 — backend에서 중복 여부 확인용
+    unique_claim_ids = len({c.get("claim_id") for c in claims_raw if isinstance(c, dict) and c.get("claim_id")})
+    logger.info(
+        f"[_build_response] claims_raw={len(claims_raw)} "
+        f"(unique_ids={unique_claim_ids}), results_raw={len(results_raw)}, "
+        f"merged={len(merged_claims)}"
+    )
+    if len(claims_raw) != unique_claim_ids:
+        logger.warning(
+            f"[_build_response] ⚠️ claims_raw에 중복 claim_id 감지: "
+            f"total={len(claims_raw)} vs unique={unique_claim_ids} → 백엔드 버그"
+        )
+
     domain = full.get("domain")
     if not isinstance(domain, (str, type(None))):
         domain = str(domain) if domain else None
