@@ -22,6 +22,14 @@ verification/verifier.py — Deterministic Verification Engine (Step 8) v3
 
 [참고] FEVER (Thorne et al., NAACL 2018)
   SUPPORTS/REFUTES/NEI 3단계 판정 → match/mismatch/unverifiable 매핑
+
+
+  # 수정자: 박재윤
+# 수정 날짜: 2026-05-14
+# 수정 내용: 연도 필터 ±2 → 정확 일치로 변경
+#   · 기존: abs(claim_year - kv_year) > 2 → 다른 연도 데이터 비교 허용
+#   · 변경: abs(claim_year - kv_year) > 0 → 연도 불일치 시 무조건 skip
+#   · 이유: 2026년 기사 수치를 2024년 KOSIS 연간 평균과 비교하는 오판정 방지
 """
 # 수정자: 신준수
 # 수정 날짜: 2026-04-27
@@ -188,7 +196,8 @@ def _find_best_match(
         if claim_year and kv_period:
             kv_year = kv_period[:4]
             try:
-                if abs(int(claim_year) - int(kv_year)) > 2:
+                # · 연도 정확 일치 필터 (박재윤 2026-05-14: ±2 → 0으로 변경)
+                if abs(int(claim_year) - int(kv_year)) > 0:
                     year_filtered += 1
                     continue
             except (ValueError, TypeError):
