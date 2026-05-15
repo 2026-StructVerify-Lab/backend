@@ -18,6 +18,9 @@ detection/schema_inductor.py — Dynamic Schema Induction (Step 5)
 - ClaimSchema 신규 필드 추출: parent_path / is_approximate / modifier
 - 모든 정제 책임은 LLM에게 위임 (룰 베이스 X)
 
+# [박재윤 - 2026-05-14]: SCHEMA_INDUCTION_PROMPT system_prompt 개선
+#   · 예보/예상/전망/예측 indicator → schema 추출 금지 규칙 추가
+
 [신준수 - 2026-05-15]
 - induce_schema_for_claim(): 에이전틱 롤백용 단일 claim 재유도 함수 추가
   · 기존 induce_schemas()는 변경 없음
@@ -505,7 +508,8 @@ async def _induce_multiple(
                 "통계 분석 전문가. 위 규칙을 엄격히 따르세요. "
                 "★ 핵심: [검증 대상 문장]에 literally 등장하는 수치만 추출. "
                 "[문맥]의 수치는 절대 추출 금지. "
-                "각 schema에 source_phrase 의무 포함."
+                "각 schema에 source_phrase 의무 포함. "
+                "★ '예상/예보/전망/예측' 포함 indicator는 KOSIS 검증 불가 → 해당 schema 추출 금지."
             ),
         )
     except Exception as e:
