@@ -15,6 +15,10 @@
 # [DONE] getMeta(PRD/CMMT) 보강
 # [DONE] KOSIS API fetch() Param/statisticsParameterData
 # [TODO] 응답 파싱·obj/itm 매칭 정교화
+# [2026-05-14 | 이수민] memory/v1: category_path 보강 로직 추가
+#   - _lookup_category_path(): kosis_stat_catalog 테이블에서 stat_id로 직접 조회
+#   - search_and_fetch 성공 시 stat_rec.metadata 우선, 없으면 DB 조회로 보강
+#   - working memory 도메인 가드(verifier)에서 활용
 """
 retrieval/kosis_connector.py — KOSIS Open API 커넥터 (v3: CatalogSearchTool + LLM Agent)
 
@@ -288,6 +292,30 @@ def is_same_unit_type(claim_unit: str, kosis_unit: str) -> bool:
     return (ct == "unknown" or kt == "unknown") or (ct == kt)
 
 
+# ── [이수민 2026-05-14] category_path DB 직접 조회 헬퍼 ─────────────────────
+# stat_rec.metadata에 category_path가 없는 경우 (KOSIS API 검색 결과 등)
+# kosis_stat_catalog 테이블에서 직접 조회. 도메인 가드용.
+async def _lookup_category_path(stat_id: str) -> str | None:
+    try:
+        import asyncpg
+        dsn = os.environ.get(
+            "PGVECTOR_DSN",
+            "postgresql://postgres:1234@localhost:5432/factcheck",
+        )
+        conn = await asyncpg.connect(dsn)
+        try:
+            row = await conn.fetchrow(
+                "SELECT category_path FROM kosis_stat_catalog WHERE stat_id = $1",
+                stat_id,
+            )
+            return row["category_path"] if row else None
+        finally:
+            await conn.close()
+    except Exception as e:
+        logger.debug(f"category_path 조회 실패 ({stat_id}): {e}")
+        return None
+
+
 # ── 기존 헬퍼 (신준수) ───────────────────────────────────────────────────────
 
 def _meta_error_payload(tag: str, exc: Exception | None = None) -> dict[str, Any]:
@@ -336,16 +364,22 @@ async def kosis_get_meta(
     if meta_type == "PRD":
         p["detail"] = "Y"
     url = f"{base.rstrip('/')}/statisticsData.do"
+    logger.info("[ ] 요청: org_id=%s, tbl_id=%s, meta_type=%s", org_id, tbl_id, meta_type)
     try:
         r = await client.get(url, params=p, headers=_JSON_HEADERS, timeout=timeout)
         r.raise_for_status()
+        logger.info("[kosis_get_meta] 응답 raw text (앞 500자): %s", (r.text or "")[:500])
         data = _kosis_text_to_json(r.text or "")
         if data is None:
+            logger.info("[kosis_get_meta] JSON 파싱 실패 (data=None)")
             return _meta_error_payload("parse")
         if isinstance(data, dict) and data.get("err") is not None and "row" not in data:
+            logger.info("[kosis_get_meta] API 오류 응답: err=%s, errMsg=%s", data.get("err"), data.get("errMsg"))
             return {"kosis_error": "api_err", "err": data.get("err"), "errMsg": data.get("errMsg")}
+        logger.info("[kosis_get_meta] 파싱 성공: type=%s, len=%s", type(data).__name__, len(data) if isinstance(data, (list, dict)) else "-")
         return data
     except Exception as e:
+        logger.info("[kosis_get_meta] HTTP 예외: %s", e)
         return _meta_error_payload("http", e)
 
 
@@ -560,9 +594,17 @@ class KOSISConnector(BaseConnector):
                     })
                     continue
 
+                # [이수민 2026-05-14] working memory 도메인 가드용
+                # stat_rec.metadata에 있으면 사용, 없으면 DB 직접 조회로 보강
+                if data.category_path is None:
+                    data.category_path = (stat_rec.metadata or {}).get("category_path")
+                if data.category_path is None:
+                    data.category_path = await _lookup_category_path(selected_id)
+
                 logger.info(
                     f"Evidence 조회 성공 (후보 {round_idx+1}): [{selected_id}] "
-                    f"value={data.official_value} {data.unit or ''}"
+                    f"value={data.official_value} {data.unit or ''} "
+                    f"category={data.category_path}"
                 )
                 return data
 
@@ -820,6 +862,15 @@ class KOSISConnector(BaseConnector):
             population=query.population or "",
             candidates=candidate_text,
         )
+        logger.info(
+            "[LLM 진입 직전 | _agent_select_stat] claim=%r | indicator=%r | time=%r | population=%r | 후보(%d개):\n%s",
+            raw_claim[:200] or query.keyword,
+            query.indicator or "",
+            query.time_period or "",
+            query.population or "",
+            len(candidates),
+            candidate_text,
+        )
         try:
             result = await llm.generate_json(
                 prompt=prompt,
@@ -862,6 +913,15 @@ class KOSISConnector(BaseConnector):
             prev_params=json.dumps(prev_params, ensure_ascii=False)[:300],
             error=error[:200],
             candidates=candidate_text,
+        )
+        logger.info(
+            "[LLM 진입 직전 | _agent_retry_params] claim=%r | 실패 stat_id=%s | prev_params=%s | error=%r | 후보(%d개):\n%s",
+            raw_claim[:200] or query.keyword,
+            prev_stat_id,
+            json.dumps(prev_params, ensure_ascii=False)[:300],
+            error[:200],
+            len(candidates),
+            candidate_text,
         )
         try:
             result = await llm.generate_json(
@@ -918,6 +978,14 @@ class KOSISConnector(BaseConnector):
             claim_text=raw_claim[:200] or query.keyword,
             tried_list=tried_text,
             remaining_candidates=remaining_text,
+        )
+        logger.info(
+            "[LLM 진입 직전 | _agent_retry_with_rotation] claim=%r | 실패 이력(%d개):\n%s\n남은 후보(%d개):\n%s",
+            raw_claim[:200] or query.keyword,
+            len(tried_log),
+            tried_text,
+            len(remaining),
+            remaining_text,
         )
 
         try:
