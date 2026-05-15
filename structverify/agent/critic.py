@@ -239,30 +239,22 @@ def _evaluate_step8(
         return CriticVerdict.STOP
 
     elif verdict == VerdictType.UNVERIFIABLE:
-        # 목적: UNVERIFIABLE 원인을 간이 규칙으로 분석
-        # 이미 롤백을 여러 번 했으면 더 이상 롤백하지 않음
-        if ctx.attempt_count >= 2:
-            logger.info(
-                f"[Critic] Step 8 UNVERIFIABLE claim={ctx.claim.sent_id} "
-                f"(attempt={ctx.attempt_count}) → GIVE_UP (롤백 반복 비효율)"
-            )
-            return CriticVerdict.GIVE_UP
-
-        # evidence가 아예 없었으면 (Step 7 결과 없음) → 데이터 없음 가능성
-        step7_snapshot = ctx.last_snapshot(7)
-        if step7_snapshot and step7_snapshot.output is None:
-            logger.info(
-                f"[Critic] Step 8 UNVERIFIABLE claim={ctx.claim.sent_id} "
-                f"(evidence None) → GIVE_UP (KOSIS 데이터 없음 추정)"
-            )
-            return CriticVerdict.GIVE_UP
-
-        # schema가 있고 evidence도 있었는데 UNVERIFIABLE → schema 재유도 시도
+        # [v2 신준수 2026-05-15] UNVERIFIABLE → 즉시 STOP (롤백 금지)
+        #
+        # 롤백 이유로 schema를 재유도하면 오히려 evidence를 찾지 못하게 되는
+        # 역효과가 발생함. 기존 process_one_claim과 동일하게 UNVERIFIABLE은
+        # 그 상태로 확정하고 explanation만 생성하도록 처리.
+        #
+        # 롤백이 의미있는 케이스 (commit 7 TODO):
+        #   - LLM이 "schema_error"로 판단했을 때만 선별적으로 ROLLBACK 허용
+        #
+        # [v1 버그] → ROLLBACK: schema 재유도 → KOSIS query 변경
+        #            → evidence 사라짐 → 정확도 하락
         logger.info(
-            f"[Critic] Step 8 UNVERIFIABLE claim={ctx.claim.sent_id} → ROLLBACK "
-            f"(schema 재유도로 개선 가능 추정)"
+            f"[Critic] Step 8 UNVERIFIABLE claim={ctx.claim.sent_id} → STOP "
+            f"(롤백 없이 확정 — explanation 생성 후 종료)"
         )
-        return CriticVerdict.ROLLBACK
+        return CriticVerdict.STOP
 
     logger.warning(f"[Critic] Step 8 알 수 없는 verdict={verdict} → GIVE_UP")
     return CriticVerdict.GIVE_UP

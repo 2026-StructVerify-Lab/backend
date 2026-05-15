@@ -298,8 +298,11 @@ class RuntimeAgent:
         async with sem:
             while current_step <= 9 and not ctx.is_exhausted():
 
-                # ── Planner: 스텝 진입 전 전략 수립 (Step 5, 7만) ──────────
-                if current_step in (5, 7):
+                # ── Planner: 롤백 이력 있을 때만 전략 수립 ────────────────
+                # [v3 신준수 2026-05-15] 첫 시도(롤백 없음)에는 Planner 호출 생략
+                # → 불필요한 LLM 호출 제거, 속도 개선
+                # 롤백 후 재시도 시에만 hint를 생성해서 개선 방향 주입
+                if current_step in (5, 7) and ctx.rollback_log:
                     strategy = await plan_step(current_step, ctx, self.config)
                     if strategy.get("hint"):
                         ctx.hints[current_step] = strategy["hint"]
@@ -386,9 +389,28 @@ class RuntimeAgent:
             result = None
             if 8 in ctx.snapshots and ctx.snapshots[8].output is not None:
                 result = ctx.snapshots[8].output
-                # Step 9 explanation 부착
+
+                # [v3 신준수 2026-05-15] Step 9가 정상 실행됐으면 그 설명 사용
                 if 9 in ctx.snapshots and ctx.snapshots[9].output:
                     result.explanation = ctx.snapshots[9].output
+
+                # [v3 신준수 2026-05-15] Step 9 미실행(ROLLBACK/STOP/GIVE_UP) 시
+                # 무조건 설명 생성 — UNVERIFIABLE/MISMATCH도 설명 있어야 함
+                # 기존 process_one_claim은 항상 generate_explanation() 호출했음
+                elif result.explanation is None:
+                    try:
+                        from structverify.explanation.explainer import generate_explanation
+                        result.explanation = await generate_explanation(
+                            claim, result, self.config
+                        )
+                        logger.info(
+                            f"[Agent A] fallback explanation 생성 claim={claim.sent_id} "
+                            f"verdict={result.verdict.value}"
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"[Agent A] fallback explanation 실패 claim={claim.sent_id}: {e}"
+                        )
 
             logger.info(
                 f"[Agent A] _run_claim_loop 완료 claim={claim.sent_id} "
