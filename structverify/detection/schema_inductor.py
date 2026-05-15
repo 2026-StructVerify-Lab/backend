@@ -17,6 +17,12 @@ detection/schema_inductor.py — Dynamic Schema Induction (Step 5)
 - 박재유 SYSTEM_PROMPT 스타일 차용: 단위 강제 + indicator 정제 + parent_path 추출
 - ClaimSchema 신규 필드 추출: parent_path / is_approximate / modifier
 - 모든 정제 책임은 LLM에게 위임 (룰 베이스 X)
+
+[신준수 - 2026-05-15]
+- induce_schema_for_claim(): 에이전틱 롤백용 단일 claim 재유도 함수 추가
+  · 기존 induce_schemas()는 변경 없음
+  · 복제(cloning) 없이 ClaimSchema 1개만 반환
+  · hint 파라미터로 Planner가 결정한 재시도 힌트를 프롬프트에 주입
 """
 from __future__ import annotations
 
@@ -373,6 +379,72 @@ async def induce_schemas(
         f"(성공 schema {success}건, 실패 claim {fail}건)"
     )
     return expanded
+
+
+# ── [신준수 2026-05-15] 에이전틱 롤백용 단일 claim 재유도 ──────────────────
+# 목적: Planner가 롤백 결정 시 특정 claim에 대해 schema를 1개만 재추출.
+#       기존 induce_schemas()는 전체 claims 대상이라 병렬 루프 내 롤백 불가.
+#       이 함수는 복제(cloning) 없이 ClaimSchema 1개만 반환한다.
+async def induce_schema_for_claim(
+    claim: "Claim",
+    config: dict | None = None,
+    graph: "ClaimGraph | None" = None,
+    hint: str | None = None,
+) -> "ClaimSchema | None":
+    """
+    단일 claim에 대해 ClaimSchema 1개를 재유도한다 (에이전틱 롤백 전용).
+
+    기존 induce_schemas()와의 차이:
+      - 전체 claims 리스트가 아닌 단일 claim 처리
+      - claim 복제(cloning) 없음 — schema 1개만 반환
+      - hint 파라미터: Planner가 결정한 재시도 방향을 프롬프트에 주입
+        예: "indicator='쉬었음 인구', source_phrase='21만7천명' 타겟팅"
+
+    Args:
+        claim:  재유도 대상 Claim
+        config: 설정 dict (llm, detected_domain 등)
+        graph:  ClaimGraph (시점 해소용, 없으면 None)
+        hint:   Planner가 결정한 재시도 힌트 문자열
+
+    Returns:
+        ClaimSchema 또는 None (추출 실패 시)
+    """
+    config = config or {}
+    llm = LLMClient(config=config.get("llm", {}))
+
+    domain = config.get("detected_domain", "general")
+    domain_hint = (
+        f"주요 지표 예시: {DOMAIN_HINTS[domain]}"
+        if domain in DOMAIN_HINTS else ""
+    )
+    context = getattr(claim, "context_text", None) or claim.claim_text
+    temporal_hint = _build_temporal_hint(graph, claim) if graph else ""
+
+    # 목적: hint가 있으면 프롬프트 끝에 주입하여 LLM 재시도 방향을 유도
+    retry_hint_text = f"\n[재시도 힌트]\n{hint}" if hint else ""
+
+    schemas = await _induce_multiple(
+        llm, claim.claim_text, domain, domain_hint,
+        context=context,
+        temporal_hint=temporal_hint + retry_hint_text,
+    )
+
+    if not schemas:
+        logger.warning(
+            f"[induce_schema_for_claim] {claim.sent_id} → 스키마 추출 실패"
+            + (f" (hint={hint!r})" if hint else "")
+        )
+        return None
+
+    # 목적: 복제 없이 첫 번째 schema만 반환
+    schema = schemas[0]
+    logger.info(
+        f"[induce_schema_for_claim] {claim.sent_id} → "
+        f"indicator={schema.indicator}, value={schema.value}, "
+        f"unit={schema.unit}, time_period={schema.time_period}"
+        + (f" (hint 적용)" if hint else "")
+    )
+    return schema
 
 
 def _build_temporal_hint(graph: "ClaimGraph", claim: Claim) -> str:
