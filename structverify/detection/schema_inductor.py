@@ -20,6 +20,11 @@ detection/schema_inductor.py — Dynamic Schema Induction (Step 5)
 
 # [박재윤 - 2026-05-14]: SCHEMA_INDUCTION_PROMPT system_prompt 개선
 #   · 예보/예상/전망/예측 indicator → schema 추출 금지 규칙 추가
+
+# [박재윤 - 2026-05-15]: SCHEMA_INDUCTION_PROMPT 수치 추출 규칙 보강
+#   · "~였다/~이다/~다" 패턴 수치도 추출 대상 명시 (근원물가 2.2% 누락 방지)
+#   · "N만 M천" 복합 단위 패턴 _extract_numbers_from_text에 추가
+#     (24만 2천 → 242000 환산 오류 방지)
 """
 from __future__ import annotations
 
@@ -268,6 +273,8 @@ SCHEMA_INDUCTION_PROMPT = """당신은 뉴스 수치 주장에서 공식 통계 
    · "1만 9059명" → value=19059
    · "21만 7천명" → value=217000
    · "1만 7921건" → value=17921
+   · "2.2%였다" → value=2.2, unit="%", source_phrase="2.2%"
+   · "~였다/~이다/~다" 뒤에 오는 수치도 추출 대상
 
 2. **★ 한 문장에 여러 수치**: 각각 별도 schema. *놓치지 마세요*.
    · "X명으로 Y% 늘었다" → 2개 schema (절대값 + 비율)
@@ -666,6 +673,11 @@ def _extract_numbers_from_text(text: str) -> set[float]:
         n = int(m.group(1)) * 1000
         if m.group(2):
             n += int(m.group(2))
+        numbers.add(float(n))
+    
+    # "N만 M천" 복합 패턴
+    for m in re.finditer(r"(\d+)\s*만\s*(\d+)\s*천", text):
+        n = int(m.group(1)) * 10000 + int(m.group(2)) * 1000
         numbers.add(float(n))
 
     # 4) 일반 숫자 (콤마 포함 정수 + 소수)
