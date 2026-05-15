@@ -327,7 +327,7 @@ class RuntimeAgent:
                 )
 
                 # ── Critic: 결과 평가 ──────────────────────────────────────
-                verdict = critic_evaluate(current_step, output, ctx)
+                verdict = critic_evaluate(current_step, output, ctx, config=self.config)
                 logger.info(
                     f"[Agent A] step={current_step} claim={claim.sent_id} "
                     f"verdict={verdict.value}"
