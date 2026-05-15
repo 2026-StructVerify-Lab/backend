@@ -102,7 +102,8 @@ class AppConfig(BaseSettings):
     app_name: str = "Structverify Platform"
     app_env: str = "dev"            # dev / staging / prod
     app_version: str = "0.1.0"
-    debug: bool = True
+    debug: bool = False
+    
 
     # ── 외부 서비스 ──
     postgres_dsn: str = "postgresql+asyncpg://structverify:structverify@localhost:5432/structverify"

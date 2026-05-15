@@ -9,6 +9,8 @@ retrieval/evidence_subgraph.py — Evidence 서브그래프 조립 (Step 7)
 # 수정자: 신준수
 # 수정 날짜: 2026-04-27
 # 수정 내용: Evidence 필드는 StatData 정규화 필드만 사용( values 키 직접 접근 제거)
+# [2026-05-14 | 이수민] memory/v1: StatData.category_path → Evidence.category_path 전달
+#   - 도메인 가드용 카테고리 정보를 Evidence까지 보존해 verifier가 활용
 from __future__ import annotations
 from structverify.core.schemas import (
     Evidence, GraphNode, GraphEdge, GraphNodeType, GraphEdgeType, ProvenanceRecord)
@@ -46,6 +48,8 @@ async def build_evidence_subgraph(
         time_period=data.time_period,
         raw_response=data.raw_response,
         graph_nodes=graph_nodes, provenance=provenance,
+        # [이수민 2026-05-14] working memory 도메인 가드용
+        category_path=getattr(data, "category_path", None),
     )
 
     # Evidence → Claim 연결 엣지

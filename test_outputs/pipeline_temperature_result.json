@@ -1,0 +1,231 @@
+{
+  "domain": "environment",
+  "verdict_distribution": {
+    "mismatch": 6,
+    "unverifiable": 9,
+    "match": 1
+  },
+  "mismatch_distribution": {
+    "exaggeration": 3,
+    "time_period": 3
+  },
+  "domain_guard_triggered": 0,
+  "results": [
+    {
+      "sent_id": "b0000_s0000",
+      "indicator": "연평균기온",
+      "value": 14.8,
+      "time_period": "2023",
+      "verdict": "mismatch",
+      "mismatch_type": "exaggeration",
+      "confidence": 0.8333351351351351,
+      "evidence": {
+        "stat_id": "DT_2OEEG008",
+        "category_path": null,
+        "official_value": 2.46664
+      }
+    },
+    {
+      "sent_id": "b0001_s0000",
+      "indicator": "연평균 기온",
+      "value": 14.0,
+      "time_period": "2024",
+      "verdict": "mismatch",
+      "mismatch_type": "time_period",
+      "confidence": 0.8238114285714285,
+      "evidence": {
+        "stat_id": "DT_2OEEG008",
+        "category_path": null,
+        "official_value": 2.46664
+      }
+    },
+    {
+      "sent_id": "b0001_s0001",
+      "indicator": "평균기온",
+      "value": 13.9,
+      "time_period": "2023",
+      "verdict": "mismatch",
+      "mismatch_type": "time_period",
+      "confidence": 0.8437223021582734,
+      "evidence": {
+        "stat_id": "DT_2OEEG008",
+        "category_path": null,
+        "official_value": 2.17226
+      }
+    },
+    {
+      "sent_id": "b0001_s0001",
+      "indicator": "평균기온",
+      "value": 14.8,
+      "time_period": "2024",
+      "verdict": "mismatch",
+      "mismatch_type": "time_period",
+      "confidence": 0.8532256756756758,
+      "evidence": {
+        "stat_id": "DT_2OEEG008",
+        "category_path": null,
+        "official_value": 2.17226
+      }
+    },
+    {
+      "sent_id": "b0001_s0002",
+      "indicator": null,
+      "value": null,
+      "time_period": null,
+      "verdict": "unverifiable",
+      "mismatch_type": null,
+      "confidence": 0.2,
+      "evidence": {
+        "stat_id": "DT_1YL9801",
+        "category_path": null,
+        "official_value": 12.2
+      }
+    },
+    {
+      "sent_id": "b0001_s0003",
+      "indicator": "평균기온",
+      "value": 14.0,
+      "time_period": "2023",
+      "verdict": "mismatch",
+      "mismatch_type": "exaggeration",
+      "confidence": 0.8238114285714285,
+      "evidence": {
+        "stat_id": "DT_2OEEG008",
+        "category_path": null,
+        "official_value": 2.46664
+      }
+    },
+    {
+      "sent_id": "b0001_s0004",
+      "indicator": "연평균 기온",
+      "value": 12.7,
+      "time_period": "2023",
+      "verdict": "mismatch",
+      "mismatch_type": "exaggeration",
+      "confidence": 0.8057763779527559,
+      "evidence": {
+        "stat_id": "DT_2OEEG008",
+        "category_path": null,
+        "official_value": 2.46664
+      }
+    },
+    {
+      "sent_id": "b0001_s0004",
+      "indicator": "연평균 기온",
+      "value": 2.3,
+      "time_period": "2023",
+      "verdict": "match",
+      "mismatch_type": null,
+      "confidence": 0.95,
+      "evidence": {
+        "stat_id": "DT_2OEEG008",
+        "category_path": null,
+        "official_value": 2.19837
+      }
+    },
+    {
+      "sent_id": "b0001_s0005",
+      "indicator": null,
+      "value": null,
+      "time_period": null,
+      "verdict": "unverifiable",
+      "mismatch_type": null,
+      "confidence": 0.3,
+      "evidence": null
+    },
+    {
+      "sent_id": "b0001_s0006",
+      "indicator": "평균 최저기온",
+      "value": 10.2,
+      "time_period": "2023",
+      "verdict": "unverifiable",
+      "mismatch_type": null,
+      "confidence": 0.3,
+      "evidence": {
+        "stat_id": "DT_14102_B002",
+        "category_path": "MT_ZTITLE > 기상관측통계",
+        "official_value": 15.1
+      }
+    },
+    {
+      "sent_id": "b0001_s0006",
+      "indicator": "평균 최고기온",
+      "value": 20.1,
+      "time_period": "2023",
+      "verdict": "unverifiable",
+      "mismatch_type": null,
+      "confidence": 0.3,
+      "evidence": {
+        "stat_id": "DT_14102_B002",
+        "category_path": "MT_ZTITLE > 기상관측통계",
+        "official_value": 15.1
+      }
+    },
+    {
+      "sent_id": "b0001_s0007",
+      "indicator": "기온",
+      "value": null,
+      "time_period": "2024-08",
+      "verdict": "unverifiable",
+      "mismatch_type": null,
+      "confidence": 0.2,
+      "evidence": {
+        "stat_id": "DT_14102_B001",
+        "category_path": "MT_ZTITLE > 기상관측통계",
+        "official_value": 8.9
+      }
+    },
+    {
+      "sent_id": "b0001_s0008",
+      "indicator": "평균기온",
+      "value": 25.3,
+      "time_period": "2024-09",
+      "verdict": "unverifiable",
+      "mismatch_type": null,
+      "confidence": 0.3,
+      "evidence": {
+        "stat_id": "DT_14102_B002",
+        "category_path": "MT_ZTITLE > 기상관측통계",
+        "official_value": 15.1
+      }
+    },
+    {
+      "sent_id": "b0001_s0008",
+      "indicator": "평년기온",
+      "value": 20.8,
+      "time_period": "2024-09",
+      "verdict": "unverifiable",
+      "mismatch_type": null,
+      "confidence": 0.3,
+      "evidence": {
+        "stat_id": "DT_14102_B002",
+        "category_path": "MT_ZTITLE > 기상관측통계",
+        "official_value": 15.1
+      }
+    },
+    {
+      "sent_id": "b0001_s0009",
+      "indicator": "평균 지구 표면 기온",
+      "value": 0.85,
+      "time_period": "2024-01..2024-11",
+      "verdict": "unverifiable",
+      "mismatch_type": null,
+      "confidence": 0.3,
+      "evidence": null
+    },
+    {
+      "sent_id": "b0001_s0010",
+      "indicator": "평균 기온",
+      "value": 0.18,
+      "time_period": "2022",
+      "verdict": "unverifiable",
+      "mismatch_type": null,
+      "confidence": 0.3,
+      "evidence": {
+        "stat_id": "DT_141007N_001",
+        "category_path": "MT_ZTITLE > 기상관측통계",
+        "official_value": 5.6
+      }
+    }
+  ]
+}
