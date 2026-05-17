@@ -85,7 +85,7 @@ from structverify.utils.logger import get_logger
 logger = get_logger(__name__)
 
 _FETCH_MAX_RETRY  = 2    # 단일 stat_id 내 prd_se 순회 retry
-_MAX_CANDIDATES   = 5    # [v4] 후보 순회 최대 횟수
+_MAX_CANDIDATES   = 8    # [v4] 후보 순회 최대 횟수
 _JSON_HEADERS: dict[str, str] = {
     "Accept":     "application/json, */*;q=0.1",
     "User-Agent": "StructVerify/1.0 (KOSIS OpenAPI; +https://kosis.kr/openapi/)",
@@ -112,6 +112,8 @@ population: {population}
    예: indicator=출생아수 → 출생 관련 테이블, indicator=고용률 → 고용 관련 테이블.
 3. 시점 일치: time_period가 "YYYY-MM"이면 prd_se=M(월간), "YYYY"이면 prd_se=Y(연간).
 4. 부적합 후보: 위 조건 불만족 시 stat_id를 "NONE"으로 답하세요.
+5. 장래 추계 데이터 금지: UN/IMF 출처이거나 2050년 이후 데이터가 있는 테이블 선택 금지.
+   실측 통계만 선택하세요.
 
 JSON으로만 답하세요:
 {{
@@ -178,6 +180,11 @@ def _is_table_relevant(indicator: str, table_name: str) -> bool:
     foreign_in_indicator = any(c in ind_lower for c in _FOREIGN_COUNTRIES)
     foreign_in_table = any(c in tbl_lower for c in _FOREIGN_COUNTRIES | _FOREIGN_TABLE_MARKERS)
     if foreign_in_indicator and not foreign_in_table:
+        return False
+    
+    # [박재윤 - 2026-05-14]: 장래 추계 테이블 차단
+    _FORECAST_TABLE_MARKERS = {"장래", "추계", "전망"}
+    if any(r in tbl_lower for r in _FORECAST_TABLE_MARKERS):
         return False
 
     # [박재윤 - 2026-05-14]: 해외 지역명 체크 추가

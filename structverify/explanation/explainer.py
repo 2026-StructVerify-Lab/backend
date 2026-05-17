@@ -60,7 +60,14 @@ claim 시점: {claim_time}
 - 기사 수치와 공식 수치를 나란히 비교 (단위 일치 확인)
 - claim 시점({claim_time})과 공식 시점({evidence_time})이 다르면 그 점도 명시
 - 통계표 ID 포함
-- ⚠️ "사실이 아닙니다", "틀렸습니다" 등 부정 표현 절대 금지"""
+- ⚠️ "사실이 아닙니다", "틀렸습니다" 등 부정 표현 절대 금지
+
+[⚠️ 주의 — 설명 전 반드시 확인]
+- 공식 통계 출처({stat_source})가 indicator({indicator})와 
+  *같은 국가/지역*의 통계인지 확인하세요.
+- 시점({claim_time} vs {evidence_time})이 다르면 
+  "같은 연도 데이터가 아님"을 반드시 명시하세요.
+"""
 
 MISMATCH_PROMPT = """당신은 팩트체크 전문 작가입니다.
 아래 검증 결과를 독자가 이해하기 쉽게 한국어로 설명하세요.
@@ -117,15 +124,16 @@ claim 시점: {claim_time}
 
 [검증 시도]
 검증 불가 이유: {reason}
+시도한 통계표: {stat_source} 
 시도한 검색어: {search_hint}
-{c2_calculation_block}
 
 [작성 규칙]
 - 2~3문장으로 작성
 - "사실입니다" 또는 "사실이 아닙니다"라고 단정하지 마세요
 - 왜 공식 통계를 찾지 못했는지만 설명 (시점 매칭 실패, 단위 불일치 등)
 - 독자가 직접 KOSIS에서 확인할 방법 제시
-- 수치를 새로 만들어내지 마세요. 위에 명시된 수치만 사용."""
+- 수치를 새로 만들어내지 마세요. 위에 명시된 수치만 사용.
+"""
 
 
 # ── 메인 함수 ─────────────────────────────────────────────────────────────
@@ -263,6 +271,7 @@ def _build_prompt(
             claimed_value=claimed_value,
             unit=unit,
             reason=reason,
+            stat_source=stat_source,
             search_hint=search_hint,
             c2_calculation_block=c2_block,
         )
