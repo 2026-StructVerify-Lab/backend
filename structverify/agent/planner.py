@@ -8,9 +8,10 @@ agent/planner.py — 전략 수립 및 롤백 방향 결정 (Planner)
 기존 레이어의 LLM 호출과 독립적으로 동작한다.
 LLMClient는 config["llm"]에서 가져온다.
 
-- 담당자: 신준수
+- 담당자: 신준수 [agent/v1]
 """
 # 수정자: 신준수
+# 버전: agent/v1
 # 수정 날짜: 2026-05-15
 # 수정 내용: 에이전틱 리팩토링 - Planner 전략/롤백 LLM 판단 모듈 신규
 

@@ -4,9 +4,10 @@ agent/critic.py — 스텝 결과 품질 평가 (Critic)
 Executor가 실행한 결과를 평가하고 CriticVerdict를 반환한다.
 코드 시그널 기반 판단 우선, LLM은 품질이 애매한 경우에만 사용한다.
 
-- 담당자: 신준수
+- 담당자: 신준수 [agent/v1]
 """
 # 수정자: 신준수
+# 버전: agent/v1
 # 수정 날짜: 2026-05-15
 # 수정 내용: 에이전틱 리팩토링 - Critic 코드 시그널 기반 판단 신규 (commit 4)
 #           + LLM 품질 판단 추가 (commit 7):
@@ -158,6 +159,15 @@ def _evaluate_step7(
     retry_count = ctx.retry_count_for_step(7)
 
     if evidence is None:
+        # 롤백 이력이 있다 = 이미 schema 재유도까지 시도했음
+        # 그래도 evidence=None이면 KOSIS에 해당 지표 자체가 없는 것 → GIVE_UP
+        if ctx.rollback_log:
+            logger.warning(
+                f"[Critic] Step 7 claim={ctx.claim.sent_id} → "
+                f"롤백 후에도 evidence None → KOSIS 데이터 없음, GIVE_UP"
+            )
+            return CriticVerdict.GIVE_UP
+
         if retry_count < _MAX_STEP7_RETRY:
             logger.info(
                 f"[Critic] Step 7 claim={ctx.claim.sent_id} → evidence None "
@@ -239,7 +249,7 @@ def _evaluate_step8(
         return CriticVerdict.STOP
 
     elif verdict == VerdictType.UNVERIFIABLE:
-        # [v2 신준수 2026-05-15] UNVERIFIABLE → 즉시 STOP (롤백 금지)
+        # [agent/v1 신준수 2026-05-15] UNVERIFIABLE → 즉시 STOP (롤백 금지)
         #
         # 롤백 이유로 schema를 재유도하면 오히려 evidence를 찾지 못하게 되는
         # 역효과가 발생함. 기존 process_one_claim과 동일하게 UNVERIFIABLE은
@@ -248,7 +258,7 @@ def _evaluate_step8(
         # 롤백이 의미있는 케이스 (commit 7 TODO):
         #   - LLM이 "schema_error"로 판단했을 때만 선별적으로 ROLLBACK 허용
         #
-        # [v1 버그] → ROLLBACK: schema 재유도 → KOSIS query 변경
+        # [agent/v1 버그] → ROLLBACK: schema 재유도 → KOSIS query 변경
         #            → evidence 사라짐 → 정확도 하락
         logger.info(
             f"[Critic] Step 8 UNVERIFIABLE claim={ctx.claim.sent_id} → STOP "

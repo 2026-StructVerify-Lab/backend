@@ -21,7 +21,7 @@ detection/schema_inductor.py — Dynamic Schema Induction (Step 5)
 # [박재윤 - 2026-05-14]: SCHEMA_INDUCTION_PROMPT system_prompt 개선
 #   · 예보/예상/전망/예측 indicator → schema 추출 금지 규칙 추가
 
-[신준수 - 2026-05-15]
+[agent/v1 신준수 - 2026-05-15]
 - induce_schema_for_claim(): 에이전틱 롤백용 단일 claim 재유도 함수 추가
   · 기존 induce_schemas()는 변경 없음
   · 복제(cloning) 없이 ClaimSchema 1개만 반환
@@ -390,7 +390,7 @@ async def induce_schemas(
     return expanded
 
 
-# ── [신준수 2026-05-15] 에이전틱 롤백용 단일 claim 재유도 ──────────────────
+# ── [agent/v1 신준수 2026-05-15] 에이전틱 롤백용 단일 claim 재유도 ──────────
 # 목적: Planner가 롤백 결정 시 특정 claim에 대해 schema를 1개만 재추출.
 #       기존 induce_schemas()는 전체 claims 대상이라 병렬 루프 내 롤백 불가.
 #       이 함수는 복제(cloning) 없이 ClaimSchema 1개만 반환한다.

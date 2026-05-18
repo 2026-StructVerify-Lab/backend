@@ -4,9 +4,10 @@ agent/context.py — Claim 단위 RunContext (에이전틱 루프 메모리)
 한 claim의 Step 5~9 실행 동안 살아있는 in-memory 컨텍스트.
 Planner/Critic이 판단할 때 이 객체를 참조한다.
 
-- 담당자: 신준수
+- 담당자: 신준수 [agent/v1]
 """
 # 수정자: 신준수
+# 버전: agent/v1
 # 수정 날짜: 2026-05-15
 # 수정 내용: 에이전틱 리팩토링 - RunContext / StepSnapshot / CriticVerdict 신규 정의
 

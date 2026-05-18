@@ -57,7 +57,7 @@ Thought → Action(Tool Call) → Observation 순환을 통해 파이프라인 �
 #            성공한 stat_id는 memory.record_stat_id_used()로 캐시
 #   - 종료 시 memory.stats() 로깅
 
-# [신준수 - 2026-05-15] 에이전틱 리팩토링 v2
+# [agent/v1 신준수 - 2026-05-15] 에이전틱 리팩토링
 #   - process_one_claim 클로저 → _run_claim_loop 메서드로 교체
 #   - Planner / Executor / Critic 루프 적용
 #   - local_nodes/local_edges 버퍼 패턴 도입 (T1 해결):
@@ -84,7 +84,7 @@ from structverify.graph.document_graph import build_document_temporal_graph
 from structverify.graph.claim_graph import ClaimGraph
 from structverify.retrieval.kosis_connector import KOSISConnector
 from structverify.memory import DocumentWorkingMemory  # [이수민 2026-05-14]
-# [신준수 2026-05-15] 에이전틱 루프 모듈
+# [agent/v1 신준수 2026-05-15] 에이전틱 루프 모듈
 from structverify.agent.context import RunContext, CriticVerdict
 from structverify.agent.executor import execute_step
 from structverify.agent.critic import evaluate as critic_evaluate
@@ -214,7 +214,7 @@ class RuntimeAgent:
 
         # ── 각 주장별 Step 7~9 (병렬 처리 + 에이전틱 루프) ──────────────
         # [v1 박재윤 2026-05-12]: asyncio.gather + Semaphore(3)으로 병렬화
-        # [v2 신준수 2026-05-15]: process_one_claim → _run_claim_loop으로 교체
+        # [agent/v1 신준수 2026-05-15]: process_one_claim → _run_claim_loop으로 교체
         #   · Planner → Executor → Critic 루프 적용
         #   · local 버퍼 패턴으로 T1(공유 리스트 오염) 해결
         sem = asyncio.Semaphore(3)
@@ -243,7 +243,7 @@ class RuntimeAgent:
         #         result.explanation = await generate_explanation(claim, result, self.config)
         #         return result
 
-        # [v2 신준수 2026-05-15] 에이전틱 루프 — 각 claim별 Planner/Executor/Critic
+        # [agent/v1 신준수 2026-05-15] 에이전틱 루프 — 각 claim별 Planner/Executor/Critic
         loop_results = list(await asyncio.gather(*[
             self._run_claim_loop(c, full_graph, memory, sem) for c in claims
         ]))
@@ -265,7 +265,7 @@ class RuntimeAgent:
                     f"nodes={len(all_nodes)}, edges={len(all_edges)}")
         return claims, results, all_nodes, all_edges
 
-    # ── [신준수 2026-05-15] 에이전틱 claim 루프 ──────────────────────────────
+    # ── [agent/v1 신준수 2026-05-15] 에이전틱 claim 루프 ────────────────────────
     async def _run_claim_loop(
         self,
         claim: Claim,
@@ -289,9 +289,9 @@ class RuntimeAgent:
             (VerificationResult | None, local_nodes, local_edges)
         """
         ctx = RunContext(claim=claim)
-        # [v3 신준수 2026-05-15] 첫 실행은 Step 7부터 시작 (Step 5는 process()에서 이미 완료)
+        # [agent/v1 신준수 2026-05-15] 첫 실행은 Step 7부터 시작 (Step 5는 process()에서 이미 완료)
         # Step 5(schema 재유도)는 Critic ROLLBACK 판정 시에만 거슬러 올라감
-        # [v2 버그] current_step = 5 → Step 5가 두 번 실행되어 schema 재유도 중복 발생
+        # [agent/v1 버그] current_step = 5 → Step 5가 두 번 실행되어 schema 재유도 중복 발생
         # current_step = 5
         current_step = 7  # Step 7: KOSIS 검색부터 시작
 
@@ -299,7 +299,7 @@ class RuntimeAgent:
             while current_step <= 9 and not ctx.is_exhausted():
 
                 # ── Planner: 롤백 이력 있을 때만 전략 수립 ────────────────
-                # [v3 신준수 2026-05-15] 첫 시도(롤백 없음)에는 Planner 호출 생략
+                # [agent/v1 신준수 2026-05-15] 첫 시도(롤백 없음)에는 Planner 호출 생략
                 # → 불필요한 LLM 호출 제거, 속도 개선
                 # 롤백 후 재시도 시에만 hint를 생성해서 개선 방향 주입
                 if current_step in (5, 7) and ctx.rollback_log:
@@ -390,11 +390,11 @@ class RuntimeAgent:
             if 8 in ctx.snapshots and ctx.snapshots[8].output is not None:
                 result = ctx.snapshots[8].output
 
-                # [v3 신준수 2026-05-15] Step 9가 정상 실행됐으면 그 설명 사용
+                # [agent/v1 신준수 2026-05-15] Step 9가 정상 실행됐으면 그 설명 사용
                 if 9 in ctx.snapshots and ctx.snapshots[9].output:
                     result.explanation = ctx.snapshots[9].output
 
-                # [v3 신준수 2026-05-15] Step 9 미실행(ROLLBACK/STOP/GIVE_UP) 시
+                # [agent/v1 신준수 2026-05-15] Step 9 미실행(ROLLBACK/STOP/GIVE_UP) 시
                 # 무조건 설명 생성 — UNVERIFIABLE/MISMATCH도 설명 있어야 함
                 # 기존 process_one_claim은 항상 generate_explanation() 호출했음
                 elif result.explanation is None:
@@ -411,6 +411,36 @@ class RuntimeAgent:
                         logger.warning(
                             f"[Agent A] fallback explanation 실패 claim={claim.sent_id}: {e}"
                         )
+
+            # [agent/v1 신준수 2026-05-18] Step 8이 단 한 번도 실행 안 된 경우
+            # (evidence=None으로 루프 소진/GIVE_UP → Step 8 snapshot 없음)
+            # → UNVERIFIABLE dummy result 생성 후 explanation 붙여서 반환
+            # 기존: result=None 반환 → UI outer join으로 설명 없는 claim만 노출
+            if result is None:
+                from structverify.core.schemas import VerificationResult, VerdictType
+                result = VerificationResult(
+                    claim_id=claim.claim_id,
+                    verdict=VerdictType.UNVERIFIABLE,
+                    confidence=0.2,
+                )
+                logger.info(
+                    f"[Agent A] Step 8 미실행 → UNVERIFIABLE dummy result 생성 "
+                    f"claim={claim.sent_id}"
+                )
+                try:
+                    from structverify.explanation.explainer import generate_explanation
+                    result.explanation = await generate_explanation(
+                        claim, result, self.config
+                    )
+                    logger.info(
+                        f"[Agent A] dummy result explanation 생성 완료 "
+                        f"claim={claim.sent_id}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[Agent A] dummy result explanation 실패 "
+                        f"claim={claim.sent_id}: {e}"
+                    )
 
             logger.info(
                 f"[Agent A] _run_claim_loop 완료 claim={claim.sent_id} "
