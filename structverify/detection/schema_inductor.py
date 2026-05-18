@@ -25,6 +25,9 @@ detection/schema_inductor.py — Dynamic Schema Induction (Step 5)
 #   · "~였다/~이다/~다" 패턴 수치도 추출 대상 명시 (근원물가 2.2% 누락 방지)
 #   · "N만 M천" 복합 단위 패턴 _extract_numbers_from_text에 추가
 #     (24만 2천 → 242000 환산 오류 방지)
+
+# [박재윤 - 2026-05-18]: _extract_numbers_from_text "N만 NNNN" 패턴 추가
+#   · "2869만 3000명" → 28693000 환산 (4자리 숫자 붙는 패턴)
 """
 from __future__ import annotations
 
@@ -654,12 +657,20 @@ def _extract_numbers_from_text(text: str) -> set[float]:
     """
     numbers: set[float] = set()
 
+    # [박재윤 - 2026-05-18] "N만 N천" 복합 패턴 (앞 패턴보다 먼저 실행 필요)
+    # "2869만 3000명" → 28693000
+    # "159만 명" 같은 경우와 구분: 뒤 숫자가 1000 단위인 경우
+    for m in re.finditer(r"(\d+)\s*만\s*(\d{4})", text):
+        n = int(m.group(1)) * 10000 + int(m.group(2))
+        numbers.add(float(n))
+
     # 1) 한글 단위 — "N만 M" 또는 "N만"
     for m in re.finditer(r"(\d+)\s*만\s*(\d+)?", text):
         n = int(m.group(1)) * 10000
         if m.group(2):
             n += int(m.group(2))
         numbers.add(float(n))
+
 
     # 2) 한글 단위 — "N억 M" 또는 "N억"
     for m in re.finditer(r"(\d+)\s*억\s*(\d+)?", text):
