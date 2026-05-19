@@ -1,0 +1,34 @@
+{
+  "iter_num": 2,
+  "action": "fetch_evidence",
+  "input": {
+    "candidate_id": "DT_1L9U122",
+    "params": {},
+    "_candidate_fallbacks": [
+      "DT_1L9U143",
+      "DT_1L9V124",
+      "DT_1L9U142",
+      "DT_1L9V121"
+    ]
+  },
+  "output": {
+    "source": "kosis",
+    "candidate_id": "DT_1L9U122",
+    "params": {
+      "indicator": "지출 비중",
+      "time_period": "2024",
+      "population": "주거·수도",
+      "unit_hint": "%"
+    },
+    "evidence": null,
+    "tried_candidates": [
+      "DT_1L9U122",
+      "DT_1L9U143",
+      "DT_1L9V124",
+      "DT_1L9U142"
+    ]
+  },
+  "summary": "fetch(kosis): 후보 4개 모두 실패 (관련 표 없음)",
+  "success": false,
+  "error": "모든 catalog 후보가 관련성 체크 실패 또는 데이터 없음."
+}

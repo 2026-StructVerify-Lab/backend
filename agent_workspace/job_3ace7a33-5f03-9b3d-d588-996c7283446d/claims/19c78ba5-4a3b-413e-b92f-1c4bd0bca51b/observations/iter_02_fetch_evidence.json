@@ -1,0 +1,21 @@
+{
+  "iter_num": 2,
+  "action": "fetch_evidence",
+  "input": {
+    "candidate_id": "DT_1L9V153",
+    "params": {},
+    "_candidate_fallbacks": [
+      "DT_1L9U132",
+      "DT_1L9U131",
+      "DT_1L9U121",
+      "DT_1L9U120"
+    ]
+  },
+  "output": {
+    "evidence": null,
+    "reason": "no_indicator"
+  },
+  "summary": "fetch 거부: claim에 indicator 없음 (schema 유도 실패 claim — 검증 불가)",
+  "success": false,
+  "error": "claim.schema에 indicator가 없어 fetch 대상을 특정할 수 없음"
+}

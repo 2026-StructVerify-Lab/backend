@@ -1,0 +1,37 @@
+{
+  "claim_id": "d2cde6ab-ce0e-412a-a6ed-55fdd91801ea",
+  "claim_type": "comparison",
+  "required_data": [],
+  "initial_steps": [
+    {
+      "action": "catalog_search",
+      "input": {
+        "query": "가계동향조사",
+        "category": [
+          "통계표>가계",
+          "지표>국민계정"
+        ],
+        "from": "1974",
+        "to": "2024",
+        "stat_kind": "기본"
+      },
+      "rationale": "가계동향조사 통계표를 검색한다."
+    },
+    {
+      "action": "fetch_evidence",
+      "input": {
+        "candidate_id": "MDAwMjQyOTYw",
+        "params": {}
+      },
+      "rationale": "검색 결과에서 지표단위가 %이고, 분기가 아닌 년도 단위로 제공되는 가계동향조사 자료를 확인하여 요청한 연도의 지표 값을 수집한다."
+    }
+  ],
+  "fallback": {
+    "use_original_text": true,
+    "alternative_keywords": [],
+    "give_up_after_attempts": 3
+  },
+  "calculation_formula": null,
+  "notes": null,
+  "created_at": "2026-05-19T05:03:20.599424Z"
+}

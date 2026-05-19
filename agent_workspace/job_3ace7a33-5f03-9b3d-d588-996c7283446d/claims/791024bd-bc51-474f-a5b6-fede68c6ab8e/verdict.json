@@ -1,0 +1,22 @@
+{
+  "claim_id": "791024bd-bc51-474f-a5b6-fede68c6ab8e",
+  "verdict": "match",
+  "confidence": 0.8,
+  "explanation": "주장은 '2.483e+06원 이하'(부등식)이고, KOSIS() (verified_facts 캐시) 조회값은 2.272원 (시점 2024)이므로 주장이 성립합니다.",
+  "data_points": [
+    {
+      "indicator": "월평균 소비 금액",
+      "time": "2024",
+      "population": "30대 이하",
+      "unit_hint": "원",
+      "resolved_value": 2.272,
+      "resolved_unit": "원",
+      "source": "KOSIS",
+      "source_time": "2024"
+    }
+  ],
+  "iterations_used": 3,
+  "total_tokens": 0,
+  "stop_reason": "completed",
+  "created_at": "2026-05-19T05:52:45.935001Z"
+}

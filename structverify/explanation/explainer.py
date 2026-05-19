@@ -196,6 +196,15 @@ def _build_prompt(
 
     if result.verdict == VerdictType.MATCH:
         diff_pct = _calc_diff_pct(claimed_value, official_value)
+        # [수정] MATCH_PROMPT 템플릿이 쓰는 {indicator}/{claim_time}/
+        # {evidence_time} 플레이스홀더가 format 인자에서 누락돼 KeyError가
+        # 나던 버그 수정. claim.schema / evidence에서 값을 채운다.
+        _indicator = (schema.indicator if schema and schema.indicator
+                      else "지표")
+        _claim_time = (schema.time_period if schema and schema.time_period
+                       else "N/A")
+        _evidence_time = (ev.time_period if ev and ev.time_period
+                          else "N/A")
         return MATCH_PROMPT.format(
             claim_text=claim.claim_text,
             claimed_value=claimed_value,
@@ -205,6 +214,9 @@ def _build_prompt(
             confidence=result.confidence,
             stat_source=stat_source,
             provenance=prov_text,
+            indicator=_indicator,
+            claim_time=_claim_time,
+            evidence_time=_evidence_time,
         )
 
     elif result.verdict == VerdictType.MISMATCH:

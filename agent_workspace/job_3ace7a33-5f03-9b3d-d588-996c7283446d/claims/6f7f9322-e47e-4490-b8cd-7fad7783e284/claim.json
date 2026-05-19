@@ -1,0 +1,18 @@
+{
+  "claim_id": "6f7f9322-e47e-4490-b8cd-7fad7783e284",
+  "doc_id": "3ace7a33-5f03-9b3d-d588-996c7283446d",
+  "block_id": "b0001",
+  "sent_id": "b0001_s0000",
+  "claim_text": "모든 연령 10년 전보다 소비 감소\n소득에서 소비지출이 차지하는 비중을 나타내는 ‘평균소비성향’이 전 연령대에 걸쳐 10년 전보다 하락한 것으로 나타났다.",
+  "claim_type": "statistic",
+  "canonical_type": null,
+  "schema": null,
+  "source_offset": {
+    "page": null,
+    "char_start": 38,
+    "char_end": 124
+  },
+  "check_worthy_score": 0.75,
+  "graph_anchor_id": "node:b0001_s0000",
+  "context_text": "모든 연령 10년 전보다 소비 감소\n소득에서 소비지출이 차지하는 비중을 나타내는 ‘평균소비성향’이 전 연령대에 걸쳐 10년 전보다 하락한 것으로 나타났다."
+}

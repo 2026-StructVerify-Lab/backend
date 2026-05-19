@@ -1,0 +1,54 @@
+{
+  "claim_id": "a56c052a-95bc-4a9c-8cdb-2dac7c296fe3",
+  "claim_type": "comparison",
+  "required_data": [
+    {
+      "indicator": "평균소비성향",
+      "time": "2014",
+      "population": "전체",
+      "unit_hint": "%",
+      "resolved_value": null,
+      "resolved_unit": null,
+      "source": null,
+      "source_time": null
+    },
+    {
+      "indicator": "평균소비성향",
+      "time": "2024",
+      "population": "전체",
+      "unit_hint": "%",
+      "resolved_value": null,
+      "resolved_unit": null,
+      "source": null,
+      "source_time": null
+    }
+  ],
+  "initial_steps": [
+    {
+      "action": "catalog_search",
+      "input": {
+        "query": "평균소비성향 가계동향",
+        "category": [
+          "가계"
+        ]
+      },
+      "rationale": "KOSIS에서 평균소비성향 표를 찾는다."
+    },
+    {
+      "action": "fetch_evidence",
+      "input": {
+        "candidate_id": "<검색 결과 나온 표의 id>",
+        "params": {}
+      },
+      "rationale": "찾은 표에서 2014년과 2024년 데이터를 확인한다."
+    }
+  ],
+  "fallback": {
+    "use_original_text": false,
+    "alternative_keywords": [],
+    "give_up_after_attempts": 5
+  },
+  "calculation_formula": null,
+  "notes": null,
+  "created_at": "2026-05-19T04:58:41.821869Z"
+}

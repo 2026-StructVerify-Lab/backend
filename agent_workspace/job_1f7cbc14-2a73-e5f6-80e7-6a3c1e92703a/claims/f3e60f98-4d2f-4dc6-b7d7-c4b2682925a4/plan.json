@@ -1,0 +1,60 @@
+{
+  "claim_id": "f3e60f98-4d2f-4dc6-b7d7-c4b2682925a4",
+  "claim_type": "comparison",
+  "required_data": [
+    {
+      "indicator": "평균소비성향",
+      "time": "2014",
+      "population": "30대 이하",
+      "unit_hint": "%",
+      "resolved_value": null,
+      "resolved_unit": null,
+      "source": null,
+      "source_time": null
+    },
+    {
+      "indicator": "평균소비성향",
+      "time": "2024",
+      "population": "30대 이하",
+      "unit_hint": "%",
+      "resolved_value": null,
+      "resolved_unit": null,
+      "source": null,
+      "source_time": null
+    }
+  ],
+  "initial_steps": [
+    {
+      "action": "catalog_search",
+      "input": {
+        "query": "가계동향조사",
+        "category": [
+          "통계표>가계"
+        ],
+        "top_k": 10
+      },
+      "rationale": "KOSIS에서 가계 동향 조사 표를 찾는다."
+    },
+    {
+      "action": "fetch_evidence",
+      "input": {
+        "candidate_id": "SG********01",
+        "params": {}
+      },
+      "rationale": "표본 개편 전후 자료를 구분하기 위해 연도를 확인한다."
+    },
+    {
+      "action": "calculate",
+      "input": {},
+      "rationale": "두 시점의 값을 각각 확인하여 주장과 일치하는지 비교한다."
+    }
+  ],
+  "fallback": {
+    "use_original_text": true,
+    "alternative_keywords": [],
+    "give_up_after_attempts": 3
+  },
+  "calculation_formula": null,
+  "notes": null,
+  "created_at": "2026-05-19T03:35:21.948622Z"
+}

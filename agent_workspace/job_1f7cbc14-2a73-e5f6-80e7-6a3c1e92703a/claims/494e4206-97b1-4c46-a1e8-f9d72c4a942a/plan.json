@@ -1,0 +1,47 @@
+{
+  "claim_id": "494e4206-97b1-4c46-a1e8-f9d72c4a942a",
+  "claim_type": "comparison",
+  "required_data": [],
+  "initial_steps": [
+    {
+      "action": "catalog_search",
+      "input": {
+        "query": "가계동향조사",
+        "category": [
+          "지표",
+          "통계표"
+        ],
+        "filters": [
+          {
+            "dimension": "항목",
+            "operator": "contains",
+            "value": "교육"
+          },
+          {
+            "dimension": "시점",
+            "operator": "eq",
+            "value": "2024"
+          }
+        ],
+        "top_k": 5
+      },
+      "rationale": "KOSIS에서 가계동향조사 내 교육 항목이 포함된 2024년 데이터셋 탐색"
+    },
+    {
+      "action": "fetch_evidence",
+      "input": {
+        "candidate_id": "<검색 결과 상위 지표명의 아이디>",
+        "params": {}
+      },
+      "rationale": "탐색된 데이터셋에서 지표별 값을 크롤링하여 검증에 필요한 데이터 획득"
+    }
+  ],
+  "fallback": {
+    "use_original_text": true,
+    "alternative_keywords": [],
+    "give_up_after_attempts": 3
+  },
+  "calculation_formula": null,
+  "notes": null,
+  "created_at": "2026-05-19T03:39:31.182171Z"
+}

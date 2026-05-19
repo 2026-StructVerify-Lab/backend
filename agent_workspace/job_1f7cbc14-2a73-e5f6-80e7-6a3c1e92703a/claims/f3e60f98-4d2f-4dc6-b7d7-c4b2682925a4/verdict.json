@@ -1,0 +1,11 @@
+{
+  "claim_id": "f3e60f98-4d2f-4dc6-b7d7-c4b2682925a4",
+  "verdict": "unverifiable",
+  "confidence": 0.2,
+  "explanation": "Agent loop이 verdict 결정 없이 종료됨 (stop_reason=max_iterations, iter=4/10). 마지막 observation: 실패: expression 비어있음",
+  "data_points": [],
+  "iterations_used": 4,
+  "total_tokens": 0,
+  "stop_reason": "max_iterations",
+  "created_at": "2026-05-19T03:35:53.558018Z"
+}

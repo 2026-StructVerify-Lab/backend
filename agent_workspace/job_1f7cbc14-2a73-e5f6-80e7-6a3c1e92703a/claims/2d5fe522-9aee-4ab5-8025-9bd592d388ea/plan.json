@@ -1,0 +1,56 @@
+{
+  "claim_id": "2d5fe522-9aee-4ab5-8025-9bd592d388ea",
+  "claim_type": "difference",
+  "required_data": [
+    {
+      "indicator": "월평균 가처분소득",
+      "time": "2024",
+      "population": "30대 이하",
+      "unit_hint": "원",
+      "resolved_value": null,
+      "resolved_unit": null,
+      "source": null,
+      "source_time": null
+    },
+    {
+      "indicator": "월평균 가처분소득",
+      "time": "2014",
+      "population": "30대 이하",
+      "unit_hint": "원",
+      "resolved_value": null,
+      "resolved_unit": null,
+      "source": null,
+      "source_time": null
+    }
+  ],
+  "initial_steps": [
+    {
+      "action": "catalog_search",
+      "input": {
+        "query": "가계동향조사",
+        "category": [
+          "통계표>가구",
+          "지표>소득분배"
+        ],
+        "top_k": 5
+      },
+      "rationale": "KOSIS에서 가계동향조사 표를 찾는다."
+    },
+    {
+      "action": "fetch_evidence",
+      "input": {
+        "candidate_id": "MDAwMjQzOTY=",
+        "params": {}
+      },
+      "rationale": "검색 결과에서 지표가 개인소득인 테이블을 선택한다."
+    }
+  ],
+  "fallback": {
+    "use_original_text": true,
+    "alternative_keywords": [],
+    "give_up_after_attempts": 3
+  },
+  "calculation_formula": "current - prev",
+  "notes": null,
+  "created_at": "2026-05-19T03:36:07.678155Z"
+}

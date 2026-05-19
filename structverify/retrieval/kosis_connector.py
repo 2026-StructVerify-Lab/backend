@@ -676,13 +676,24 @@ class KOSISConnector(BaseConnector):
             logger.info("[재검색] 새 후보 없음")
             return None
 
+        # [수정 v6.22] 재검색 경로도 claim 시점 단위를 존중 — 'Y' 하드코딩 제거.
+        # [BEFORE] prd_se_hint="Y" 하드코딩 → 월별 claim도 연간부터 시도.
+        # [AFTER] query.time_period가 'YYYY-MM'이면 'M', 분기면 'Q', 아니면 'Y'.
+        _tp = str(query.time_period or "").strip()
+        if re.match(r"^\d{4}[-./]?\d{2}$", _tp):
+            _retry_prd = "M"
+        elif re.search(r"[Qq][1-4]", _tp) or re.match(r"^\d{4}[-./]?[1-4]$", _tp):
+            _retry_prd = "Q"
+        else:
+            _retry_prd = "Y"
+
         # 단순화한 검색어 기준으로 관련성 체크 + fetch
         for rc in retry_candidates[:5]:
             if not _is_table_relevant(simplified, rc.stat_name):
                 continue
             data = await self._fetch_with_retry(
                 stat_id=rc.stat_id, stat_rec=rc, query=query,
-                prd_se_hint="Y",
+                prd_se_hint=_retry_prd,  # [수정 v6.22] 'Y' 하드코딩 → 시점 추론
                 start_prd_de=query.time_period or "",
                 end_prd_de=query.time_period or "",
             )
@@ -721,23 +732,38 @@ class KOSISConnector(BaseConnector):
         year_m = re.search(r"(\d{4})", start_prd_de or time_ref)
         year = year_m.group(1) if year_m else "2024"
 
-        # prd_se 순회 전략
+        # ── [수정 v6.22] prd_se 순회 전략 — claim 시점 단위를 최우선 존중 ──
+        # [BEFORE 버그] prd_se_hint가 'M'(월)이어도 아래처럼 'Y'를 맨 앞에
+        #   insert(0, ...)했음:
+        #       if prd_se_hint != "Y":
+        #           prd_strategies.insert(0, {"prdSe": "Y", ...})
+        #   → 연간 데이터도 가진 표(예: '월.분기.연간 인구동향' DT_1B8000G)는
+        #     'Y' 요청이 먼저 성공 → 연 데이터 반환 → period guard가
+        #     '연 단위 표'로 거부 → 월별 claim이 영영 검증 불가.
+        # [AFTER 수정] prd_se_hint(claim에서 유래한 시점 단위)를 1순위로
+        #   고정하고, 나머지 주기는 그 '뒤'에만 폴백으로 둔다. claim이
+        #   월이면 월을 먼저 시도해야 월 데이터를 받는다.
+        #   도메인 무관 — 시점 단위 우선순위만 다룸.
         prd_strategies = [
             {"prdSe": prd_se_hint, "startPrdDe": start_prd_de or year,
              "endPrdDe": end_prd_de or year},
         ]
-        # hint가 Y가 아니면 Y도 시도
-        if prd_se_hint != "Y":
-            prd_strategies.insert(0, {"prdSe": "Y", "startPrdDe": year, "endPrdDe": year})
-        # M, Q 추가
-        for prd, sp, ep in [("M", f"{year}01", f"{year}12"), ("Q", f"{year}01", f"{year}04")]:
+        # 나머지 주기는 hint 뒤로만 추가 (hint가 항상 우선).
+        _other_periods = [
+            ("M", f"{year}01", f"{year}12"),
+            ("Q", f"{year}01", f"{year}04"),
+            ("Y", year, year),
+        ]
+        for prd, sp, ep in _other_periods:
             if prd != prd_se_hint:
                 prd_strategies.append({"prdSe": prd, "startPrdDe": sp, "endPrdDe": ep})
 
-        # 기간 지정 실패 시 최신 데이터 폴백
+        # 기간 지정 실패 시 최신 데이터 폴백 — 여기서도 hint 주기를 먼저.
+        # [수정 v6.22] 폴백 순서도 ["Y","M","Q"] 고정 → hint 우선으로 변경.
+        _fb_order = [prd_se_hint] + [p for p in ["M", "Q", "Y"] if p != prd_se_hint]
         fallbacks = [
             {"prdSe": p, "newEstPrdCnt": "3"}
-            for p in ["Y", "M", "Q"]
+            for p in _fb_order
         ]
 
         org_id = (

@@ -165,11 +165,107 @@ def _normalize_korean(s: str) -> str:
     return s.strip().lower()
 
 
+# ── [수정 v6.23] 국가 차원 인식 ───────────────────────────────────────
+# [추가 이유] DT_2KAA207('합계출산율')처럼 표 이름엔 국가 표시가 없지만
+#   실제 행은 국가별(세계/대한민국/일본/중국...)인 표가 있다. 표 이름만
+#   보는 가드는 이런 표를 통과시키고, 행 선택은 첫 행('세계' 2.25)을
+#   집어 한국 기사값(0.72)과 비교 → '불일치(거짓)'로 오판한다.
+# [해결] 가져온 행 데이터의 카테고리 컬럼을 보고 '국가 차원'인지
+#   판별한다. 국가 차원이면 반드시 '대한민국' 행을 골라야 하고,
+#   한국 행이 없으면(외국만 있으면) 그 표는 국내 claim에 부적합.
+# 도메인 무관 — KOSIS 표준 국가 라벨만 사용, 지표명 하드코딩 없음.
+
+# KOSIS에서 '대한민국'을 가리키는 표기들
+_KOREA_LABELS = {"대한민국", "한국", "korea", "republicofkorea", "southkorea", "kor"}
+
+# 국가 차원임을 강하게 시사하는, 한국이 아닌 대표 국가/지역 라벨.
+# (이 라벨이 행 카테고리에 보이면 그 컬럼은 '국가 차원'이다)
+_FOREIGN_COUNTRY_LABELS = {
+    "세계", "아시아", "유럽", "아프리카", "북아메리카", "남아메리카",
+    "오세아니아", "일본", "중국", "미국", "독일", "프랑스", "영국",
+    "인도", "베트남", "태국", "러시아", "이탈리아", "스페인", "캐나다",
+    "호주", "브라질", "멕시코", "인도네시아", "필리핀", "대만", "홍콩",
+}
+
+
+def _is_korea_label(value: str) -> bool:
+    """카테고리 값이 '대한민국'을 가리키는지."""
+    n = _normalize_korean(value)
+    return n in _KOREA_LABELS
+
+
+def _detect_country_field(rows: list[dict]) -> str | None:
+    """행 목록에서 '국가 차원'을 담은 카테고리 컬럼명을 찾는다.
+
+    C1_NM~C4_NM 중, 값들에 외국 국가/대륙 라벨이 하나라도 보이면
+    그 컬럼이 국가 차원 — 컬럼명을 반환. 없으면 None.
+
+    표 이름이 아니라 *실제 가져온 데이터*를 보고 판단하므로,
+    이름에 국가 표시가 없는 표(DT_2KAA207 등)도 잡아낸다.
+    """
+    for field_name in ("C1_NM", "C2_NM", "C3_NM", "C4_NM"):
+        seen_foreign = False
+        seen_any = False
+        for r in rows:
+            raw = r.get(field_name)
+            if raw is None:
+                continue
+            seen_any = True
+            n = _normalize_korean(str(raw))
+            if n in {_normalize_korean(x) for x in _FOREIGN_COUNTRY_LABELS}:
+                seen_foreign = True
+                break
+        if seen_any and seen_foreign:
+            return field_name
+    return None
+
+
+# ── [수정 v6.24] 데이터 기반 관련성 판정 ──────────────────────────────
+# [추가 이유] 가계동향조사 표(DT_1L9V153 '가구원수별 가구당 월평균 가계수지'
+#   등)는 표 이름에 '평균소비성향'·'지출 비중' 같은 지표명이 없다. 지표는
+#   표 안의 *항목 행*(ITM_NM 등)으로 들어있다. 표 이름만 보는 관련성
+#   가드(_is_table_relevant)는 이런 표를 전부 '관련 없음'으로 거부 →
+#   가계동향조사 기사 claim이 행 선택까지 가지도 못하고 전멸한다.
+#   (출생아 수 표는 이름에 '출생'이 있어 우연히 통과했을 뿐.)
+# [해결] 이미 fetch해서 손에 든 rows 안에서 indicator 항목을 직접 찾는다.
+#   행에 있으면 그 표는 관련 있는 표 — 표 이름과 무관하게 통과.
+# 도메인 무관 — 지표명/표 ID 하드코딩 없음. 행 데이터로만 판별.
+
+def _indicator_in_rows(rows: list[dict], indicator: str | None) -> bool:
+    """fetch한 rows의 항목 컬럼에 indicator가 실제로 들어있는지.
+
+    ITM_NM·C1_NM~C4_NM 값을 정규화해서 indicator와 비교한다.
+    - 정규화 후 한쪽이 다른 쪽에 포함되면 매칭 (표기차 흡수).
+    True면 '표 이름이 안 맞아도 데이터 안에 지표가 있는 표'.
+    """
+    if not rows or not indicator:
+        return False
+    ind_norm = _normalize_korean(str(indicator).strip())
+    if not ind_norm:
+        return False
+    _FIELDS = ("ITM_NM", "C1_NM", "C2_NM", "C3_NM", "C4_NM")
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        for f in _FIELDS:
+            raw = r.get(f)
+            if raw is None:
+                continue
+            fn = _normalize_korean(str(raw))
+            if not fn:
+                continue
+            # 정규화 후 양방향 substring (예: '평균소비성향' in '가구당평균소비성향')
+            if ind_norm in fn or fn in ind_norm:
+                return True
+    return False
+
+
 def _select_best_row(
     rows: list[dict],
     indicator: str | None,
     time_period: str | None,
     population: str | None = None,
+    unit_hint: str | None = None,
 ) -> dict | None:
     """KOSIS row 목록에서 indicator + time_period 매칭 row 1개 선택.
 
@@ -288,22 +384,70 @@ def _select_best_row(
                 return True
         return False
 
-    # 1차: indicator + 정확 시점 (+ population)
+    # ── [수정 v6.25] 단위 적합성 가드 ────────────────────────────────
+    # [추가 이유] 가계동향조사 표는 비목 '금액(원)' 행과, 기사 claim의
+    #   '지출 비중(%)'·'평균소비성향(%)'이 한 표에 섞여 있다. 단위를
+    #   안 보면 ITM='전체가구' 행의 2.253원을 claim '4.8%'와 비교해
+    #   가짜 mismatch를 낸다. claim unit_hint와 행 UNIT_NM의 타입이
+    #   다르면(% vs 원/명) 그 행은 답이 될 수 없으므로 후보에서 제외.
+    # [효과] '지출 비중' claim은 표에 % 행이 없으면 전 행 탈락 → None
+    #   → 가짜 mismatch 대신 정직한 unverifiable.
+    from structverify.retrieval.kosis_connector import is_same_unit_type
+    _unit_hint = (unit_hint or "").strip()
+
+    def _unit_match(row: dict) -> bool:
+        if not _unit_hint:
+            return True  # claim 단위 정보 없음 — 가드 불가
+        row_unit = str(row.get("UNIT_NM", "") or "").strip()
+        if not row_unit:
+            return True  # 행 단위 미상 — 막지 않음
+        return is_same_unit_type(_unit_hint, row_unit)
+
+    # ── [수정 v6.23] 국가 차원 필터 ──────────────────────────────────
+    # 행 데이터에 국가 차원(세계/일본/중국...)이 있으면, 국내 claim은
+    # 반드시 '대한민국' 행이어야 한다. population='전체'라 해도 국가
+    # 차원에선 '세계'가 아니라 '대한민국'을 골라야 한다.
+    # _pop_match는 '전체'를 무조건 통과시켜 첫 행(세계)을 잡으므로,
+    # 그 위에 이 가드를 덧씌운다.
+    _country_field = _detect_country_field(rows)
+    if _country_field is not None:
+        _korea_rows = [
+            r for r in rows if _is_korea_label(str(r.get(_country_field, "")))
+        ]
+        if _korea_rows:
+            # 국가 차원이 있는 표 → 한국 행으로만 후보를 좁힌다.
+            logger.info(
+                f"[_select_best_row] 국가 차원 감지({_country_field}) "
+                f"→ 대한민국 행 {len(_korea_rows)}개로 한정"
+            )
+            rows = _korea_rows
+        else:
+            # 국가 차원인데 한국 행이 없음 → 해외 전용 표.
+            # 국내 claim에는 부적합 → 매칭 실패 처리.
+            logger.warning(
+                f"[_select_best_row] 국가 차원({_country_field})에 "
+                f"대한민국 행 없음 → 해외 전용 표, 국내 claim 부적합"
+            )
+            return None
+
+    # 1차: indicator + 정확 시점 (+ population + 단위)
     for r in rows:
-        if _ind_match(r) and _time_match(r) and _pop_match(r):
+        if _ind_match(r) and _time_match(r) and _pop_match(r) and _unit_match(r):
             return r
 
-    # 2차: indicator + 정확 시점
+    # 2차: indicator + 정확 시점 + 단위
     if prd_target:
         for r in rows:
-            if _ind_match(r) and _time_match(r):
+            if _ind_match(r) and _time_match(r) and _unit_match(r):
                 return r
 
     # 3차: indicator만 매칭 — 가장 최근 시점 row 우선
     #   [v6.19] 단, claim이 월 단위면 연 단위 row는 제외 (가짜 매칭 방지)
+    #   [v6.25] 단위 불일치 row도 제외
     if ind_norm:
         matched = [
-            r for r in rows if _ind_match(r) and _granularity_ok(r)
+            r for r in rows
+            if _ind_match(r) and _granularity_ok(r) and _unit_match(r)
         ]
         if matched:
             matched.sort(
@@ -312,10 +456,10 @@ def _select_best_row(
             )
             return matched[0]
 
-    # 4차: 시점만 매칭
+    # 4차: 시점만 매칭 (+ 단위)
     if prd_target:
         for r in rows:
-            if _time_match(r):
+            if _time_match(r) and _unit_match(r):
                 return r
 
     # [v6.19] 월 claim인데 연 단위 표만 있는 경우 — 여기까지 왔으면
@@ -566,13 +710,25 @@ class KOSISDataSource(BaseDataSource):
                 return None
 
         # (b) 일반 관련성 체크 — indicator가 표 이름과 같은 분야인지
+        # [수정 v6.24] 표 이름만 보던 것을 데이터 기반으로 보강.
+        # 가계동향조사 표처럼 지표가 표 이름이 아니라 *행 항목*(ITM_NM 등)
+        # 으로 들어있는 표는 _is_table_relevant(이름 기반)가 거부한다.
+        # → 먼저 이미 fetch한 rows 안에 indicator가 있는지 확인하고,
+        #   있으면 '데이터에 지표가 실재하는 관련 표'이므로 통과시킨다.
+        #   rows에 없을 때만 기존 이름 기반 가드로 폴백.
         if relevance_query and not _is_table_relevant(relevance_query, stat_name_str):
-            logger.warning(
-                f"[KOSISDataSource] 테이블 관련성 없음 → fetch 거부: "
-                f"[{stat_id_str}] {stat_name_str!r} vs "
-                f"indicator={claim_indicator!r} population={claim_population!r}"
-            )
-            return None
+            if _indicator_in_rows(rows, claim_indicator):
+                logger.info(
+                    f"[KOSISDataSource] 표 이름엔 지표 없으나 행 데이터에 "
+                    f"'{claim_indicator}' 존재 → 관련 표로 인정: [{stat_id_str}]"
+                )
+            else:
+                logger.warning(
+                    f"[KOSISDataSource] 테이블 관련성 없음 → fetch 거부: "
+                    f"[{stat_id_str}] {stat_name_str!r} vs "
+                    f"indicator={claim_indicator!r} population={claim_population!r}"
+                )
+                return None
 
         # ★ rows에서 indicator + time_period 매칭 row 직접 선택
         # connector가 drows[0]만 official_value로 만들기 때문에 통합표에서 잘못된 row를 받음.
@@ -602,6 +758,7 @@ class KOSISDataSource(BaseDataSource):
                 indicator=params.get("indicator"),
                 time_period=params.get("time_period"),
                 population=params.get("population"),
+                unit_hint=params.get("unit_hint"),
             )
 
         if best_row is not None:

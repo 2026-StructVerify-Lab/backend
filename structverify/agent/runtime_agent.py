@@ -400,6 +400,7 @@ class RuntimeAgent:
         """
         from structverify.agent.planner import Planner, PlannerConfig
         from structverify.agent.loop import agent_loop, LoopConfig
+        from structverify.agent.reflect import ReflectAgent, ReflectConfig
         from structverify.agent.workspace import build_workspace
         from structverify.retrieval.registry import build_all_enabled
         import structverify.retrieval.kosis_source  # noqa: F401 — @register_datasource 트리거
@@ -462,16 +463,48 @@ class RuntimeAgent:
 
             # 5) Agent Loop 실행 (ReAct Action/Observation)
             loop_cfg = agent_cfg.get("loop") or {}
+            loop_mode = str(loop_cfg.get("mode", "deterministic")).strip()
+            max_iter = int(loop_cfg.get("max_iterations", 10))
+
+            # [reflect 활성화] mode='reflect'면 ReflectAgent를 loop에 주입.
+            #   매 iter LLM이 last_observation을 보고 다음 action을 동적
+            #   결정(catalog 결과 부적합 시 검색어 바꿔 재검색, 원문 재독 등).
+            #   ReflectAgent는 파싱 실패 시 None을 반환하고, loop은 그 경우
+            #   plan의 다음 step으로 deterministic fallback → 안전.
+            #   mode='deterministic'이면 reflect_fn=None (기존 동작 유지).
+            reflect_fn = None
+            if loop_mode == "reflect":
+                async def llm_call_for_reflect(prompt: str) -> str:
+                    return await plan_llm.generate(
+                        prompt=prompt,
+                        system_prompt=(
+                            "당신은 사실검증 ReAct 에이전트입니다. "
+                            "지금까지의 관찰 결과를 보고 다음 action을 "
+                            "JSON으로만 답하세요."
+                        ),
+                    )
+
+                reflect_fn = ReflectAgent(
+                    llm_call=llm_call_for_reflect,
+                    claim=claim,
+                    config=ReflectConfig(),
+                    max_iterations=max_iter,
+                )
+                logger.info(
+                    f"[planner] {claim.claim_id}: reflect 모드 활성화 "
+                    f"(max_iter={max_iter}) — 매 iter LLM 재계획"
+                )
+
             verdict = await agent_loop(
                 plan=plan,
                 claim=claim,
                 workspace=workspace,
                 datasources=datasources,
                 config=self.config,
-                reflect_fn=None,  # Phase D = deterministic
+                reflect_fn=reflect_fn,
                 loop_config=LoopConfig(
-                    max_iterations=int(loop_cfg.get("max_iterations", 10)),
-                    mode="deterministic",
+                    max_iterations=max_iter,
+                    mode=loop_mode,
                 ),
             )
 

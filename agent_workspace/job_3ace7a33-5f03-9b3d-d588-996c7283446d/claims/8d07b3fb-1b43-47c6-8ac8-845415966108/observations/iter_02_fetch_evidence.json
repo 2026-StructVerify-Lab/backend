@@ -1,0 +1,25 @@
+{
+  "iter_num": 2,
+  "action": "fetch_evidence",
+  "input": {
+    "candidate_id": "DS_157",
+    "params": {}
+  },
+  "output": {
+    "source": "kosis",
+    "candidate_id": "DS_157",
+    "params": {
+      "indicator": "월평균 소비 금액",
+      "time_period": "2024",
+      "population": "30대 이하",
+      "unit_hint": "원"
+    },
+    "evidence": null,
+    "tried_candidates": [
+      "DS_157"
+    ]
+  },
+  "summary": "fetch(kosis): 후보 1개 모두 실패 (관련 표 없음)",
+  "success": false,
+  "error": "모든 catalog 후보가 관련성 체크 실패 또는 데이터 없음."
+}

@@ -1,0 +1,32 @@
+[
+  {
+    "indicator": "평균소비성향",
+    "time_period": "2024",
+    "value": 2.914,
+    "unit": "명",
+    "source": "KOSIS:DT_1L9V005",
+    "claim_id": "eb2b3ebf-9cc8-4d75-a6c8-f417520f9c44",
+    "verdict": "mismatch",
+    "recorded_at": "2026-05-19T04:59:28.637035+00:00"
+  },
+  {
+    "indicator": "월평균 소비 금액",
+    "time_period": "2024",
+    "value": 2.272,
+    "unit": "원",
+    "source": "KOSIS:DT_1L9U142",
+    "claim_id": "47deae46-32bb-4c50-9f29-a2f8cbbbe4bd",
+    "verdict": "match",
+    "recorded_at": "2026-05-19T05:03:43.759341+00:00"
+  },
+  {
+    "indicator": "의류 신발 지출 비중",
+    "time_period": "2024",
+    "value": 2.253,
+    "unit": "원",
+    "source": "KOSIS:DT_1L9U122",
+    "claim_id": "ac7d7de1-8892-4298-9b0a-cec1d199152c",
+    "verdict": "mismatch",
+    "recorded_at": "2026-05-19T05:05:23.298707+00:00"
+  }
+]

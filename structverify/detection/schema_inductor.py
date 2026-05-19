@@ -766,6 +766,30 @@ async def _induce_multiple(
     #   → 자동 역산: prev_value = 0.79 - 0.06 = 0.73
     #
     # 효과: verifier C2 분기가 작동 → KOSIS 절대값 row와 자동 계산 비교.
+
+    def _prev_year_period(tp: str | None) -> str | None:
+        """[수정 v6.23] time_period에서 '1년 전' 시점을 계산.
+
+        '차이/증감' claim의 비교 기준은 보통 '지난해 같은 달/기간'이다.
+        prev_time_period를 현재 시점과 똑같이 두면(이전 버그) prev와
+        current가 같아져 → fetch가 두 시점을 못 가져오고 검증 불가.
+        연도만 1 빼고 월/분기 부분은 그대로 둔다. 도메인 무관.
+
+        '2025-04' → '2024-04'  /  '2023' → '2022'  /  '2025Q2' → '2024Q2'
+        """
+        if not tp:
+            return None
+        s = str(tp).strip()
+        import re as _re
+        m = _re.match(r"^(\d{4})(.*)$", s)
+        if not m:
+            return None
+        try:
+            year = int(m.group(1))
+        except ValueError:
+            return None
+        return f"{year - 1}{m.group(2)}"
+
     try:
         _has_prev_field = "prev_value" in ClaimSchema.model_fields
     except Exception:
@@ -808,11 +832,20 @@ async def _induce_multiple(
             if matching_abs:
                 # 역산: prev = current - diff
                 derived_prev = matching_abs.value - diff_s.value
+                # [수정 v6.23] prev_time_period — '지난해 같은 달/기간'이므로
+                # 현재 시점에서 1년 전으로 계산. (이전 버그: 현재 시점을
+                # 그대로 넣어 prev==current → fetch가 두 시점 확보 실패 →
+                # difference claim이 '단일 fetch로 검증 불가'로 끝남)
+                # LLM이 prev_time_period를 채웠으면 그대로 존중, 비었으면 역산.
+                _llm_prev_tp = getattr(diff_s, "prev_time_period", None)
+                _derived_prev_tp = _llm_prev_tp or _prev_year_period(
+                    matching_abs.time_period
+                )
                 # diff_s에 prev_value 채워넣기 (model_copy)
                 try:
                     updated = diff_s.model_copy(update={
                         "prev_value": derived_prev,
-                        "prev_time_period": matching_abs.time_period,  # 같은 시점 가정 (직전 시점은 비교 기준)
+                        "prev_time_period": _derived_prev_tp,
                         "prev_phrase": None,  # 역산이라 원문 phrase 없음
                     })
                     # results 안에서 교체
@@ -823,7 +856,7 @@ async def _induce_multiple(
                     logger.info(
                         f"  ✨ prev_value 역산 (L fix): {diff_s.indicator}={diff_s.value} "
                         f"← {matching_abs.indicator}={matching_abs.value} - {diff_s.value} "
-                        f"= {derived_prev:.4f}"
+                        f"= {derived_prev:.4f} (prev_time={_derived_prev_tp})"
                     )
                 except Exception as e:
                     logger.debug(f"prev_value 역산 실패: {e}")

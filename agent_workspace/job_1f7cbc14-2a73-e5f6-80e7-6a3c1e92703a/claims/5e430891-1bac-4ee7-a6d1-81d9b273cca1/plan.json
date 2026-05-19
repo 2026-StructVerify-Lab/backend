@@ -1,0 +1,46 @@
+{
+  "claim_id": "5e430891-1bac-4ee7-a6d1-81d9b273cca1",
+  "claim_type": "comparison",
+  "required_data": [],
+  "initial_steps": [
+    {
+      "action": "catalog_search",
+      "input": {
+        "query": "가계동향조사",
+        "category": [
+          "지표",
+          "통계표"
+        ],
+        "filters": [
+          {
+            "dimension": "항목",
+            "operator": "contains",
+            "value": "보건"
+          },
+          {
+            "dimension": "시점",
+            "operator": "eq",
+            "value": "2024"
+          }
+        ]
+      },
+      "rationale": "KOSIS에서 가계동향조사 표를 검색하여 보건 항목 확인"
+    },
+    {
+      "action": "fetch_evidence",
+      "input": {
+        "candidate_id": "<검색 결과 나온 표의 아이디>",
+        "params": {}
+      },
+      "rationale": "해당 표에서 2014년과 2024년의 보건 지출 비중 값을 확인"
+    }
+  ],
+  "fallback": {
+    "use_original_text": true,
+    "alternative_keywords": [],
+    "give_up_after_attempts": 3
+  },
+  "calculation_formula": null,
+  "notes": null,
+  "created_at": "2026-05-19T03:36:36.867191Z"
+}

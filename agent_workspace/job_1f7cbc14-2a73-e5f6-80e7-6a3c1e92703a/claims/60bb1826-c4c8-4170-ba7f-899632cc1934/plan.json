@@ -1,0 +1,35 @@
+{
+  "claim_id": "60bb1826-c4c8-4170-ba7f-899632cc1934",
+  "claim_type": "comparison",
+  "required_data": [],
+  "initial_steps": [
+    {
+      "action": "catalog_search",
+      "input": {
+        "query": "가계 > 지출 구성비",
+        "category": [
+          "가계",
+          "지출"
+        ],
+        "top_k": 5
+      },
+      "rationale": "KOSIS에서 가계 지출 구성비 표를 검색한다."
+    },
+    {
+      "action": "fetch_evidence",
+      "input": {
+        "candidate_id": "<검색 결과 나온 표의 id>",
+        "params": {}
+      },
+      "rationale": "표 id를 이용하여 해당 표를 가져온다."
+    }
+  ],
+  "fallback": {
+    "use_original_text": true,
+    "alternative_keywords": [],
+    "give_up_after_attempts": 3
+  },
+  "calculation_formula": null,
+  "notes": null,
+  "created_at": "2026-05-19T03:37:46.730458Z"
+}

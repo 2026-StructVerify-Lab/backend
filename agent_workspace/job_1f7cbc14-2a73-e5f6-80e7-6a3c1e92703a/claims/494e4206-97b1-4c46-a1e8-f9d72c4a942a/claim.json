@@ -1,0 +1,33 @@
+{
+  "claim_id": "494e4206-97b1-4c46-a1e8-f9d72c4a942a",
+  "doc_id": "1f7cbc14-2a73-e5f6-80e7-6a3c1e92703a",
+  "block_id": "b0001",
+  "sent_id": "b0001_s0013",
+  "claim_text": "반면 식료품·음료(15.9%→13.6%), 의류·신발(6.4%→4.8%) 등 전통적인 생필품과 교육(8.8%→7.9%) 등은 하락했다.",
+  "claim_type": "decrease",
+  "canonical_type": null,
+  "schema": {
+    "indicator": "교육 지출 비중",
+    "time_period": "2024",
+    "unit": "%",
+    "population": "전체",
+    "value": 7.9,
+    "comparison_type": null,
+    "source_reference": null,
+    "graph_schema_candidates": [],
+    "parent_path": "경제 > 소비 > 지출 구성비",
+    "is_approximate": false,
+    "modifier": null,
+    "prev_value": null,
+    "prev_time_period": null,
+    "prev_phrase": null
+  },
+  "source_offset": {
+    "page": null,
+    "char_start": 876,
+    "char_end": 951
+  },
+  "check_worthy_score": 0.75,
+  "graph_anchor_id": "node:b0001_s0013",
+  "context_text": "소비 구조도 달라졌다. 10년간 지출 비중이 증가한 항목은 보건(7.2%→9.8%), 오락·문화(5.4%→7.8%), 음식·숙박(13.7%→14.4%), 주거·수도(11.5%→12.2%) 등이었다. 반면 식료품·음료(15.9%→13.6%), 의류·신발(6.4%→4.8%) 등 전통적인 생필품과 교육(8.8%→7.9%) 등은 하락했다."
+}

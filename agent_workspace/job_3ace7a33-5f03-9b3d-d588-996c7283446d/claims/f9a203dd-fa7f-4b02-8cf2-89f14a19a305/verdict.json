@@ -1,0 +1,22 @@
+{
+  "claim_id": "f9a203dd-fa7f-4b02-8cf2-89f14a19a305",
+  "verdict": "mismatch",
+  "confidence": 0.7,
+  "explanation": "주장값 6.4%과 KOSIS(DT_1L9U122) 소득5분위별 가구당 가계수지 (전국1인이상실질) 조회값 2.253원이 64.8% 차이 (시점 2024).",
+  "data_points": [
+    {
+      "indicator": "의류 신발 지출 비중",
+      "time": "2024",
+      "population": "전체",
+      "unit_hint": "원",
+      "resolved_value": 2.253,
+      "resolved_unit": "원",
+      "source": "KOSIS:DT_1L9U122",
+      "source_time": "2024"
+    }
+  ],
+  "iterations_used": 3,
+  "total_tokens": 0,
+  "stop_reason": "completed",
+  "created_at": "2026-05-19T05:05:46.759239Z"
+}

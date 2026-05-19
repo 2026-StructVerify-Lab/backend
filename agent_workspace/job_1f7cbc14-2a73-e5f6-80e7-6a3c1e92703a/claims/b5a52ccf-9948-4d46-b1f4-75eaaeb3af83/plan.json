@@ -1,0 +1,36 @@
+{
+  "claim_id": "b5a52ccf-9948-4d46-b1f4-75eaaeb3af83",
+  "claim_type": "comparison",
+  "required_data": [],
+  "initial_steps": [
+    {
+      "action": "catalog_search",
+      "input": {
+        "query": "가계동향조사",
+        "category": [
+          "지표",
+          "국민계정",
+          "물가"
+        ],
+        "top_k": 5
+      },
+      "rationale": "KOSIS에서 가계동향조사 표 찾기"
+    },
+    {
+      "action": "fetch_evidence",
+      "input": {
+        "candidate_id": "<검색 결과 나온 지표 번호>",
+        "params": {}
+      },
+      "rationale": "지표 들어가서 해당 연도 분기 별 자료 확인"
+    }
+  ],
+  "fallback": {
+    "use_original_text": true,
+    "alternative_keywords": [],
+    "give_up_after_attempts": 3
+  },
+  "calculation_formula": null,
+  "notes": null,
+  "created_at": "2026-05-19T03:38:37.189932Z"
+}

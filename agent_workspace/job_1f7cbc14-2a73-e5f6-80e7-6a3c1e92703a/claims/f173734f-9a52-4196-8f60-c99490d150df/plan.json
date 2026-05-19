@@ -1,0 +1,55 @@
+{
+  "claim_id": "f173734f-9a52-4196-8f60-c99490d150df",
+  "claim_type": "comparison",
+  "required_data": [
+    {
+      "indicator": "음식·숙박업의 지출 비중",
+      "time": "2014",
+      "population": "전체",
+      "unit_hint": "%",
+      "resolved_value": null,
+      "resolved_unit": null,
+      "source": null,
+      "source_time": null
+    },
+    {
+      "indicator": "음식·숙박업의 지출 비중",
+      "time": "2024",
+      "population": "전체",
+      "unit_hint": "%",
+      "resolved_value": null,
+      "resolved_unit": null,
+      "source": null,
+      "source_time": null
+    }
+  ],
+  "initial_steps": [
+    {
+      "action": "catalog_search",
+      "input": {
+        "query": "가계동향조사",
+        "category": [
+          "통계표>가계"
+        ],
+        "top_k": 5
+      },
+      "rationale": "KOSIS에서 가계동향조사 표를 검색하여 지표 확인"
+    },
+    {
+      "action": "fetch_evidence",
+      "input": {
+        "candidate_id": "DS_157",
+        "params": {}
+      },
+      "rationale": "가계동향조사 지표 확인 후, 해당 연도의 값을 확인"
+    }
+  ],
+  "fallback": {
+    "use_original_text": false,
+    "alternative_keywords": [],
+    "give_up_after_attempts": 5
+  },
+  "calculation_formula": null,
+  "notes": null,
+  "created_at": "2026-05-19T03:37:07.475323Z"
+}

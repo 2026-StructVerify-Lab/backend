@@ -1,0 +1,56 @@
+{
+  "claim_id": "ab85bc27-2d37-4ed9-80a2-c5bd5ed59ccc",
+  "claim_type": "comparison",
+  "required_data": [
+    {
+      "indicator": "음식·숙박업의 지출 비중",
+      "time": "2014",
+      "population": "전체",
+      "unit_hint": "%",
+      "resolved_value": null,
+      "resolved_unit": null,
+      "source": null,
+      "source_time": null
+    },
+    {
+      "indicator": "음식·숙박업의 지출 비중",
+      "time": "2024",
+      "population": "전체",
+      "unit_hint": "%",
+      "resolved_value": null,
+      "resolved_unit": null,
+      "source": null,
+      "source_time": null
+    }
+  ],
+  "initial_steps": [
+    {
+      "action": "catalog_search",
+      "input": {
+        "query": "가계동향조사",
+        "category": [
+          "지표",
+          "통계표"
+        ],
+        "top_k": 5
+      },
+      "rationale": "가계동향조사 지표 및 통계표 확인"
+    },
+    {
+      "action": "fetch_evidence",
+      "input": {
+        "candidate_id": "SG111",
+        "params": {}
+      },
+      "rationale": "가계동향조사 지표 SG111 상세보기"
+    }
+  ],
+  "fallback": {
+    "use_original_text": false,
+    "alternative_keywords": [],
+    "give_up_after_attempts": 5
+  },
+  "calculation_formula": null,
+  "notes": null,
+  "created_at": "2026-05-19T05:53:07.316750Z"
+}

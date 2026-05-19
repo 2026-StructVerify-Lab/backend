@@ -1,0 +1,28 @@
+{
+  "iter_num": 2,
+  "action": "fetch_evidence",
+  "input": {
+    "candidate_id": "DS_157",
+    "params": {}
+  },
+  "output": {
+    "evidence": {
+      "value": 2.272,
+      "unit": "원",
+      "time_period": "2024",
+      "source": "KOSIS:DT_1L9U142",
+      "stat_table_id": "",
+      "stat_name": "(verified_facts 캐시)",
+      "rows": [],
+      "raw": {
+        "from_cache": true,
+        "origin_claim": "47deae46-32bb-4c50-9f29-a2f8cbbbe4bd"
+      },
+      "from_verified_cache": true
+    },
+    "used_candidate_id": "cache"
+  },
+  "summary": "verified_facts 캐시 재사용: 월평균 소비 금액 2024 = 2.272원",
+  "success": true,
+  "error": null
+}

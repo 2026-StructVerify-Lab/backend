@@ -386,6 +386,57 @@ def _try_growth_rate_from_rows(
     return (calc_rate, current_val, prev_val, desc)
 
 
+def _try_difference_from_rows(
+    evidence: dict,
+    schema: Any,
+    claim_id: str,
+) -> tuple[float, float, float, str] | None:
+    """[수정 v6.23] difference claim을 같은 표 rows로 직접 계산.
+
+    growth_rate와 동일한 원리 — fetch한 표의 rows에서 prev_time_period
+    시점 행을 찾아 (current - prev) 차이를 직접 계산한다. growth_rate는
+    비율(%)이고 difference는 차이값이라는 점만 다르다.
+
+    "합계출산율 0.79명으로 지난해 같은 달보다 0.06명 증가" 같은 claim 대응:
+    같은 표에서 2025-04(0.79)와 2024-04 행을 찾아 차이를 계산.
+
+    반환: (계산된_차이, current_value, prev_value, 설명) 또는 None.
+    """
+    prev_time = getattr(schema, "prev_time_period", None) if schema else None
+    if not prev_time:
+        return None  # 비교 시점 없음 → 계산 불가
+
+    rows = evidence.get("rows") or []
+    if not rows:
+        return None
+
+    # current 값: fetch가 매칭한 값
+    current_val = _parse_row_dt(evidence.get("value"))
+    matched_row = evidence.get("matched_row") or {}
+    if current_val is None and matched_row:
+        current_val = _parse_row_dt(matched_row.get("DT"))
+    if current_val is None:
+        return None
+
+    # prev 값: 같은 표에서 prev_time 행 탐색
+    prev_val = _find_row_value_for_time(rows, prev_time)
+    if prev_val is None:
+        logger.info(
+            f"[loop] {claim_id}: difference 직접계산 — prev 시점 {prev_time!r} "
+            f"행을 표에서 못 찾음 ({len(rows)} rows)"
+        )
+        return None
+
+    calc_diff = current_val - prev_val
+    desc = (
+        f"표에서 직접 계산: 현재값({evidence.get('time_period') or '현재'}) "
+        f"{current_val} - 이전값({prev_time}) {prev_val} "
+        f"→ 차이 {current_val}-{prev_val} = {calc_diff:.4f}"
+    )
+    logger.info(f"[loop] {claim_id}: difference 직접계산 성공 — {desc}")
+    return (calc_diff, current_val, prev_val, desc)
+
+
 def _detect_threshold_direction(claim: Any) -> str | None:
     """[v6.20] claim 문장이 부등식(threshold) 주장인지 판정.
 
@@ -515,6 +566,56 @@ def _synthesize_verdict_from_observation(
                             f"증가율 직접 검증: 기사 주장 {claimed_rate}%, "
                             f"KOSIS({stat_table_id}) 표에서 계산한 값 "
                             f"{calc_rate:.2f}% (차이 {diff:.2f}%p). {calc_desc}"
+                        ),
+                        data_points=_evidence_to_data_points(evidence, claim),
+                        iterations_used=iter_num,
+                        stop_reason=StopReason.COMPLETED,
+                    )
+
+        # ── [수정 v6.23] DIFFERENCE 직접 계산 시도 ──────────────────────
+        # growth_rate와 동일 — 같은 표 rows에서 prev_time_period 행을 찾아
+        # (current - prev) 차이를 직접 계산. "합계출산율 0.79명으로 지난해
+        # 같은 달보다 0.06명 증가" 같은 claim 대응.
+        if claim_actual_type == ClaimType.DIFFERENCE:
+            calc = _try_difference_from_rows(evidence, schema, claim_id)
+            if calc is not None and claim_value is not None:
+                calc_diff, cur_v, prev_v, calc_desc = calc
+                try:
+                    claimed_diff = float(claim_value)
+                except (TypeError, ValueError):
+                    claimed_diff = None
+                if claimed_diff is not None:
+                    # 차이값 비교 — 부호 무시하고 절대 크기 비교
+                    # (기사 "0.06명 증가"=0.06, 계산값도 +0.06 방향)
+                    gap = abs(abs(calc_diff) - abs(claimed_diff))
+                    # 차이값 자체의 크기에 비례한 허용 오차 (10%) 또는
+                    # 최소 절대 허용치 중 큰 쪽 — 작은 값(0.06 등)도 견딤.
+                    tol = max(abs(claimed_diff) * 0.10, 0.02)
+                    if gap <= tol:
+                        verdict_t = VerdictType.MATCH
+                        conf = 0.8
+                        v_label = "일치"
+                    elif gap <= tol * 3:
+                        verdict_t = VerdictType.UNVERIFIABLE
+                        conf = 0.4
+                        v_label = "오차 큼"
+                    else:
+                        verdict_t = VerdictType.MISMATCH
+                        conf = 0.7
+                        v_label = "불일치"
+                    logger.info(
+                        f"[loop] {claim_id}: difference 직접계산 판정={v_label} "
+                        f"(기사 {claimed_diff} vs 계산 {calc_diff:.4f}, "
+                        f"차이 {gap:.4f}, 허용 {tol:.4f})"
+                    )
+                    return AgentVerdict(
+                        claim_id=claim_id,
+                        verdict=verdict_t,
+                        confidence=conf,
+                        explanation=(
+                            f"차이값 직접 검증: 기사 주장 {claimed_diff}, "
+                            f"KOSIS({stat_table_id}) 표에서 계산한 값 "
+                            f"{calc_diff:.4f} (차이 {gap:.4f}). {calc_desc}"
                         ),
                         data_points=_evidence_to_data_points(evidence, claim),
                         iterations_used=iter_num,
@@ -757,7 +858,9 @@ async def agent_loop(
                 next_step = PlanStep(
                     action=decision.action,
                     input=decision.input,
-                    rationale=decision.rationale,
+                    # ReflectDecision은 'thought' 필드를 씀 (rationale 아님).
+                    # PlanStep.rationale에 thought를 매핑.
+                    rationale=decision.thought,
                 )
 
         # reflect_fn 없거나 None 반환 → plan의 다음 step 사용

@@ -1,0 +1,22 @@
+[
+  {
+    "indicator": "출생아 수 증가율",
+    "time_period": "202504",
+    "value": 20787.0,
+    "unit": "명 건",
+    "source": "KOSIS:DT_1B8000G",
+    "claim_id": "040aed6c-adf4-409b-9722-01af3fecf1aa",
+    "verdict": "match",
+    "recorded_at": "2026-05-19T03:16:00.487313+00:00"
+  },
+  {
+    "indicator": "출생아 수",
+    "time_period": "202504",
+    "value": 20787.0,
+    "unit": "명 건",
+    "source": "KOSIS:DT_1B8000G",
+    "claim_id": "8f5378ba-81de-4d7a-93be-473b30a52b81",
+    "verdict": "match",
+    "recorded_at": "2026-05-19T03:16:02.074007+00:00"
+  }
+]

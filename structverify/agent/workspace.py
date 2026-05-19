@@ -40,6 +40,40 @@ from uuid import UUID
 logger = get_logger(__name__)
 
 
+# ── [수정 v6.22] verified_facts 캐시 매칭 헬퍼 ────────────────────────
+# [추가 이유] 기존 lookup_verified_fact의 포함관계 매칭이 너무 느슨해서,
+#   '출생아 수 증가율'(%) claim이 '출생아 수'(명) 값 230028을 그대로
+#   재사용하던 버그가 있었음 (단위가 % vs 명으로 다른데도 적중).
+#   → 파생 지표(증가율/차이 등)를 base 지표와 분리하고, unit이 호환될
+#     때만 캐시 적중을 허용하도록 아래 헬퍼를 추가.
+# 도메인 무관 — 보편적 파생 어휘 + 단위 정규화만 사용.
+_DERIVED_SUFFIXES = ("증가율", "감소율", "증감률", "변화율", "상승률",
+                     "하락률", "증감", "차이", "증가폭", "변화량")
+
+
+def _strip_derived_suffix(indicator: str) -> str:
+    """indicator에서 파생 접미사를 떼어 base 지표명을 반환.
+    '출생아 수 증가율' → '출생아 수' / '합계출산율 차이' → '합계출산율'
+    """
+    s = str(indicator or "").strip()
+    for suf in _DERIVED_SUFFIXES:
+        if s.endswith(suf):
+            return s[: -len(suf)].strip()
+    return s
+
+
+def _norm_unit(unit: str) -> str:
+    """단위 문자열 정규화 — 캐시 매칭 시 % ↔ 명 혼동 차단용.
+    퍼센트 계열 → 'percent', 그 외는 공백 제거한 원문.
+    """
+    u = str(unit or "").strip().lower()
+    if not u:
+        return ""
+    if u in ("%", "％", "percent", "퍼센트", "프로", "pp", "%p", "퍼센트포인트"):
+        return "percent"
+    return u.replace(" ", "")
+
+
 # ── 백엔드 추상 인터페이스 ─────────────────────────────────────────
 
 class WorkspaceBackend(ABC):
@@ -317,29 +351,63 @@ class Workspace:
         )
 
     def lookup_verified_fact(
-        self, indicator: str, time_period: str
+        self, indicator: str, time_period: str, unit_hint: str | None = None
     ) -> dict | None:
         """(indicator, time_period)로 검증된 사실 조회. 없으면 None.
 
-        indicator는 정확 일치 외에 포함관계도 허용 — 'output' claim과
-        'output 증가율' claim이 같은 기반 수치를 쓸 수 있도록.
+        [수정 v6.22] 매칭 규칙을 엄격하게 — 잘못된 캐시 재사용 방지.
+        [BEFORE 버그] indicator 포함관계('A' in 'A 증가율')만으로 매칭 →
+          '출생아 수 증가율'(%) claim이 '출생아 수'(명) 230028을 재사용.
+        [AFTER 수정]
+          1) indicator + time_period 정확 일치 (+ unit 호환)
+          2) base indicator(파생 접미사 제거) 일치 + unit 호환
+        '증가율'·'차이' 같은 파생 지표는 원지표와 unit이 다르므로
+        unit_hint 가드가 자동으로 걸러낸다.
+
+        unit_hint가 주어지면, 저장된 fact의 unit과 호환되지 않는 항목은
+        매칭에서 제외 (% ↔ 명 혼동 차단).
         """
         ind = str(indicator or "").strip()
         tp = str(time_period or "").strip()
         if not ind or not tp:
             return None
         facts = self.read_verified_facts()
-        # 1차: 정확 일치
+
+        def _unit_ok(fact_unit: str) -> bool:
+            """unit_hint와 fact의 unit이 호환되는지. hint 없으면 통과."""
+            if not unit_hint:
+                return True
+            fu = _norm_unit(fact_unit)
+            hu = _norm_unit(unit_hint)
+            if not fu or not hu:
+                return True  # 한쪽이라도 비었으면 판별 불가 → 통과
+            return fu == hu
+
+        # 1차: indicator + time_period 정확 일치 (+ unit 호환)
         for f in facts:
             if (str(f.get("indicator", "") or "").strip() == ind
                     and str(f.get("time_period", "") or "").strip() == tp):
-                return f
-        # 2차: indicator 포함관계 + time_period 정확 일치
+                if _unit_ok(str(f.get("unit", "") or "")):
+                    return f
+                logger.info(
+                    f"[workspace] verified_fact unit 불일치로 캐시 거부: "
+                    f"{ind} {tp} (요청 unit={unit_hint}, "
+                    f"저장 unit={f.get('unit')})"
+                )
+                return None
+
+        # 2차: base indicator(파생 접미사 제거) 일치 + unit 호환
+        # '증가율'/'차이' 지표는 base가 같아도 unit이 다르므로 _unit_ok가
+        # 걸러준다. 즉 안전한 경우(같은 단위·동일 base 지표)만 재사용.
+        ind_base = _strip_derived_suffix(ind)
         for f in facts:
+            if str(f.get("time_period", "") or "").strip() != tp:
+                continue
             f_ind = str(f.get("indicator", "") or "").strip()
-            if (str(f.get("time_period", "") or "").strip() == tp
-                    and f_ind and (f_ind in ind or ind in f_ind)):
-                return f
+            f_base = _strip_derived_suffix(f_ind)
+            if ind_base and f_base and ind_base == f_base:
+                if _unit_ok(str(f.get("unit", "") or "")):
+                    return f
         return None
 
     # ── Log (jsonl, append-only — 구조화) ────────────────────
