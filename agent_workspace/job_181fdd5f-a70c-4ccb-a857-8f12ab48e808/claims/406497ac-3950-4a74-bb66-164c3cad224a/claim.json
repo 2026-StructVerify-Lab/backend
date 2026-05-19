@@ -1,0 +1,33 @@
+{
+  "claim_id": "406497ac-3950-4a74-bb66-164c3cad224a",
+  "doc_id": "181fdd5f-a70c-4ccb-a857-8f12ab48e808",
+  "block_id": "b0002",
+  "sent_id": "b0002_s0003",
+  "claim_text": "올 4월 혼인 건수는 1만 8921건으로 전년보다 4.9% 증가했다.",
+  "claim_type": "statistic",
+  "canonical_type": null,
+  "schema": {
+    "indicator": "혼인 건수 증가율",
+    "time_period": "2025-04",
+    "unit": "%",
+    "population": "전체",
+    "value": 4.9,
+    "comparison_type": null,
+    "source_reference": null,
+    "graph_schema_candidates": [],
+    "parent_path": "인구 > 결혼 > 혼인 건수",
+    "is_approximate": false,
+    "modifier": null,
+    "prev_value": null,
+    "prev_time_period": "2024-04",
+    "prev_phrase": null
+  },
+  "source_offset": {
+    "page": null,
+    "char_start": 237,
+    "char_end": 275
+  },
+  "check_worthy_score": 0.8,
+  "graph_anchor_id": "node:b0002_s0003",
+  "context_text": "이는 1991년 4월(8.7%) 이후 34년 만에 가장 높은 증가율이다. 올 4월 합계출산율도 0.79명으로 지난해 같은 달보다 0.06명 증가했다. 올 4월 혼인 건수는 1만 8921건으로 전년보다 4.9% 증가했다."
+}

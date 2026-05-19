@@ -147,9 +147,18 @@ CLAIM_SCHEMA_JSON_SCHEMA: dict[str, Any] = {
         "prev_time_period": {
             "type": "string",
             "description": (
-                "prev_value의 시점. 형식: 'YYYY' 또는 'YYYY-MM'. "
-                "예: 현재가 2025-04이고 '지난해 같은 달'이면 '2024-04'. "
-                "추론 가능하면 채우고, 불명확하면 빈 문자열."
+                "★ 비교 기준 시점. 형식: 'YYYY' 또는 'YYYY-MM'. "
+                "★★ 중요: prev_value가 문장에 없어도(null이어도) "
+                "비교 시점 표현만 있으면 *반드시* 채우세요. "
+                "증가율/변화량 schema는 '무엇과 비교했는지'가 핵심이므로 "
+                "시점은 본문 표현을 보고 계산: "
+                "  현재 2023 + '1년 전/전년/지난해' → '2022'  "
+                "  현재 2023 + '5년 전/5년 새'      → '2018'  "
+                "  현재 2025-04 + '지난해 같은 달'  → '2024-04'  "
+                "  현재 2024 + '2019년 대비'        → '2019'. "
+                "즉 prev_value=null이어도 prev_time_period는 채웁니다 "
+                "(나중에 통계 DB에서 그 시점 값을 직접 조회해 검증함). "
+                "비교 시점 표현이 전혀 없으면만 빈 문자열."
             ),
         },
         "prev_phrase": {
@@ -272,6 +281,47 @@ SCHEMA_INDUCTION_PROMPT = """당신은 뉴스 수치 주장에서 공식 통계 
   ]
   ★ "차이 0.04" schema의 prev_value=0.72 (계산: 0.76 - 0.04). prev_phrase는 *문장에 직접 없으면* 빈 문자열.
 
+[예시 — ★ 증가율인데 비교값이 본문에 없음 (시점만 계산)]
+검증 대상 문장: "2023년 출생아 수는 23만 명으로 1년 전보다 7.7% 줄었다"
+결과:
+  schemas: [
+    {{indicator: "출생아 수", value: 230000, unit: "명", time_period: "2023",
+      source_phrase: "23만 명",
+      parent_path: "인구 > 출생 > 출생아 수"}},
+    {{indicator: "출생아 수 증가율", value: 7.7, unit: "%", time_period: "2023",
+      source_phrase: "7.7%",
+      prev_value: null, prev_time_period: "2022", prev_phrase: "",
+      parent_path: "인구 > 출생 > 출생아 수"}}
+  ]
+  ★★ 핵심: "1년 전 출생아 수"가 본문에 숫자로 안 적혀 있음
+     → prev_value=null (본문에 없으니까)
+     → 하지만 prev_time_period="2022"는 *반드시 채움*
+        ("2023년" + "1년 전" → 2022 로 계산).
+     → 검증 단계에서 통계 DB의 2022년 출생아 수를 조회해
+        (현재값 - 2022년값) 으로 7.7% 를 직접 계산·검증함.
+
+[예시 — ★ 한 문장에 지역별 수치 나열 (같은 지표, 지역만 다름)]
+검증 대상 문장: "동작구가 10.6%로 가장 높았다. 이어 성동구(8.9%), 마포구(8.7%), 영등포구(7.9%)"
+결과:
+  schemas: [
+    {{indicator: "표준주택 공시가격 변동률", value: 10.6, unit: "%", time_period: "2020",
+      population: "동작구", source_phrase: "10.6%",
+      parent_path: "주택 > 공시가격 > 변동률"}},
+    {{indicator: "표준주택 공시가격 변동률", value: 8.9, unit: "%", time_period: "2020",
+      population: "성동구", source_phrase: "8.9%",
+      parent_path: "주택 > 공시가격 > 변동률"}},
+    {{indicator: "표준주택 공시가격 변동률", value: 8.7, unit: "%", time_period: "2020",
+      population: "마포구", source_phrase: "8.7%",
+      parent_path: "주택 > 공시가격 > 변동률"}},
+    {{indicator: "표준주택 공시가격 변동률", value: 7.9, unit: "%", time_period: "2020",
+      population: "영등포구", source_phrase: "7.9%",
+      parent_path: "주택 > 공시가격 > 변동률"}}
+  ]
+  ★★ 핵심: "동작구(10.6%)", "성동구(8.9%)" 처럼 *지역+수치 쌍이 여러 개*면
+     각 쌍을 *반드시 개별 schema*로. 절대 "자치구별 상승률" 하나로 뭉뚱그리지 마세요.
+  ★★ 지역명은 population에, 수치는 value에 각각 채웁니다. value를 null로 두지 마세요.
+  ★★ indicator는 모든 schema가 동일 (지표는 같고 지역만 다르므로).
+
 [핵심 규칙]
 
 1. **단위 통일**: 한글 단위는 정확하게 숫자로 변환. *'만'은 10,000*.
@@ -288,6 +338,10 @@ SCHEMA_INDUCTION_PROMPT = """당신은 뉴스 수치 주장에서 공식 통계 
 2. **★ 한 문장에 여러 수치**: 각각 별도 schema. *놓치지 마세요*.
    · "X명으로 Y% 늘었다" → 2개 schema (절대값 + 비율)
    · "X로 Z 증가" → 2개 schema (현재값 + 변화량)
+   · **★ 지역(항목)별 나열** "A구(10.6%), B구(8.9%), C구(8.7%)"
+     → 각 지역마다 별도 schema. indicator는 동일, population=지역명,
+        value=각 수치. 절대 하나로 합치거나 value=null로 두지 마세요.
+   · 이 규칙은 지역뿐 아니라 연령대·업종·품목 등 *모든 분류 축*에 적용.
 
 3. **★ value/unit/source_phrase 일관성**:
    · source_phrase가 "X%" → unit="%", value는 비율
@@ -348,10 +402,13 @@ async def induce_schemas(
 
         context = getattr(claim, "context_text", None) or claim.claim_text
         temporal_hint = _build_temporal_hint(graph, claim) if graph else ""
+        # [v6.16] 시점 표현이 전혀 없는 claim의 fallback 기준 연도
+        anchor_year = graph.get_anchor_year() if graph else None
 
         schemas = await _induce_multiple(
             llm, claim.claim_text, domain, domain_hint,
             context=context, temporal_hint=temporal_hint,
+            anchor_year=anchor_year,
         )
 
         if not schemas:
@@ -363,6 +420,30 @@ async def induce_schemas(
             )
             continue
 
+        # [v6.17] value=null 중복 schema 제거
+        #   LLM이 value를 못 채우고 indicator만 같은 빈 schema를 N개 만드는
+        #   경우만 정리. 단, population까지 같아야 진짜 중복으로 간주.
+        #   ★ "동작구 10.6%, 성동구 8.9%"처럼 지역만 다른 정상 다중 수치는
+        #     population이 다르므로 합쳐지지 않음 (이전엔 다 뭉개지던 버그).
+        deduped: list[ClaimSchema] = []
+        seen_null_keys: set[tuple] = set()
+        for sch in schemas:
+            if sch.value is None:
+                key = (
+                    sch.indicator or "",
+                    sch.time_period or "",
+                    sch.population or "",   # ★ population 추가 — 지역별 구분
+                )
+                if key in seen_null_keys:
+                    logger.info(
+                        f"  [중복 제거] value=null 중복 schema 폐기 "
+                        f"(indicator={sch.indicator}, population={sch.population})"
+                    )
+                    continue
+                seen_null_keys.add(key)
+            deduped.append(sch)
+        schemas = deduped
+
         # 첫 schema는 원래 claim에 부착
         claim.schema = schemas[0]
         expanded.append(claim)
@@ -370,7 +451,8 @@ async def induce_schemas(
         logger.info(
             f"스키마 유도: {claim.sent_id} [1/{len(schemas)}] "
             f"indicator={schemas[0].indicator}, value={schemas[0].value}, "
-            f"unit={schemas[0].unit}, parent_path={schemas[0].parent_path}"
+            f"unit={schemas[0].unit}, time_period={schemas[0].time_period}, "
+            f"parent_path={schemas[0].parent_path}"
         )
 
         # 추가 schema들은 claim 복제 후 부착 (claim_id 새로 발급)
@@ -384,7 +466,8 @@ async def induce_schemas(
             logger.info(
                 f"스키마 유도: {claim.sent_id} [{i}/{len(schemas)}] (복제) "
                 f"indicator={sch.indicator}, value={sch.value}, "
-                f"unit={sch.unit}, parent_path={sch.parent_path}"
+                f"unit={sch.unit}, time_period={sch.time_period}, "
+                f"parent_path={sch.parent_path}"
             )
 
     logger.info(
@@ -394,12 +477,81 @@ async def induce_schemas(
     return expanded
 
 
+# [v6.20] claim 문장 텍스트에서 직접 셀 상대/절대 시점 표현 패턴.
+# document_graph의 LLM temporal agent가 한 문장의 표현을 일부 누락하면
+# (예: "작년...재작년..."에서 "작년"을 빠뜨림) count_temporal_expressions가
+# 1을 반환 → multi_temporal=False → 잘못된 단정 hint. 그래서 그래프와
+# 별개로 claim_text를 정규식으로 스캔해 보수적으로 multi 여부를 판정한다.
+_TEMPORAL_TEXT_PATTERNS = (
+    "재작년", "지지난해", "지지난 해",
+    "작년", "지난해", "지난 해", "전년",
+    "올해", "금년", "이번 해",
+    "내년", "이듬해", "다음 해",
+    "내후년",
+)
+
+
+def _count_temporal_in_text(text: str) -> int:
+    """claim 문장 텍스트에서 상대 시점 표현의 개수를 센다.
+
+    "작년 X도, 재작년 Y도" → 2 (작년 1 + 재작년 1).
+    겹치는 패턴 중복 카운트를 막기 위해, 긴 패턴부터 매칭하며
+    매칭된 구간을 소거한다 ('재작년'을 먼저 잡아야 '작년'이
+    그 안에서 다시 안 잡힌다).
+    """
+    if not text:
+        return 0
+    s = str(text)
+    count = 0
+    # 긴 패턴 우선 (재작년 → 작년 순서 보장)
+    for pat in sorted(_TEMPORAL_TEXT_PATTERNS, key=len, reverse=True):
+        while pat in s:
+            count += 1
+            s = s.replace(pat, "\x00" * len(pat), 1)  # 매칭 구간 소거
+    return count
+
+
 def _build_temporal_hint(graph: "ClaimGraph", claim: Claim) -> str:
-    """그래프 시점 해소 결과를 prompt hint 텍스트로."""
+    """
+    그래프 시점 해소 결과를 prompt hint 텍스트로.
+
+    [v6.15] 상대 시점 표현 매핑 강화:
+      anchor_year 기준으로 '내년/올해/작년/지난해/재작년'을 모두 절대 연도로
+      변환하는 표를 LLM에게 명시 → time_period=null 방지.
+    """
     prov = graph.temporal_provenance(claim)
     anchor_year = graph.get_anchor_year()
 
-    if prov and prov.get("resolved"):
+    # [v6.19] 한 문장에 시간표현이 여러 개면 (예: "작년 X도, 재작년 Y도")
+    # temporal_provenance가 어느 표현이 이 claim의 것인지 구분 못 하고
+    # 첫 번째를 무조건 반환한다 → 단정적 hint가 틀릴 수 있음.
+    # 이 경우 단정하지 말고 anchor 변환표만 줘서 LLM이 claim 문맥으로
+    # 직접 시점을 고르게 한다.
+    _te_count = graph.count_temporal_expressions(claim)
+    # [v6.20] 그래프 카운트와 별개로 claim 문장 텍스트도 직접 스캔.
+    # temporal agent가 표현을 누락해도(그래프 te_count=1) 텍스트에
+    # 상대표현이 2개 이상이면 multi로 판정 → 잘못된 단정 hint 방지.
+    _text_te_count = _count_temporal_in_text(
+        getattr(claim, "claim_text", "") or ""
+    )
+    multi_temporal = (_te_count > 1) or (_text_te_count > 1)
+
+    # [v6.19 진단] multi_temporal 판정과 분기 결정을 로그로 — 어느 경로를
+    # 탔는지 안 보여서 temporal 수정이 먹혔는지 확인이 안 됨.
+    _branch = (
+        "단정(prov)" if (prov and prov.get("resolved") and not multi_temporal)
+        else ("변환표(anchor)" if anchor_year is not None else "없음")
+    )
+    logger.info(
+        f"[temporal_hint] {getattr(claim, 'sent_id', '?')}: "
+        f"te_count={_te_count} text_te={_text_te_count} "
+        f"multi_temporal={multi_temporal} "
+        f"prov_resolved={(prov or {}).get('resolved')} "
+        f"prov_expr={(prov or {}).get('expression')!r} "
+        f"anchor={anchor_year} → branch={_branch}"
+    )
+
+    if prov and prov.get("resolved") and not multi_temporal:
         return (
             f"\n[시점 정보 — 그래프 해소 결과]\n"
             f"- 원문 표현: {prov.get('expression')}\n"
@@ -408,12 +560,30 @@ def _build_temporal_hint(graph: "ClaimGraph", claim: Claim) -> str:
             f"위 절대 시점을 time_period로 사용하세요."
         )
     elif anchor_year is not None:
+        # [v6.15] 상대 표현 → 절대 연도 변환표를 명시적으로 제공
+        multi_note = ""
+        if multi_temporal:
+            # [v6.19] 한 문장에 시간표현이 여러 개 — 수치별로 구분 지시
+            multi_note = (
+                f"- ⚠️ 이 문장에는 시점 표현이 *둘 이상* 있습니다 "
+                f"(예: '작년 X도, 재작년 Y도').\n"
+                f"  각 수치 바로 앞/근처의 시점 표현을 보고 schema마다 "
+                f"time_period를 *개별적으로* 정확히 매칭하세요.\n"
+                f"  모든 수치에 같은 시점을 쓰지 마세요.\n"
+            )
         return (
             f"\n[시점 정보 — 문서 anchor]\n"
             f"- 이 문서의 기준 연도(anchor_year): {anchor_year}\n"
-            f"- 본문에 '작년/지난해/재작년/올해' 같은 상대 표현이 있으면\n"
-            f"  anchor_year를 기준으로 절대 연도(예: {anchor_year-1}, {anchor_year-2})로 풀어\n"
-            f"  time_period에 절대값으로 적으세요."
+            f"{multi_note}"
+            f"- 상대 시점 표현은 *반드시* 아래 표대로 절대 연도로 변환하세요:\n"
+            f"    '내후년'        → {anchor_year + 2}\n"
+            f"    '내년/이듬해'   → {anchor_year + 1}\n"
+            f"    '올해/금년/현재' → {anchor_year}\n"
+            f"    '작년/지난해'   → {anchor_year - 1}\n"
+            f"    '재작년'        → {anchor_year - 2}\n"
+            f"- ★ 검증 대상 문장에 위 상대 표현이 하나라도 있으면\n"
+            f"  time_period를 절대 연도(예: '{anchor_year + 1}')로 *반드시* 채우세요.\n"
+            f"- ★ time_period를 null로 두지 마세요. 시점 단서가 전혀 없을 때만 null."
         )
     return ""
 
@@ -425,6 +595,7 @@ async def _induce_multiple(
     domain_hint: str = "",
     context: str = "",
     temporal_hint: str = "",
+    anchor_year: int | None = None,
 ) -> list[ClaimSchema]:
     """
     단일 주장 → list[ClaimSchema] (0개 이상).
@@ -513,14 +684,19 @@ async def _induce_multiple(
             prev_phrase = (item.get("prev_phrase") or "").strip()
 
             # prev_phrase가 있으면 검증 (context leak 방지 — source_phrase와 동일 규칙)
+            # [v6.17] prev_value/prev_phrase만 폐기하고 prev_time_period는 유지.
+            #   시점은 본문 표현("1년 전")에서 계산한 것이라 leak이 아니며,
+            #   prev_value가 없어도 시점만 있으면 통계 DB에서 그 시점 값을
+            #   직접 조회해 검증할 수 있음.
             if prev_phrase and not _source_phrase_in_claim(prev_phrase, claim_text):
                 logger.warning(
                     f"  ⚠️ prev_phrase context leak: {prev_phrase!r} 가 검증 대상 문장에 없음 "
-                    f"→ prev_value 폐기 (indicator={item.get('indicator')})"
+                    f"→ prev_value만 폐기 (prev_time_period={prev_time_period!r}는 유지, "
+                    f"indicator={item.get('indicator')})"
                 )
                 prev_value = None
-                prev_time_period = None
                 prev_phrase = None
+                # prev_time_period는 일부러 유지 — 검증 단계에서 사용
 
             # prev_phrase가 있으면 prev_value 환산 정확성도 검증 (E fix 응용)
             if prev_phrase and prev_value is not None:
@@ -534,9 +710,20 @@ async def _induce_multiple(
                     )
                 prev_value = corrected_prev
 
+            # [v6.16] time_period가 비어있으면 문서 anchor_year로 채움
+            #   "전국 공시가격 상승률 4.5%" 처럼 시점 표현이 없는 문장도
+            #   기사 작성연도(anchor_year) 기준으로 검증되도록 보정.
+            _tp = item.get("time_period") or None
+            if not _tp and anchor_year is not None:
+                _tp = str(anchor_year)
+                logger.info(
+                    f"  [시점 보정] time_period 없음 → anchor_year={anchor_year} 적용 "
+                    f"(indicator={item.get('indicator')})"
+                )
+
             schema_kwargs = dict(
                 indicator=item.get("indicator") or None,
-                time_period=item.get("time_period") or None,
+                time_period=_tp,
                 unit=item.get("unit") or None,
                 population=item.get("population") or None,
                 value=corrected_value,
@@ -568,6 +755,78 @@ async def _induce_multiple(
 
         if _validate_schema(schema):
             results.append(schema)
+
+    # ── [v6.15 L fix] 차이 schema의 prev_value 자동 역산 ─────────────────
+    # 같은 sentence에서 *절대값 schema*와 *차이 schema*가 함께 나왔을 때,
+    # 차이 schema의 prev_value가 *비어있으면* → 절대값 − 차이값으로 역산.
+    #
+    # 예: "합계출산율 0.79명으로 지난해보다 0.06명 증가"
+    #   - 절대값 schema: 합계출산율=0.79
+    #   - 차이 schema: 합계출산율 차이=0.06, prev_value=None
+    #   → 자동 역산: prev_value = 0.79 - 0.06 = 0.73
+    #
+    # 효과: verifier C2 분기가 작동 → KOSIS 절대값 row와 자동 계산 비교.
+    try:
+        _has_prev_field = "prev_value" in ClaimSchema.model_fields
+    except Exception:
+        _has_prev_field = False
+
+    if _has_prev_field and len(results) >= 2:
+        # 절대값 schema (indicator에 "차이/증감/변화량" 없음) 찾기
+        abs_schemas = [
+            s for s in results
+            if s.indicator and not any(
+                kw in s.indicator for kw in ("차이", "증감", "변화량", "증가율")
+            ) and s.value is not None
+        ]
+        diff_schemas = [
+            s for s in results
+            if s.indicator and ("차이" in s.indicator or "증감" in s.indicator
+                                or "변화량" in s.indicator)
+            and s.value is not None
+            and getattr(s, "prev_value", None) is None
+        ]
+
+        for diff_s in diff_schemas:
+            # 같은 indicator base 찾기 (예: "합계출산율 차이" → "합계출산율")
+            diff_base = diff_s.indicator
+            for kw in ("차이", "증감", "변화량"):
+                diff_base = diff_base.replace(kw, "").strip()
+
+            # 매칭되는 절대값 schema
+            matching_abs = None
+            for abs_s in abs_schemas:
+                if abs_s.indicator and (abs_s.indicator == diff_base
+                                        or diff_base in abs_s.indicator
+                                        or abs_s.indicator in diff_base):
+                    # 단위도 비슷한지 (둘 다 비어있거나 둘 다 있고 같은 type)
+                    if (not abs_s.unit and not diff_s.unit) or \
+                       (abs_s.unit and diff_s.unit and abs_s.unit == diff_s.unit):
+                        matching_abs = abs_s
+                        break
+
+            if matching_abs:
+                # 역산: prev = current - diff
+                derived_prev = matching_abs.value - diff_s.value
+                # diff_s에 prev_value 채워넣기 (model_copy)
+                try:
+                    updated = diff_s.model_copy(update={
+                        "prev_value": derived_prev,
+                        "prev_time_period": matching_abs.time_period,  # 같은 시점 가정 (직전 시점은 비교 기준)
+                        "prev_phrase": None,  # 역산이라 원문 phrase 없음
+                    })
+                    # results 안에서 교체
+                    for i, s in enumerate(results):
+                        if s is diff_s:
+                            results[i] = updated
+                            break
+                    logger.info(
+                        f"  ✨ prev_value 역산 (L fix): {diff_s.indicator}={diff_s.value} "
+                        f"← {matching_abs.indicator}={matching_abs.value} - {diff_s.value} "
+                        f"= {derived_prev:.4f}"
+                    )
+                except Exception as e:
+                    logger.debug(f"prev_value 역산 실패: {e}")
 
     return results
 
@@ -615,7 +874,11 @@ def _source_phrase_in_claim(phrase: str, claim_text: str) -> bool:
     """
     LLM이 제공한 source_phrase가 claim_text에 등장하는지 검증.
 
-    엄격 비교 (substring) + 공백 무관 비교 둘 다 시도.
+    [v6.15] 3단계 비교:
+      1) 직접 substring
+      2) 공백 제거 후 비교
+      3) 숫자 기준 비교 — source_phrase의 모든 숫자가 claim_text에 있으면 통과
+         ("6.8%" vs "6.8%↑" 처럼 기호 차이로 1·2단계가 실패하는 경우 대응)
     """
     if not phrase or not claim_text:
         return False
@@ -627,6 +890,13 @@ def _source_phrase_in_claim(phrase: str, claim_text: str) -> bool:
     claim_no_space = re.sub(r"\s+", "", claim_text)
     if phrase_no_space in claim_no_space:
         return True
+    # 3) [v6.15] 숫자 기준 비교 — 기호(↑↓%、 등) 차이 흡수
+    #    source_phrase의 숫자들이 모두 claim_text 안에 있으면 leak 아님
+    phrase_nums = re.findall(r"\d+\.?\d*", phrase)
+    if phrase_nums:
+        claim_nums = set(re.findall(r"\d+\.?\d*", claim_text))
+        if all(n in claim_nums for n in phrase_nums):
+            return True
     return False
 
 

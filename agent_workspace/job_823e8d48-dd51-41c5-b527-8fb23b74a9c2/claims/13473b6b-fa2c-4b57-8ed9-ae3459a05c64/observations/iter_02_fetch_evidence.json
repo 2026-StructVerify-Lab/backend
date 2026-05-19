@@ -1,0 +1,36 @@
+{
+  "iter_num": 2,
+  "action": "fetch_evidence",
+  "input": {
+    "candidate_id": "DT_1B8000K",
+    "params": {},
+    "_candidate_fallbacks": [
+      "DT_1B83A11",
+      "DT_1B83A24",
+      "DT_1B8000H",
+      "DT_1B8000F"
+    ]
+  },
+  "output": {
+    "source": "kosis",
+    "candidate_id": "DT_1B8000K",
+    "params": {
+      "indicator": "혼인 건수",
+      "time_period": "2025-04",
+      "population": "전체",
+      "unit_hint": "건",
+      "_range_start": "2024-04",
+      "_range_end": "2025-04"
+    },
+    "evidence": null,
+    "tried_candidates": [
+      "DT_1B8000K",
+      "DT_1B83A11",
+      "DT_1B83A24",
+      "DT_1B8000H"
+    ]
+  },
+  "summary": "fetch(kosis): 후보 4개 모두 실패 (관련 표 없음)",
+  "success": false,
+  "error": "모든 catalog 후보가 관련성 체크 실패 또는 데이터 없음."
+}

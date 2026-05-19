@@ -1,0 +1,22 @@
+{
+  "claim_id": "30dadd92-552b-4079-8f60-addcc95cb806",
+  "verdict": "match",
+  "confidence": 0.85,
+  "explanation": "주장값 2.3e+05명과 KOSIS(DT_1B8000G) 월.분기.연간 인구동향(출생사망혼인이혼) 조회값 2.3e+05명 건이 일치 (오차 0.01%, 시점 주장=2023, 조회=2023).",
+  "data_points": [
+    {
+      "indicator": "출생아 수",
+      "time": "2023",
+      "population": "전체",
+      "unit_hint": "명 건",
+      "resolved_value": 230028.0,
+      "resolved_unit": "명 건",
+      "source": "KOSIS:DT_1B8000G",
+      "source_time": "2023"
+    }
+  ],
+  "iterations_used": 3,
+  "total_tokens": 0,
+  "stop_reason": "completed",
+  "created_at": "2026-05-19T01:31:00.988714Z"
+}

@@ -41,7 +41,7 @@ def init_engine() -> AsyncEngine:
 
     _engine = create_async_engine(
         settings.postgres_dsn,
-        echo=settings.debug,        # SQL 로그 (dev only)
+        echo=False,       # SQL 로그 (dev only)
         pool_size=10,
         max_overflow=20,
         pool_pre_ping=True,         # 죽은 connection 자동 감지

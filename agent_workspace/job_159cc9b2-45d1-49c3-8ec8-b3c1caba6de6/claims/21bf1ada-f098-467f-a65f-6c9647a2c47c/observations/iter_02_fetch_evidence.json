@@ -1,0 +1,32 @@
+{
+  "iter_num": 2,
+  "action": "fetch_evidence",
+  "input": {
+    "url": "https://www.weather.go.kr/w/obs-climate/land/past-obs/obs-by-day.do?stn=109&yy=2023&mm=12&obsType=daily&x=31&y=9",
+    "candidate_id": "DT_14104_N_001",
+    "_candidate_fallbacks": [
+      "DT_14104_N_002",
+      "DT_14106",
+      "DT_141007N_001",
+      "DT_14105_N_001"
+    ]
+  },
+  "output": {
+    "source": "kosis",
+    "candidate_id": "DT_14106",
+    "params": {},
+    "evidence": {
+      "value": null,
+      "unit": "",
+      "time_period": "",
+      "source": "kosis",
+      "stat_table_id": "DT_14106",
+      "stat_name": "DT_14106",
+      "rows": [],
+      "raw": "StatData(stat_id='DT_14106', stat_name='DT_14106', values={}, raw_response={'error': 'fetch_failed'}, official_value=None, unit=None, time_period=None)"
+    }
+  },
+  "summary": "fetch(kosis, DT_14106): value=None unit='' time=''",
+  "success": true,
+  "error": null
+}

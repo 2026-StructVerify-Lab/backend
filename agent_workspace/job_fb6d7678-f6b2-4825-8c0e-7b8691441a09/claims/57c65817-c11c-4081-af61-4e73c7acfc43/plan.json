@@ -1,0 +1,59 @@
+{
+  "claim_id": "57c65817-c11c-4081-af61-4e73c7acfc43",
+  "claim_type": "growth_rate",
+  "required_data": [
+    {
+      "indicator": "출생아 수",
+      "time": "2025-04",
+      "population": "전체",
+      "unit_hint": "명",
+      "resolved_value": null,
+      "resolved_unit": null,
+      "source": null,
+      "source_time": null
+    },
+    {
+      "indicator": "출생아 수",
+      "time": "2024-04",
+      "population": "전체",
+      "unit_hint": "명",
+      "resolved_value": null,
+      "resolved_unit": null,
+      "source": null,
+      "source_time": null
+    }
+  ],
+  "initial_steps": [
+    {
+      "action": "catalog_search",
+      "input": {
+        "query": "출생아 수 인구동향",
+        "category": [
+          "인구",
+          "출생"
+        ],
+        "top_k": 5
+      },
+      "rationale": "KOSIS에서 월별 출생아 수 표 찾기"
+    },
+    {
+      "action": "fetch_evidence",
+      "input": {
+        "candidate_id": "<catalog_search 결과의 top id>",
+        "params": {}
+      },
+      "rationale": "표의 데이터 중 2025-04 와 2024-04 행 가져오기"
+    }
+  ],
+  "fallback": {
+    "use_original_text": false,
+    "alternative_keywords": [
+      "월별 인구동향",
+      "출생사망혼인이혼"
+    ],
+    "give_up_after_attempts": 5
+  },
+  "calculation_formula": "(current - prev) / prev * 100",
+  "notes": null,
+  "created_at": "2026-05-19T01:43:50.315266Z"
+}

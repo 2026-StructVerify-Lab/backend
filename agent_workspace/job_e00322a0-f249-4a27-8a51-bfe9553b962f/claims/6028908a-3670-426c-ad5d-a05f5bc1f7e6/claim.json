@@ -1,0 +1,33 @@
+{
+  "claim_id": "6028908a-3670-426c-ad5d-a05f5bc1f7e6",
+  "doc_id": "e00322a0-f249-4a27-8a51-bfe9553b962f",
+  "block_id": "b0001",
+  "sent_id": "b0001_s0004",
+  "claim_text": "작년 평균기온은 평년(1991∼2020년 평균) 연평균 기온(12.5±0.2도)을 2도나 웃돌았다.",
+  "claim_type": "온도",
+  "canonical_type": null,
+  "schema": {
+    "indicator": "연평균 기온",
+    "time_period": "2024",
+    "unit": "도",
+    "population": "전체",
+    "value": 12.5,
+    "comparison_type": null,
+    "source_reference": null,
+    "graph_schema_candidates": [],
+    "parent_path": "환경 > 기후 > 연평균 기온",
+    "is_approximate": true,
+    "modifier": "±0.2",
+    "prev_value": null,
+    "prev_time_period": null,
+    "prev_phrase": null
+  },
+  "source_offset": {
+    "page": null,
+    "char_start": 291,
+    "char_end": 346
+  },
+  "check_worthy_score": 0.8,
+  "graph_anchor_id": "node:b0001_s0004",
+  "context_text": "1973년은 기상관측망이 대폭 확충돼 각종 기상기록 기준점이 되는 해다. 한 해 평균기온이 14도를 넘기는 작년이 처음이다. 작년 평균기온은 평년(1991∼2020년 평균) 연평균 기온(12.5±0.2도)을 2도나 웃돌았다."
+}

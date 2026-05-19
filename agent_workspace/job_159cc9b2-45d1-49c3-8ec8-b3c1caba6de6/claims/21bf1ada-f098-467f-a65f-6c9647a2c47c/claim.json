@@ -1,0 +1,18 @@
+{
+  "claim_id": "21bf1ada-f098-467f-a65f-6c9647a2c47c",
+  "doc_id": "159cc9b2-45d1-49c3-8ec8-b3c1caba6de6",
+  "block_id": "b0000",
+  "sent_id": "b0000_s0000",
+  "claim_text": "# 작년 연평균기온 14.5도…사상 처음 14도 돌파 또 신기록\n작성일자 2025-01-01 11:34",
+  "claim_type": "record",
+  "canonical_type": null,
+  "schema": null,
+  "source_offset": {
+    "page": null,
+    "char_start": 0,
+    "char_end": 57
+  },
+  "check_worthy_score": 0.8,
+  "graph_anchor_id": "node:b0000_s0000",
+  "context_text": "# 작년 연평균기온 14.5도…사상 처음 14도 돌파 또 신기록\n작성일자 2025-01-01 11:34"
+}

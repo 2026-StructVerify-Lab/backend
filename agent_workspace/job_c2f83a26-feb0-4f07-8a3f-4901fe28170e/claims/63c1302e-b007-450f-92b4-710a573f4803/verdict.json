@@ -1,0 +1,11 @@
+{
+  "claim_id": "63c1302e-b007-450f-92b4-710a573f4803",
+  "verdict": "unverifiable",
+  "confidence": 0.3,
+  "explanation": "growth_rate 유형은 두 시점 비교 필요. KOSIS(DT_1B8000K) 현재값 None (시점 ) 확보. 이전 시점 데이터 부재로 검증 불가.",
+  "data_points": [],
+  "iterations_used": 3,
+  "total_tokens": 0,
+  "stop_reason": "completed",
+  "created_at": "2026-05-18T08:40:00.259386Z"
+}

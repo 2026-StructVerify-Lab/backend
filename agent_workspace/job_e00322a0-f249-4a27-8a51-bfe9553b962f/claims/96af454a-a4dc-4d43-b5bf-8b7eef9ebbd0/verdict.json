@@ -1,0 +1,11 @@
+{
+  "claim_id": "96af454a-a4dc-4d43-b5bf-8b7eef9ebbd0",
+  "verdict": "unverifiable",
+  "confidence": 0.3,
+  "explanation": "비교 불가: 주장값=None, KOSIS(DT_14106) 조회값=None.",
+  "data_points": [],
+  "iterations_used": 3,
+  "total_tokens": 0,
+  "stop_reason": "completed",
+  "created_at": "2026-05-18T08:20:09.783135Z"
+}

@@ -1,0 +1,15 @@
+{
+  "source": "kosis",
+  "candidate_id": "DT_1B8000K",
+  "params": {},
+  "evidence": {
+    "value": null,
+    "unit": "",
+    "time_period": "",
+    "source": "kosis",
+    "stat_table_id": "DT_1B8000K",
+    "stat_name": "DT_1B8000K",
+    "rows": [],
+    "raw": "StatData(stat_id='DT_1B8000K', stat_name='DT_1B8000K', values={}, raw_response={'error': 'fetch_failed'}, official_value=None, unit=None, time_period=None)"
+  }
+}

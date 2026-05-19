@@ -1,0 +1,22 @@
+{
+  "claim_id": "ca6f53b8-fe55-4ca0-bd64-1b9bda0db813",
+  "verdict": "mismatch",
+  "confidence": 0.7,
+  "explanation": "주장값 14.5도과 KOSIS(DT_1YL9801) 기온(시도) 조회값 13.7℃이 5.5% 차이 (시점 2023).",
+  "data_points": [
+    {
+      "indicator": "평균기온",
+      "time": "2023",
+      "population": "전체",
+      "unit_hint": "℃",
+      "resolved_value": 13.7,
+      "resolved_unit": "℃",
+      "source": "KOSIS:DT_1YL9801",
+      "source_time": "2023"
+    }
+  ],
+  "iterations_used": 3,
+  "total_tokens": 0,
+  "stop_reason": "completed",
+  "created_at": "2026-05-18T08:20:34.263741Z"
+}

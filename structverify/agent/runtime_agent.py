@@ -41,31 +41,18 @@ Thought → Action(Tool Call) → Observation 순환을 통해 파이프라인 �
     generate_explain  → HCX-003 (v1, 중량)
 
 [참고] ReAct (Yao et al., ICLR 2023) — https://github.com/ysymyth/ReAct
-
-
-# [박재윤 - 2026-05-12]
-# - Step 7~9 asyncio.gather + Semaphore(3)으로 병렬화 (직렬 → 병렬)
-
-# [DONE] Step 7~9 병렬화 (asyncio.gather + Semaphore 3)
-
-# [2026-05-14 | 이수민] memory/v1: DocumentWorkingMemory 통합
-#   - 파이프라인 시작 시 memory 생성 (doc 처리 동안만 유효, 종료 시 소멸)
-#   - Step 3: memory.record_domain()  — 도메인 + 설명 기록
-#   - Step 4.5: memory.record_anchor_year() + record_temporal()
-#   - Step 5: memory.record_claims() — claims + metric_to_claims 자동 인덱싱
-#   - Step 8: verify_claim()에 memory 전달 → 도메인 가드 활성화
-#            성공한 stat_id는 memory.record_stat_id_used()로 캐시
-#   - 종료 시 memory.stats() 로깅
 """
 from __future__ import annotations
 
 from structverify.core.schemas import (
-    Claim, SIRDocument, VerificationResult, GraphNode, GraphEdge,
+    Claim, SIRDocument, VerificationResult, GraphNode, GraphEdge, Evidence,
+    GraphNodeType, GraphEdgeType,
 )
 from structverify.detection.domain_classifier import classify_domain
 from structverify.detection.claim_detector import detect_claims
 from structverify.detection.schema_inductor import induce_schemas
 from structverify.graph.graph_builder import build_claim_graph
+from structverify.graph.graph_multihop import apply_multihop_verification
 from structverify.graph.document_graph import build_document_temporal_graph
 from structverify.graph.claim_graph import ClaimGraph
 from structverify.retrieval.query_builder import build_query
@@ -73,7 +60,7 @@ from structverify.retrieval.evidence_subgraph import build_evidence_subgraph
 from structverify.retrieval.kosis_connector import KOSISConnector
 from structverify.verification.verifier import verify_claim
 from structverify.explanation.explainer import generate_explanation
-from structverify.memory import DocumentWorkingMemory  # [이수민 2026-05-14]
+from structverify.memory import DocumentWorkingMemory  # [머지 이수민 main]
 from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -94,9 +81,12 @@ class RuntimeAgent:
         }
         self.kosis = KOSISConnector(config=kosis_cfg)
 
-        # TODO [김예슬]: Graph Store 초기화 (Neo4j 노드/엣지 실시간 저장용)
-        # from structverify.graph.graph_store import GraphStore
-        # self.graph_store = GraphStore(config=self.config.get("graph", {}))
+        # [v6.19] Graph Store 초기화 (Neo4j — 옵셔널)
+        #   default.yaml graph.store.enabled=true 일 때만 실제 연결.
+        #   미설정/미설치/연결실패 시 GraphStore 내부에서 안전하게 비활성화됨.
+        from structverify.graph.graph_store import GraphStore
+        graph_store_cfg = (self.config.get("graph") or {}).get("store") or {}
+        self.graph_store = GraphStore(config=graph_store_cfg)
 
     async def process(self, sir_doc: SIRDocument) -> tuple[
         list[Claim], list[VerificationResult], list[GraphNode], list[GraphEdge]
@@ -107,14 +97,18 @@ class RuntimeAgent:
         Returns:
             (claims, results, graph_nodes, graph_edges)
         """
-        # ── [이수민 2026-05-14] DocumentWorkingMemory 생성 ────────────
+
+        # ── [머지: main의 DocumentWorkingMemory] ──────────────────────
         # 이 doc 처리 동안만 살아있는 in-memory 컨텍스트.
-        # 각 step의 결과를 누적하여 verifier 도메인 가드 등에서 활용.
+        # v2의 verified_facts(검증값 캐시)와 역할이 다름:
+        #   - memory     : doc 단위 — 도메인 가드 / stat_id 캐시 / claim 인덱스
+        #   - verified_facts : claim 간 검증값 재사용 (agent loop 내부)
+        # 둘은 충돌하지 않으며 상호 보완적이다.
         from uuid import uuid4
         memory = DocumentWorkingMemory(
             doc_id=str(sir_doc.doc_id),
             run_id=str(uuid4())[:8],
-            source_uri=sir_doc.source_uri,
+            source_uri=getattr(sir_doc, "source_uri", None),
         )
 
         # ── Action: classify_domain ──────────────────────────────────
@@ -124,7 +118,7 @@ class RuntimeAgent:
         domain, domain_desc = await classify_domain(sir_doc, self.config)
         self.config["detected_domain"] = domain
         self.config["detected_domain_desc"] = domain_desc
-        memory.record_domain(domain, domain_desc)  # [이수민 2026-05-14]
+        memory.record_domain(domain, domain_desc)  # [머지 이수민 main]
         logger.info(f"[Agent A] Step 3 classify_domain → {domain} ({domain_desc})")
 
         # ── Action: detect_claims ────────────────────────────────────
@@ -140,30 +134,6 @@ class RuntimeAgent:
             logger.info("[Agent A] 검증 가능한 주장 없음 — 파이프라인 종료")
             return [], [], [], []
 
-        # ── [v6 멀티홉] Action: build_document_temporal_graph ───────────
-        # Tool: HCX-007 Structured Outputs (v3, 1회 호출)
-        # Thought: "문서 전체에서 anchor 시점 + 모든 시간 표현 + coref를
-        #           한 번에 추출해서 그래프에 박아두자."
-        # Observation: DocumentNode + TemporalExprNodes + ResolvedTimeNodes
-        #
-        # 이 단계가 schema_inductor 앞에 와야 함:
-        #   schema_inductor가 그래프 traverse 결과를 prompt hint로 사용
-        # 룰 매핑 일체 없음 — LLM이 anchor와 모든 표현을 동시에 풀어냄
-        doc_nodes, doc_edges = await build_document_temporal_graph(sir_doc, self.config)
-        # [이수민 2026-05-14] anchor_year + 시간 표현 매핑을 working memory에 기록
-        for node in doc_nodes:
-            if node.node_type.value == "document":
-                ay = node.properties.get("anchor_year")
-                if ay:
-                    memory.record_anchor_year(int(ay))
-            elif node.node_type.value == "temporal_expr":
-                expr = node.properties.get("expression")
-                resolved = node.properties.get("resolved_value")
-                if expr and resolved:
-                    memory.record_temporal(expr, resolved)
-        logger.info(f"[Agent A] Step 4.5 build_document_temporal_graph → "
-                    f"{len(doc_nodes)} nodes, {len(doc_edges)} edges")
-
         # ── [v4 김예슬] Context Window 부착 ────────────────────────────
         # 각 claim에 앞뒤 문장 context를 붙여서 LLM이 맥락을 이해할 수 있게 함
         # 예: "이는 20년 새 2.6배 증가한 것이다" → 앞 문장 "쉬었음 청년이 21만7천명"도 함께 전달
@@ -171,92 +141,466 @@ class RuntimeAgent:
         for claim in claims:
             claim.context_text = _get_context_window(claim, sir_doc, window=2)
 
-        # [v6] document graph만으로 ClaimGraph facade 생성
-        # 이 시점에서는 claim/metric 노드는 없지만, schema_inductor가
-        # claim.graph_anchor_id로 sentence를 찾아 시점 traverse만 하면 됨
-        pre_graph = ClaimGraph(doc_nodes, doc_edges)
+        # ── Action: build_document_temporal_graph ─────────────────────
+        # Tool: HCX 문서 시간 분석 agent (LLM 1회 호출)
+        # Thought: "기사 작성일/anchor_year를 추출해서 '내년/올해' 같은
+        #           상대 시점을 절대 연도로 풀 수 있게 해야 한다"
+        # Observation: DocumentNode(anchor_year=...) + TemporalExpr 노드
+        # [v6.16] 이 단계가 빠져 있어서 anchor_year가 항상 None이던 버그 수정
+        temporal_graph = None
+        try:
+            t_nodes, t_edges = await build_document_temporal_graph(
+                sir_doc, self.config
+            )
+            if t_nodes:
+                temporal_graph = ClaimGraph(t_nodes, t_edges)
+                # [머지 이수민 main] anchor_year + 시간 표현을 memory에 기록
+                for _n in t_nodes:
+                    _nt = getattr(getattr(_n, "node_type", None), "value", "")
+                    if _nt == "document":
+                        _ay = (_n.properties or {}).get("anchor_year")
+                        if _ay:
+                            try:
+                                memory.record_anchor_year(int(_ay))
+                            except (ValueError, TypeError):
+                                pass
+                    elif _nt == "temporal_expr":
+                        _expr = (_n.properties or {}).get("expression")
+                        _resolved = (_n.properties or {}).get("resolved_value")
+                        if _expr and _resolved:
+                            memory.record_temporal(str(_expr), str(_resolved))
+                logger.info(
+                    f"[Agent A] Step 4.5 temporal graph → "
+                    f"anchor_year={temporal_graph.get_anchor_year()}"
+                )
+        except Exception as e:
+            logger.warning(f"[Agent A] temporal graph 빌드 실패 (계속 진행): {e}")
 
         # ── Action: induce_schemas ───────────────────────────────────
         # Tool: HCX-007 Structured Outputs (v3 API)
-        # [v6] graph 전달 → "작년" 같은 표현이 그래프에서 "2023"으로 resolved
-        #     되어 prompt hint로 들어감. LLM은 그걸 그대로 time_period에 사용.
-        claims = await induce_schemas(claims, self.config, graph=pre_graph)
-        # [이수민 2026-05-14] claims를 working memory에 기록 (metric_to_claims 자동 인덱싱)
-        memory.record_claims(claims)
-        logger.info(f"[Agent A] Step 5 induce_schemas → schemas attached "
-                    f"(memory: {len(memory.metric_to_claims)} metrics)")
+        # Thought: "각 주장을 indicator/value/unit/population으로 구조화해야 한다"
+        # Observation: claim.schema = ClaimSchema({indicator, value, ...})
+        # [v4] context_text 포함 → "이는" 같은 대명사 참조 해소
+        # [v6.16] temporal_graph 전달 → 상대 시점 해소 + anchor_year fallback
+        claims = await induce_schemas(claims, self.config, graph=temporal_graph)
+        memory.record_claims(claims)  # [머지 이수민 main] metric_to_claims 인덱싱
+        logger.info(
+            f"[Agent A] Step 5 induce_schemas → schemas attached "
+            f"(memory: {len(memory.metric_to_claims)} metrics)"
+        )
 
         # ── Action: build_claim_graph ────────────────────────────────
-        # [v6] 기존 ClaimNode/MetricNode/EntityNode/COMPARE 생성
-        all_nodes, all_edges = build_claim_graph(claims, sir_doc=sir_doc)
-        # document temporal 그래프 합치기
-        all_nodes.extend(doc_nodes)
-        all_edges.extend(doc_edges)
+        # Tool: 내부 로직 (LLM 미사용)
+        # Thought: "ClaimSchema → Knowledge Graph 노드/엣지를 구성해야 한다"
+        # Observation: GraphNode[], GraphEdge[]
+        # TODO [신준수]: graph_builder.py 노드/엣지 타입 완성
+        all_nodes, all_edges = build_claim_graph(claims, sir_doc=sir_doc) # 호출부 로직 변경 [pipeline v3] 김예슬
         logger.info(f"[Agent A] Step 6 build_claim_graph → {len(all_nodes)} nodes")
 
-        # [v6] 전체 그래프로 ClaimGraph 재생성 (verifier/explainer가 사용)
-        full_graph = ClaimGraph(all_nodes, all_edges)
+        # ── Step 7~8: 각 주장별 Evidence 조회 + 검증 ────────────────
+        # [Multi-hop v1] Step 9(설명)는 multi-hop 재검증 후로 분리
+        #   이유: 파생 주장 검증은 다른 claim들의 Step 8 결과가 모두 필요함
+        # [Phase D] config.agent.enabled=true 면 planner+loop 경로 사용:
+        #   - planner가 claim마다 Plan 수립 (ReAct: Thought)
+        #   - agent_loop가 Plan대로 catalog_search → fetch_evidence → verify 순회
+        #   기존 경로(고정 retrieve→verify)는 enabled=false 시 그대로 사용 → 안전 롤백
+        # [머지 박재윤 main] asyncio.gather + Semaphore(3) 병렬화.
+        #   claim끼리 독립적이므로 agent 경로(planner+loop)도 병렬 안전.
+        #   claim 1건당 14~40초 → 8건 직렬이면 ~7분. 병렬 3이면 ~1/3.
+        agent_enabled = bool(
+            (self.config.get("agent") or {}).get("enabled", False)
+        )
 
-        # ── 각 주장별 Step 7~9 (병렬 처리) ─────────────────────────
-        # [박재윤 - 2026-05-12]: asyncio.gather + Semaphore(3)으로 병렬화
+        # agent 경로에서 쓸 문서 원문 (planner가 source_text로 사용)
+        source_text = self._get_source_text(sir_doc)
+        anchor_year = (
+            temporal_graph.get_anchor_year() if temporal_graph else None
+        )
+
         import asyncio
         sem = asyncio.Semaphore(3)
+        # 병렬 claim들이 memory에 동시 기록 → race 방지용 Lock.
+        # DocumentWorkingMemory의 record_* 는 dict 갱신이라 짧지만,
+        # record_stat_id_used 같은 복합 갱신을 원자적으로 보호한다.
+        mem_lock = asyncio.Lock()
 
         async def process_one_claim(claim):
+            """claim 1건 Step 7~8. 그래프 노드/엣지는 반환만 하고
+            병렬 종료 후 메인이 모은다 (extend가 thread-safe하지 않으므로)."""
             claim_nid = f"claim:{claim.claim_id.hex[:8]}"
             async with sem:
-                # Action: retrieve_evidence (KOSIS API)
-                # Tool: KOSIS Open API — pgvector 검색 → LLM 리랭킹 → 실제 수치 조회
-                # Thought: "KOSIS에서 공식 수치를 가져와야 한다"
-                # Observation: Evidence {official_value, stat_table_id, ...}
-                # TODO [신준수]: kosis_connector.py 실제 HTTP 호출 구현
-                # TODO [신준수]: query_builder.py ClaimSchema → KOSIS 파라미터 변환
+                if agent_enabled:
+                    # ── [Phase D] Agent Loop 경로 ──────────────────────
+                    result, ev_nodes, ev_edges = await self._verify_with_agent(
+                        claim, source_text, anchor_year, temporal_graph,
+                        claim_nid=claim_nid, memory=memory, mem_lock=mem_lock,
+                    )
+                    logger.info(
+                        f"[Agent A] Step 7~8 agent_loop → {result.verdict.value} "
+                        f"(evidence nodes={len(ev_nodes)})"
+                    )
+                    return result, ev_nodes, ev_edges
+
+                # ── 기존 경로 (고정 retrieve_evidence + verify_claim) ──
                 query = build_query(claim)
                 evidence, ev_nodes, ev_edges = await build_evidence_subgraph(
                     self.kosis, query, claim_nid,
                 )
-                all_nodes.extend(ev_nodes)
-                all_edges.extend(ev_edges)
-                logger.info(f"[Agent A] Step 7 retrieve_evidence → {str(evidence)[:80] if evidence else None}")
-
+                logger.info(
+                    f"[Agent A] Step 7 retrieve_evidence → "
+                    f"{str(evidence)[:80] if evidence else None}"
+                )
                 # Action: verify_claim (Deterministic, LLM 미개입)
-                # [v6] graph 전달 → schema.time_period가 "작년"이어도
-                #      그래프에서 멀티홉 traverse로 "2023" 찾아서 KOSIS row 매칭
-                # [v7 이수민 2026-05-14] memory 전달 → 도메인 가드 활성화
-                #      evidence.category_path와 memory.domain 불일치 시 UNVERIFIABLE
-                result = verify_claim(claim, evidence, self.config,
-                                      graph=full_graph, memory=memory)
-                # [이수민 2026-05-14] 성공한 stat_id를 memory에 캐시
-                if (result.verdict.value == "match"
-                        and evidence and evidence.stat_table_id
-                        and claim.schema and claim.schema.indicator):
-                    memory.record_stat_id_used(
-                        indicator=claim.schema.indicator,
-                        stat_id=evidence.stat_table_id,
-                        category_path=evidence.category_path,
-                        time_period=evidence.time_period,
+                # 주의: sv2 verify_claim은 memory 파라미터를 받지 않음.
+                # 도메인 가드는 호출 후 evidence를 보고 별도로 적용한다.
+                result = verify_claim(
+                    claim, evidence, self.config, graph=temporal_graph,
+                )
+                # [머지 이수민 main] 도메인 가드 — evidence가 doc 도메인과
+                # 어긋나면 UNVERIFIABLE 강등. evidence.raw_response 또는
+                # stat 메타에서 category_path를 찾는다(없으면 가드 통과).
+                _ev_cat = None
+                if evidence is not None:
+                    _ev_cat = (evidence.raw_response or {}).get("category_path")
+                if (_ev_cat and not memory.domain_matches_category(_ev_cat)):
+                    from structverify.core.schemas import VerdictType
+                    logger.warning(
+                        f"[Agent A] 도메인 가드 거절: category={_ev_cat!r} "
+                        f"vs domain={memory.domain!r} → UNVERIFIABLE"
                     )
+                    async with mem_lock:
+                        memory.record_stat_id_rejected(
+                            str(getattr(evidence, "stat_table_id", "") or "?"),
+                            f"도메인 불일치: {memory.domain}",
+                        )
+                    result.verdict = VerdictType.UNVERIFIABLE
+                    result.confidence = min(result.confidence or 0.3, 0.3)
+                # [머지 이수민 main] 성공 stat_id를 memory에 캐시
+                if (result.verdict.value == "match"
+                        and evidence and getattr(evidence, "stat_table_id", None)
+                        and claim.schema and claim.schema.indicator):
+                    async with mem_lock:
+                        memory.record_stat_id_used(
+                            indicator=claim.schema.indicator,
+                            stat_id=evidence.stat_table_id,
+                            category_path=_ev_cat,
+                            time_period=getattr(evidence, "time_period", None),
+                        )
                 logger.info(f"[Agent A] Step 8 verify_claim → {result.verdict.value}")
+                return result, ev_nodes, ev_edges
 
-                # Action: generate_explanation (LLM)
-                # Tool: HCX-003 (v1, 중량) — verdict별 전용 프롬프트 사용
-                # Thought: "판정 결과를 독자가 이해할 수 있는 설명으로 생성해야 한다"
-                # Observation: 자연어 설명 문자열 + provenance_summary 세팅
-                result.explanation = await generate_explanation(claim, result, self.config)
-                logger.info(f"[Agent A] Step 9 generate_explanation → {len(result.explanation or '')}자")
+        # 병렬 실행 — 결과는 claim 순서대로 보장됨 (gather 순서 유지)
+        _parallel = await asyncio.gather(
+            *[process_one_claim(c) for c in claims]
+        )
+        results: list[VerificationResult] = []
+        for _result, _ev_nodes, _ev_edges in _parallel:
+            results.append(_result)
+            all_nodes.extend(_ev_nodes)
+            all_edges.extend(_ev_edges)
 
-                return result
-
-        results = list(await asyncio.gather(*[process_one_claim(c) for c in claims]))
-
-        # [이수민 2026-05-14] working memory 최종 통계 로깅
+        # [머지 이수민 main] working memory 통계 로깅
         logger.info(f"[Agent A] working_memory stats: {memory.stats()}")
         if memory.rejected_stat_ids:
-            logger.info(f"[Agent A] 도메인 가드 거절: {len(memory.rejected_stat_ids)}건")
+            logger.info(
+                f"[Agent A] 도메인 가드 거절 stat_id: "
+                f"{len(memory.rejected_stat_ids)}건"
+            )
+
+        # ── Step 8.5: Multi-hop GraphRAG 파생 주장 재검증 ──────────────
+        # Tool: graph_multihop (LLM 미사용 — 비율/배수 계산은 deterministic)
+        # Thought: "KOSIS로 직접 검증 못한 파생 주장(2.6배 등)을
+        #           COMPARE 엣지 이웃들의 검증된 수치로 재계산할 수 있다"
+        # Observation: UNVERIFIABLE 파생 주장 → MATCH/MISMATCH 가능
+        results = apply_multihop_verification(
+            claims, results, all_edges, self.config
+        )
+
+        # ── Step 9: 각 주장별 설명 생성 ────────────────────────────────
+        for claim, result in zip(claims, results):
+            result.explanation = await generate_explanation(claim, result, self.config)
+            logger.info(f"[Agent A] Step 9 generate_explanation → {len(result.explanation or '')}자")
+
+        # ── [v6.19] Step 9.5: Graph Store 영속화 (Neo4j — 옵셔널) ──────
+        # graph.store.enabled=true 면 노드/엣지를 Neo4j에 MERGE.
+        # 비활성/실패해도 save_graph 내부에서 흡수 — 검증 결과는 그대로 반환.
+        if self.graph_store.is_active():
+            try:
+                n_saved, e_saved = await self.graph_store.save_graph(
+                    all_nodes, all_edges
+                )
+                logger.info(
+                    f"[Agent A] Step 9.5 graph_store → "
+                    f"Neo4j 저장 노드 {n_saved} / 엣지 {e_saved}"
+                )
+            except Exception as e:
+                logger.warning(f"[Agent A] graph_store 저장 실패 (무시): {e}")
 
         logger.info(f"[Agent A] 완료: claims={len(claims)}, results={len(results)}, "
                     f"nodes={len(all_nodes)}, edges={len(all_edges)}")
+
+        # [v6.19] job 완료 후 agent_workspace 임시 디렉토리 정리.
+        # workspace.cleanup()은 정의돼 있었지만 어디서도 호출되지 않아
+        # job마다 agent_workspace/job_* 디렉토리가 무한 누적 →
+        # "No space left on device"로 agent_loop 전체가 폴백되는 장애 발생.
+        # agent.workspace.persist_after_job=true면 디버깅 위해 보존.
+        agent_cfg = self.config.get("agent") or {}
+        ws_cfg = dict(agent_cfg.get("workspace") or {})
+        if not ws_cfg.get("persist_after_job", False):
+            try:
+                from structverify.agent.workspace import build_workspace
+                # _verify_with_agent와 동일하게 claim.doc_id를 job_id로 사용
+                _job_id = ""
+                if claims:
+                    _job_id = str(getattr(claims[0], "doc_id", "") or "")
+                _ws = build_workspace(job_id=_job_id or "job", config=ws_cfg)
+                _ws.cleanup()
+            except Exception as e:
+                logger.warning(f"[Agent A] workspace 정리 실패 (무시): {e}")
+
         return claims, results, all_nodes, all_edges
+
+    # ── [Phase D] Agent Loop 경로 헬퍼 ──────────────────────────────────────
+
+    def _get_source_text(self, sir_doc: "SIRDocument") -> str:
+        """SIR 문서에서 원문 텍스트 복원 — planner의 source_text로 사용."""
+        parts: list[str] = []
+        for block in getattr(sir_doc, "blocks", []) or []:
+            for sent in getattr(block, "sentences", []) or []:
+                t = getattr(sent, "text", None)
+                if t:
+                    parts.append(t)
+        return " ".join(parts)
+
+    async def _verify_with_agent(
+        self,
+        claim: "Claim",
+        source_text: str,
+        anchor_year: "int | None",
+        temporal_graph: "ClaimGraph | None",
+        claim_nid: str,
+        memory: "DocumentWorkingMemory | None" = None,
+        mem_lock=None,
+    ) -> "tuple[VerificationResult, list[GraphNode], list[GraphEdge]]":
+        """
+        [Phase D] planner + agent_loop 으로 claim 1건 검증.
+
+        ReAct:
+          Thought  → planner.plan() 이 Plan(검증 전략 + 단계) 수립
+          Action   → agent_loop 이 catalog_search → fetch_evidence 순회
+          Observation → 각 step 결과 누적
+          → AgentVerdict 산출 → VerificationResult 변환
+
+        Returns:
+          (VerificationResult, evidence GraphNode 리스트, GraphEdge 리스트)
+          — [v6.19] evidence를 그래프에 박아 multihop 재검증이 agent 경로에서도
+            동작하게 함. 검증 실패해도 노드는 빈 리스트로 반환(에러 아님).
+
+        실패 시 기존 경로(retrieve_evidence + verify_claim)로 폴백.
+        """
+        from structverify.agent.planner import Planner, PlannerConfig
+        from structverify.agent.loop import agent_loop, LoopConfig
+        from structverify.agent.workspace import build_workspace
+        from structverify.retrieval.registry import build_all_enabled
+        import structverify.retrieval.kosis_source  # noqa: F401 — @register_datasource 트리거
+
+        agent_cfg = self.config.get("agent") or {}
+        llm_cfg   = self.config.get("llm") or {}
+
+        try:
+            # 1) workspace 준비
+            ws_cfg = dict(agent_cfg.get("workspace") or {})
+            workspace = build_workspace(
+                job_id=str(getattr(claim, "doc_id", "") or "job"),
+                config=ws_cfg,
+            )
+            if not workspace.is_initialized():
+                workspace.initialize(source_text=source_text or "")
+            workspace.create_claim_dir(
+                claim.claim_id, claim_data=claim.model_dump(mode="json")
+            )
+
+            # 2) DataSource 등록 (KOSIS)
+            ds_cfg = self.config.get("data_sources") or {}
+            kosis_ds_cfg = dict(ds_cfg.get("kosis") or self.config.get("kosis") or {})
+            datasources = {
+                ds.name: ds
+                for ds in build_all_enabled({
+                    "enabled": ["kosis"],
+                    "kosis": kosis_ds_cfg,
+                })
+            }
+
+            # 3) Planner LLM wiring — 기존 LLMClient 재사용
+            from structverify.utils.llm_client import LLMClient
+            plan_llm = LLMClient(config=llm_cfg)
+
+            async def llm_call_for_plan(prompt: str) -> str:
+                return await plan_llm.generate(
+                    prompt=prompt,
+                    system_prompt="검증 계획 수립 전문가. JSON으로만 답하세요.",
+                )
+
+            planner = Planner(
+                llm_call=llm_call_for_plan,
+                config=PlannerConfig(
+                    model=(llm_cfg.get("plan_model") or "HCX-007"),
+                    temperature=0.1,
+                ),
+            )
+
+            # 4) Plan 생성 (ReAct Thought)
+            plan = await planner.plan(
+                claim, source_text=source_text, anchor_year=anchor_year
+            )
+            workspace.write_plan(claim.claim_id, plan.model_dump(mode="json"))
+            logger.info(
+                f"[planner] {claim.claim_id}: Plan 수립 "
+                f"type={getattr(plan, 'claim_type', None)} "
+                f"steps={len(getattr(plan, 'initial_steps', []) or [])}"
+            )
+
+            # 5) Agent Loop 실행 (ReAct Action/Observation)
+            loop_cfg = agent_cfg.get("loop") or {}
+            verdict = await agent_loop(
+                plan=plan,
+                claim=claim,
+                workspace=workspace,
+                datasources=datasources,
+                config=self.config,
+                reflect_fn=None,  # Phase D = deterministic
+                loop_config=LoopConfig(
+                    max_iterations=int(loop_cfg.get("max_iterations", 10)),
+                    mode="deterministic",
+                ),
+            )
+
+            # 6) AgentVerdict → VerificationResult 변환
+            #    [v6.17] agent_loop이 검증에 쓴 KOSIS 데이터(data_points)를
+            #    Evidence로 복원 → UI '공식 통계 출처' 박스에 표시됨.
+            agent_evidence = None
+            _ev_category = None  # 도메인 가드용 — Evidence 스키마엔 없는 필드
+            dps = getattr(verdict, "data_points", None) or []
+            if dps:
+                dp = dps[0]  # 단일 fetch — 첫 data point가 검증 근거
+                src = (dp.source or "")
+                stat_id = src.split(":", 1)[1] if ":" in src else (src or None)
+                _ev_category = getattr(dp, "category_path", None)
+                agent_evidence = Evidence(
+                    source_name="KOSIS",
+                    stat_table_id=stat_id,
+                    official_value=dp.resolved_value,
+                    unit=dp.resolved_unit,
+                    time_period=dp.source_time,
+                )
+
+            # [머지 이수민 main] 도메인 가드 — agent 경로에도 적용.
+            # data_point의 category_path가 doc 도메인과 어긋나면(예: 인구
+            # 기사인데 환경 통계표) verdict를 UNVERIFIABLE로 강등.
+            # agent_loop의 표 관련성 체크와 별개의 doc-레벨 안전망.
+            if (memory is not None and agent_evidence is not None
+                    and _ev_category):
+                if not memory.domain_matches_category(_ev_category):
+                    from structverify.core.schemas import VerdictType
+                    logger.warning(
+                        f"[Agent A] 도메인 가드 거절: claim={claim.claim_id} "
+                        f"category={_ev_category!r} "
+                        f"vs domain={memory.domain!r} → UNVERIFIABLE 강등"
+                    )
+                    if mem_lock is not None:
+                        async with mem_lock:
+                            memory.record_stat_id_rejected(
+                                str(agent_evidence.stat_table_id or "?"),
+                                f"도메인 불일치: {memory.domain}",
+                            )
+                    verdict.verdict = VerdictType.UNVERIFIABLE
+                    verdict.confidence = min(
+                        getattr(verdict, "confidence", 0.3) or 0.3, 0.3
+                    )
+                    agent_evidence = None  # 그래프에도 박지 않음
+
+            # [머지 이수민 main] MATCH면 성공 stat_id를 memory에 캐시
+            if (memory is not None and agent_evidence is not None
+                    and getattr(verdict.verdict, "value", "") == "match"
+                    and getattr(agent_evidence, "stat_table_id", None)
+                    and claim.schema and claim.schema.indicator):
+                if mem_lock is not None:
+                    async with mem_lock:
+                        memory.record_stat_id_used(
+                            indicator=claim.schema.indicator,
+                            stat_id=agent_evidence.stat_table_id,
+                            category_path=_ev_category,
+                            time_period=getattr(
+                                agent_evidence, "time_period", None
+                            ),
+                        )
+
+            # [v6.19] Evidence → 그래프 노드/엣지 (multihop 재검증 입력)
+            ev_nodes, ev_edges = _evidence_to_graph(agent_evidence, claim_nid)
+
+            result = VerificationResult(
+                claim_id=claim.claim_id,
+                verdict=verdict.verdict,
+                confidence=verdict.confidence,
+                explanation=verdict.explanation,
+                evidence=agent_evidence,
+            )
+            return result, ev_nodes, ev_edges
+
+        except Exception as e:
+            # Agent 경로 실패 → 기존 경로로 안전 폴백
+            logger.warning(
+                f"[Agent A] agent_loop 실패 → 기존 경로 폴백: {e}"
+            )
+            query = build_query(claim)
+            evidence, fb_nodes, fb_edges = await build_evidence_subgraph(
+                self.kosis, query, claim_nid,
+            )
+            fb_result = verify_claim(
+                claim, evidence, self.config, graph=temporal_graph
+            )
+            return fb_result, fb_nodes, fb_edges
+
+
+# ── [v6.19] Evidence → 그래프 노드/엣지 변환 ────────────────────────────────
+
+def _evidence_to_graph(
+    evidence: "Evidence | None", claim_nid: str,
+) -> "tuple[list[GraphNode], list[GraphEdge]]":
+    """agent 경로가 얻은 Evidence를 그래프 노드/엣지로 변환.
+
+    기존 경로의 build_evidence_subgraph와 동일한 모양:
+      EVIDENCE 노드 1개 + (claim ─VERIFIED_BY→ evidence) 엣지 1개
+    이렇게 박아야 Step 8.5 multihop이 COMPARE 이웃의 검증 수치를
+    그래프에서 찾아 파생 주장을 재검증할 수 있다.
+
+    evidence가 None이거나 official_value가 없으면 빈 리스트
+    (검증 근거가 없으므로 그래프에 박을 것도 없음).
+    """
+    if evidence is None or getattr(evidence, "official_value", None) is None:
+        return [], []
+
+    stat_id = getattr(evidence, "stat_table_id", None) or "unknown"
+    ev_node_id = f"evidence:{claim_nid}:{stat_id}"
+    ev_node = GraphNode(
+        node_id=ev_node_id,
+        node_type=GraphNodeType.EVIDENCE,
+        label=f"{evidence.source_name or 'KOSIS'}({stat_id})",
+        properties={
+            "official_value": evidence.official_value,
+            "unit": getattr(evidence, "unit", None),
+            "time_period": getattr(evidence, "time_period", None),
+            "stat_table_id": stat_id,
+            "source_name": evidence.source_name,
+        },
+    )
+    ev_edge = GraphEdge(
+        from_node=claim_nid,
+        to_node=ev_node_id,
+        edge_type=GraphEdgeType.VERIFIED_BY,
+    )
+    return [ev_node], [ev_edge]
+
 
 # ── [v4 김예슬] Context Window 헬퍼 ─────────────────────────────────────────
 
