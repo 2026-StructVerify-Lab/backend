@@ -17,6 +17,20 @@ detection/schema_inductor.py — Dynamic Schema Induction (Step 5)
 - 박재유 SYSTEM_PROMPT 스타일 차용: 단위 강제 + indicator 정제 + parent_path 추출
 - ClaimSchema 신규 필드 추출: parent_path / is_approximate / modifier
 - 모든 정제 책임은 LLM에게 위임 (룰 베이스 X)
+
+# [박재윤 - 2026-05-14]: SCHEMA_INDUCTION_PROMPT system_prompt 개선
+#   · 예보/예상/전망/예측 indicator → schema 추출 금지 규칙 추가
+
+# [박재윤 - 2026-05-15]: SCHEMA_INDUCTION_PROMPT 수치 추출 규칙 보강
+#   · "~였다/~이다/~다" 패턴 수치도 추출 대상 명시 (근원물가 2.2% 누락 방지)
+#   · "N만 M천" 복합 단위 패턴 _extract_numbers_from_text에 추가
+#     (24만 2천 → 242000 환산 오류 방지)
+
+# [박재윤 - 2026-05-18]: SCHEMA_INDUCTION_PROMPT source_phrase 원문 보존 규칙 추가
+#   · "23만 8000명" → source_phrase 원문 그대로 (8000→8천 변환 금지)
+
+# [박재윤 - 2026-05-18]: _extract_numbers_from_text "N만 NNNN" 패턴 추가
+#   · "2869만 3000명" → 28693000 환산 (4자리 숫자 붙는 패턴)
 """
 from __future__ import annotations
 
@@ -315,6 +329,11 @@ SCHEMA_INDUCTION_PROMPT = """당신은 뉴스 수치 주장에서 공식 통계 
    · "1만 9059명" → value=19059
    · "21만 7천명" → value=217000
    · "1만 7921건" → value=17921
+   · "23만 8000명" → value=238000, source_phrase="23만 8000명" (NOT "23만 8천명")
+   · "19만 3000건" → value=193000, source_phrase="19만 3000건" (NOT "19만 3천건")
+   · ★ source_phrase는 원문 그대로. 절대 한자어로 바꾸지 마세요 (8000 → 8천 금지)
+   · "2.2%였다" → value=2.2, unit="%", source_phrase="2.2%"
+   · "~였다/~이다/~다" 뒤에 오는 수치도 추출 대상
 
 2. **★ 한 문장에 여러 수치**: 각각 별도 schema. *놓치지 마세요*.
    · "X명으로 Y% 늘었다" → 2개 schema (절대값 + 비율)
@@ -604,7 +623,8 @@ async def _induce_multiple(
                 "통계 분석 전문가. 위 규칙을 엄격히 따르세요. "
                 "★ 핵심: [검증 대상 문장]에 literally 등장하는 수치만 추출. "
                 "[문맥]의 수치는 절대 추출 금지. "
-                "각 schema에 source_phrase 의무 포함."
+                "각 schema에 source_phrase 의무 포함. "
+                "★ '예상/예보/전망/예측' 포함 indicator는 KOSIS 검증 불가 → 해당 schema 추출 금지."
             ),
         )
     except Exception as e:
@@ -913,12 +933,20 @@ def _extract_numbers_from_text(text: str) -> set[float]:
     """
     numbers: set[float] = set()
 
+    # [박재윤 - 2026-05-18] "N만 N천" 복합 패턴 (앞 패턴보다 먼저 실행 필요)
+    # "2869만 3000명" → 28693000
+    # "159만 명" 같은 경우와 구분: 뒤 숫자가 1000 단위인 경우
+    for m in re.finditer(r"(\d+)\s*만\s*(\d{4})", text):
+        n = int(m.group(1)) * 10000 + int(m.group(2))
+        numbers.add(float(n))
+
     # 1) 한글 단위 — "N만 M" 또는 "N만"
     for m in re.finditer(r"(\d+)\s*만\s*(\d+)?", text):
         n = int(m.group(1)) * 10000
         if m.group(2):
             n += int(m.group(2))
         numbers.add(float(n))
+
 
     # 2) 한글 단위 — "N억 M" 또는 "N억"
     for m in re.finditer(r"(\d+)\s*억\s*(\d+)?", text):
@@ -932,6 +960,11 @@ def _extract_numbers_from_text(text: str) -> set[float]:
         n = int(m.group(1)) * 1000
         if m.group(2):
             n += int(m.group(2))
+        numbers.add(float(n))
+    
+    # "N만 M천" 복합 패턴
+    for m in re.finditer(r"(\d+)\s*만\s*(\d+)\s*천", text):
+        n = int(m.group(1)) * 10000 + int(m.group(2)) * 1000
         numbers.add(float(n))
 
     # 4) 일반 숫자 (콤마 포함 정수 + 소수)

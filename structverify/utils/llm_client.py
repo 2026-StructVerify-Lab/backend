@@ -26,6 +26,18 @@ Runtime Agent와 Builder Agent가 공유하는 LLM 호출 인터페이스.
 
 [참고] CLOVA Studio Structured Outputs
   https://api.ncloud-docs.com/docs/en/clovastudio-chatcompletionsv3-so
+   
+
+# [박재윤 - 2026-05-14]: _call_hcx_v1, _call_hcx_v3 429 retry backoff 추가
+ - 429 rate limit 시 exponential backoff 재시도{V1,V3} (최대 3회)
+
+    NCP CLOVA Studio Chat Completions v1,V3 API.
+    엔드포인트: POST /v1/chat-completions/{model}
+    대상 모델: HCX-003
+    
+# [박재윤 - 2026-05-18]: _call_hcx_structured 429 retry backoff 추가
+#   · _call_hcx_v1, _call_hcx_v3와 동일한 exponential backoff 적용 (최대 3회)
+#   · schema_inductor generate_structured 호출 시 rate limit 문제 해결
 """
 from __future__ import annotations
 
@@ -182,6 +194,9 @@ class LLMClient:
         NCP CLOVA Studio Chat Completions v1 API.
         엔드포인트: POST /v1/chat-completions/{model}
         대상 모델: HCX-003
+
+        [박재윤 - 2026-05-14]
+        - 429 rate limit 시 exponential backoff 재시도 (최대 3회)
         """
         url = f"{HCX_V1_BASE}/{model}"
         messages = []
@@ -206,24 +221,33 @@ class LLMClient:
             "Accept": "application/json",
         }
 
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(url, json=payload, headers=headers)
-                resp.raise_for_status()
-                data = resp.json()
-            status_code = data.get("status", {}).get("code", "")
-            if status_code != "20000":
-                msg = data.get("status", {}).get("message", "unknown")
-                raise RuntimeError(f"HCX v1 API 오류: {status_code} {msg}")
-            content = data["result"]["message"]["content"]
-            logger.debug(f"HCX v1 응답 ({model}): {content[:80]}...")
-            return content
-        except httpx.HTTPStatusError as e:
-            logger.error(f"HCX v1 HTTP 오류: {e.response.status_code} — {e.response.text[:200]}")
-            raise
-        except httpx.TimeoutException:
-            logger.error(f"HCX v1 타임아웃: {url}")
-            raise
+        # [박재윤 - 2026-05-14]: 429 exponential backoff (1초 → 2초 → 4초)
+        import asyncio
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    resp = await client.post(url, json=payload, headers=headers)
+                    resp.raise_for_status()
+                    data = resp.json()
+                status_code = data.get("status", {}).get("code", "")
+                if status_code != "20000":
+                    msg = data.get("status", {}).get("message", "unknown")
+                    raise RuntimeError(f"HCX v1 API 오류: {status_code} {msg}")
+                content = data["result"]["message"]["content"]
+                logger.debug(f"HCX v1 응답 ({model}): {content[:80]}...")
+                return content
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429 and attempt < max_retries - 1:
+                    wait = 2 ** attempt
+                    logger.warning(f"HCX v1 429 rate limit — {wait}초 후 재시도 ({attempt+1}/{max_retries})")
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error(f"HCX v1 HTTP 오류: {e.response.status_code} — {e.response.text[:200]}")
+                    raise
+            except httpx.TimeoutException:
+                logger.error(f"HCX v1 타임아웃: {url}")
+                raise
 
     # ── HCX v3 (HCX-005, HCX-DASH-002) ─────────────────────────────────────
 
@@ -238,6 +262,9 @@ class LLMClient:
         NCP CLOVA Studio Chat Completions v3 API.
         엔드포인트: POST /v3/chat-completions/{model}
         대상 모델: HCX-005 (비전), HCX-DASH-002 (경량)
+
+        [박재윤 - 2026-05-14]
+        - 429 rate limit 시 exponential backoff 재시도 (최대 3회)
         """
         url = f"{HCX_V3_BASE}/{model}"
         messages = []
@@ -261,21 +288,30 @@ class LLMClient:
             "Accept": "application/json",
         }
 
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(url, json=payload, headers=headers)
-                resp.raise_for_status()
-                data = resp.json()
-            status_code = data.get("status", {}).get("code", "")
-            if status_code != "20000":
-                msg = data.get("status", {}).get("message", "unknown")
-                raise RuntimeError(f"HCX v3 API 오류: {status_code} {msg}")
-            content = data["result"]["message"]["content"]
-            logger.debug(f"HCX v3 응답 ({model}): {content[:80]}...")
-            return content
-        except httpx.HTTPStatusError as e:
-            logger.error(f"HCX v3 HTTP 오류: {e.response.status_code} — {e.response.text[:200]}")
-            raise
+        # [박재윤 - 2026-05-14]: 429 exponential backoff (1초 → 2초 → 4초)
+        import asyncio
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    resp = await client.post(url, json=payload, headers=headers)
+                    resp.raise_for_status()
+                    data = resp.json()
+                status_code = data.get("status", {}).get("code", "")
+                if status_code != "20000":
+                    msg = data.get("status", {}).get("message", "unknown")
+                    raise RuntimeError(f"HCX v3 API 오류: {status_code} {msg}")
+                content = data["result"]["message"]["content"]
+                logger.debug(f"HCX v3 응답 ({model}): {content[:80]}...")
+                return content
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429 and attempt < max_retries - 1:
+                    wait = 2 ** attempt
+                    logger.warning(f"HCX v3 429 rate limit — {wait}초 후 재시도 ({attempt+1}/{max_retries})")
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error(f"HCX v3 HTTP 오류: {e.response.status_code} — {e.response.text[:200]}")
+                    raise
 
     # ── HCX Structured Outputs (HCX-007 전용) ───────────────────────────────
 
@@ -294,7 +330,12 @@ class LLMClient:
         - HCX-007 모델 전용
         - thinking과 동시 사용 불가 → thinking.effort: "none" 고정
         - responseFormat.type = "json" + schema 정의 필수
+
+        [박재윤 - 2026-05-18]: 429 retry backoff 추가
+        - _call_hcx_v1, _call_hcx_v3와 동일한 exponential backoff 적용 (최대 3회)
         """
+        import asyncio
+
         url = f"{HCX_V3_BASE}/HCX-007"
         messages = []
         if system_prompt:
@@ -309,7 +350,7 @@ class LLMClient:
             "topK": 0,
             "repetitionPenalty": 1.1,
             "stop": [],
-            "thinking": {"effort": "none"},  # Structured Outputs와 thinking 동시 불가
+            "thinking": {"effort": "none"},
             "responseFormat": {
                 "type": "json",
                 "schema": schema,
@@ -322,29 +363,40 @@ class LLMClient:
             "Accept": "application/json",
         }
 
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(url, json=payload, headers=headers)
-                resp.raise_for_status()
-                data = resp.json()
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    resp = await client.post(url, json=payload, headers=headers)
+                    resp.raise_for_status()
+                    data = resp.json()
 
-            status_code = data.get("status", {}).get("code", "")
-            if status_code != "20000":
-                msg = data.get("status", {}).get("message", "unknown")
-                raise RuntimeError(f"HCX Structured Outputs 오류: {status_code} {msg}")
+                status_code = data.get("status", {}).get("code", "")
+                if status_code != "20000":
+                    msg = data.get("status", {}).get("message", "unknown")
+                    raise RuntimeError(f"HCX Structured Outputs 오류: {status_code} {msg}")
 
-            content = data["result"]["message"]["content"]
-            logger.debug(f"HCX Structured 응답: {content[:80]}...")
+                content = data["result"]["message"]["content"]
+                logger.debug(f"HCX Structured 응답: {content[:80]}...")
+                return json.loads(content)
 
-            # content가 이미 JSON Schema 형식이므로 바로 파싱
-            return json.loads(content)
-
-        except httpx.HTTPStatusError as e:
-            logger.error(f"HCX Structured HTTP 오류: {e.response.status_code} — {e.response.text[:200]}")
-            raise
-        except json.JSONDecodeError as e:
-            logger.error(f"HCX Structured JSON 파싱 실패 (스키마 오류?): {e}")
-            raise
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429 and attempt < max_retries - 1:
+                    wait = 2 ** attempt
+                    logger.warning(
+                        f"HCX Structured 429 rate limit — {wait}초 후 재시도 "
+                        f"({attempt+1}/{max_retries})"
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error(
+                        f"HCX Structured HTTP 오류: {e.response.status_code} — "
+                        f"{e.response.text[:200]}"
+                    )
+                    raise
+            except json.JSONDecodeError as e:
+                logger.error(f"HCX Structured JSON 파싱 실패 (스키마 오류?): {e}")
+                raise
 
     # ── OpenAI ───────────────────────────────────────────────────────────────
 

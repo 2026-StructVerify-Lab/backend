@@ -1,3 +1,7 @@
+# [2026-05-14 | 이수민] memory/v1: KOSIS API + pgvector 결과 metadata 머지
+#   - 같은 stat_id가 두 경로에서 모두 나올 때 metadata 머지
+#   - KOSIS API 결과(먼저 추가)에 pgvector 결과의 category_path를 보강
+#   - 도메인 가드 인프라용 (verifier에서 evidence.category_path 사용)
 """
 retrieval/catalog_search.py — kosis_stat_catalog pgvector 검색 모듈 (Step 7-0)
 
@@ -183,12 +187,23 @@ class CatalogSearchTool:
 
         results: list[StatRecord] = []
         seen_ids: set[str] = set()
+        id_to_rec: dict[str, StatRecord] = {}  # [이수민 2026-05-14] metadata 머지용
 
         def _add(recs: list[StatRecord]) -> None:
             for r in recs:
                 if r.stat_id not in seen_ids:
                     results.append(r)
                     seen_ids.add(r.stat_id)
+                    id_to_rec[r.stat_id] = r
+                else:
+                    # [이수민 2026-05-14] 같은 stat_id 중복: metadata 머지
+                    # KOSIS API 결과(먼저)는 category_path 없고 pgvector 결과(나중)는 있음
+                    # → category_path를 KOSIS API 결과에 채워줌
+                    existing = id_to_rec.get(r.stat_id)
+                    if existing and not existing.metadata.get("category_path"):
+                        cp = r.metadata.get("category_path")
+                        if cp:
+                            existing.metadata["category_path"] = cp
 
         # 1) KOSIS 통합검색
         kosis_recs = await self._search_kosis_api(search_kw, max_results=top_k)

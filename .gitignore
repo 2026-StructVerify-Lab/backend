@@ -62,3 +62,5 @@ __pycache__/
 # env
 .env
 venv/
+
+createTable.py

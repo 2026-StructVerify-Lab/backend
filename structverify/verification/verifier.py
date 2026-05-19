@@ -22,6 +22,14 @@ verification/verifier.py — Deterministic Verification Engine (Step 8) v3
 
 [참고] FEVER (Thorne et al., NAACL 2018)
   SUPPORTS/REFUTES/NEI 3단계 판정 → match/mismatch/unverifiable 매핑
+
+
+  # 수정자: 박재윤
+# 수정 날짜: 2026-05-14
+# 수정 내용: 연도 필터 ±2 → 정확 일치로 변경
+#   · 기존: abs(claim_year - kv_year) > 2 → 다른 연도 데이터 비교 허용
+#   · 변경: abs(claim_year - kv_year) > 0 → 연도 불일치 시 무조건 skip
+#   · 이유: 2026년 기사 수치를 2024년 KOSIS 연간 평균과 비교하는 오판정 방지
 """
 # 수정자: 신준수
 # 수정 날짜: 2026-04-27
@@ -29,13 +37,23 @@ verification/verifier.py — Deterministic Verification Engine (Step 8) v3
 # 수정자: 김예슬
 # 수정 날짜: 2026-05-06
 # 수정 내용: normalize_value / is_same_unit_type / 90% 임계 추가
+# [2026-05-14 | 이수민] memory/v1: working memory 도메인 가드 추가
+#   - verify_claim() 시그니처에 memory: DocumentWorkingMemory 인자 추가
+#   - evidence.category_path와 memory.domain 불일치 시 UNVERIFIABLE(DOMAIN_MISMATCH) 반환
+#   - 거절된 stat_id는 memory.rejected_stat_ids에 기록 (false match 방지)
 from __future__ import annotations
 
 import re
 
+from typing import TYPE_CHECKING
+
 from structverify.core.schemas import (
     Claim, Evidence, VerificationResult, VerdictType, MismatchType)
 from structverify.utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from structverify.memory.working_memory import DocumentWorkingMemory
+    from structverify.graph.claim_graph import ClaimGraph
 
 logger = get_logger(__name__)
 
@@ -262,7 +280,8 @@ def _find_best_match(
         if claim_year and kv_period:
             kv_year = kv_period[:4]
             try:
-                if abs(int(claim_year) - int(kv_year)) > 2:
+                # · 연도 정확 일치 필터 (박재윤 2026-05-14: ±2 → 0으로 변경)
+                if abs(int(claim_year) - int(kv_year)) > 0:
                     year_filtered += 1
                     continue
             except (ValueError, TypeError):
@@ -373,7 +392,8 @@ def _find_best_match(
 
 def verify_claim(claim: Claim, evidence: Evidence | None,
                  config: dict | None = None,
-                 graph: "ClaimGraph | None" = None) -> VerificationResult:
+                 graph: "ClaimGraph | None" = None,
+                 memory: "DocumentWorkingMemory | None" = None) -> VerificationResult:
     """
     공식 통계와 기사 수치를 비교하여 판정 (LLM 미사용).
 
@@ -381,6 +401,9 @@ def verify_claim(claim: Claim, evidence: Evidence | None,
     [v6 멀티홉] graph가 있으면 claim의 시점을 그래프에서 resolved된 절대 시점으로
                 보정하여 KOSIS row 매칭에 사용. claim.schema.time_period가
                 "작년" 같은 상대 표현이어도 그래프 traverse로 2023이 나옴.
+    [v7 이수민 2026-05-14] memory 도메인 가드:
+                memory가 있고 evidence.category_path가 문서 도메인과 어긋나면
+                DOMAIN_MISMATCH로 UNVERIFIABLE 반환 (false match 방지).
     """
     config = config or {}
 
@@ -405,6 +428,27 @@ def verify_claim(claim: Claim, evidence: Evidence | None,
         return VerificationResult(
             claim_id=claim.claim_id, verdict=VerdictType.UNVERIFIABLE,
             confidence=0.2, evidence=None)
+
+    # ── [v7 이수민 2026-05-14] 도메인 가드 ─────────────────────────────
+    # working memory의 doc 도메인과 evidence의 카테고리가 일치하는지 확인.
+    # 어긋나면 잘못된 stat_id로 매칭된 false match 가능성 → UNVERIFIABLE.
+    if memory is not None and evidence.category_path:
+        if not memory.domain_matches_category(evidence.category_path):
+            logger.info(
+                f"[verifier 도메인 가드] reject: "
+                f"doc.domain={memory.domain} ↔ evidence.category={evidence.category_path}"
+            )
+            memory.record_stat_id_rejected(
+                evidence.stat_table_id or "unknown",
+                f"domain mismatch: {memory.domain} vs {evidence.category_path}",
+            )
+            return VerificationResult(
+                claim_id=claim.claim_id,
+                verdict=VerdictType.UNVERIFIABLE,
+                confidence=0.4,
+                evidence=evidence,
+                mismatch_type=MismatchType.DOMAIN_MISMATCH,
+            )
 
     claim_unit = (claim.schema.unit or "") if claim.schema else ""
 

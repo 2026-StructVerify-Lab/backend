@@ -220,8 +220,12 @@ def _try_trafilatura(url: str) -> str:
         )
         if not result:
             return ""
-        parsed_result = json.loads(result)   # JSON 문자열을 파이썬 딕셔너리로 변환
-        markdown = f"# {parsed_result.get('title', '')}\n\n{parsed_result.get('text', '')}"  # 제목과 본문을 마크다운 형식으로 결합
+        parsed_result = json.loads(result)
+        title = parsed_result.get('title', '')
+        date  = parsed_result.get('date', '')
+        text  = parsed_result.get('text', '')
+        header = f"# {title}\n날짜: {date}" if date else f"# {title}"
+        markdown = f"{header}\n\n{text}"
         return markdown
     except Exception as e:
         logger.debug(f"trafilatura 예외: {e}")
@@ -463,6 +467,13 @@ async def _scrape_chosun_fixed(url: str) -> str:
     elif soup.title:
         title = soup.title.get_text(strip=True)
 
+    date = ""
+    for prop in ("article:published_time", "og:article:published_time"):
+        tag = soup.find("meta", property=prop)
+        if tag and tag.get("content"):
+            date = tag["content"].strip()
+            break
+
     # 1) 브라우저 렌더링 후 DOM에 본문이 있는 경우
     container = soup.select_one("section.article-body[itemprop='articleBody'], section.article-body")
     if container:
@@ -477,22 +488,25 @@ async def _scrape_chosun_fixed(url: str) -> str:
         logger.info(f"[chosun] article-body paragraphs={len(paragraphs)}, text_len={len(body)}")
 
         if len(body) > 200:
-            return f"# {title}\n\n{body}"
+            header = f"# {title}\n날짜: {date}" if date else f"# {title}"
+            return f"{header}\n\n{body}"
 
     # 2) httpx 원본 HTML에 들어있는 Fusion.globalContent.content_elements 파싱
-    fusion_body = _extract_chosun_fusion_body(html)
+    fusion_body, fusion_date = _extract_chosun_fusion_body(html)
     if fusion_body and len(fusion_body.strip()) > 200:
         logger.info(f"[chosun] Fusion.globalContent body hit, text_len={len(fusion_body)}")
-        return f"# {title}\n\n{fusion_body}"
+        fusion_header = f"# {title}\n날짜: {fusion_date}" if fusion_date else f"# {title}"
+        return f"{fusion_header}\n\n{fusion_body}"
 
     logger.warning("[chosun] section.article-body / Fusion.globalContent 본문 추출 실패")
     return ""
   
   
-def _extract_chosun_fusion_body(html: str) -> str:
+def _extract_chosun_fusion_body(html: str) -> tuple[str, str]:
     """
     조선일보 원본 HTML의 Fusion.globalContent.content_elements에서
     type='text' 항목의 content를 추출한다.
+    Returns: (body, date) — 실패 시 ("", "")
     """
     match = re.search(
         r"Fusion\.globalContent\s*=\s*(\{.*?\});Fusion\.globalContentConfig",
@@ -501,7 +515,7 @@ def _extract_chosun_fusion_body(html: str) -> str:
     )
     if not match:
         logger.warning("[chosun] Fusion.globalContent JSON not found")
-        return ""
+        return "", ""
 
     raw_json = match.group(1)
 
@@ -509,7 +523,9 @@ def _extract_chosun_fusion_body(html: str) -> str:
         data = json.loads(raw_json)
     except Exception as e:
         logger.warning(f"[chosun] Fusion.globalContent JSON parse failed: {e}")
-        return ""
+        return "", ""
+
+    date = data.get("display_date", "") or data.get("publish_date", "") or data.get("first_publish_date", "")
 
     elements = data.get("content_elements", [])
     texts = []
@@ -529,7 +545,7 @@ def _extract_chosun_fusion_body(html: str) -> str:
             texts.append(text)
 
     body = "\n\n".join(texts)
-    return _clean_article_text(body)
+    return _clean_article_text(body), date
 
 
 def _html_to_plain_text(fragment: str) -> str:

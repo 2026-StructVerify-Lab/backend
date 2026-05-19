@@ -1,3 +1,6 @@
+# [2026-05-14 | 이수민] memory/v1: working memory 도메인 가드용 필드 추가
+#   - Evidence.category_path: KOSIS catalog의 카테고리 경로 (예: "인구 > 출생")
+#   - MismatchType.DOMAIN_MISMATCH: stat_id 카테고리가 문서 도메인과 어긋난 경우
 """
 core/schemas.py — v3 전체 파이프라인 데이터 모델
 
@@ -66,6 +69,8 @@ class MismatchType(str, Enum):
     TIME_PERIOD = "time_period"
     POPULATION = "population"
     EXAGGERATION = "exaggeration"
+    # [이수민 2026-05-14] working memory 도메인 가드용
+    DOMAIN_MISMATCH = "domain_mismatch"  # stat_id 카테고리가 문서 도메인과 어긋남
 
 
 class FeedbackType(str, Enum):
@@ -258,6 +263,8 @@ class Evidence(BaseModel):
     raw_response: dict[str, Any] = Field(default_factory=dict)
     graph_nodes: list[GraphNode] = Field(default_factory=list)
     provenance: ProvenanceRecord | None = None
+    # [이수민 2026-05-14] working memory 도메인 가드용
+    category_path: str | None = None  # KOSIS catalog의 "인구 > 출생" 등
 
 
 class VerificationResult(BaseModel):

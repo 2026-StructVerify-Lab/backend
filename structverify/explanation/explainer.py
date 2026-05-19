@@ -46,7 +46,14 @@ MATCH_PROMPT = """당신은 팩트체크 전문 작가입니다.
 - "KOSIS {{통계명}}에 따르면" 형식으로 출처 명시
 - 기사 수치와 공식 수치를 나란히 비교
 - 통계표 ID 포함
-- ⚠️ "사실이 아닙니다", "틀렸습니다" 등 부정 표현 절대 금지"""
+- ⚠️ "사실이 아닙니다", "틀렸습니다" 등 부정 표현 절대 금지
+
+[⚠️ 주의 — 설명 전 반드시 확인]
+- 공식 통계 출처({stat_source})가 indicator({indicator})와 
+  *같은 국가/지역*의 통계인지 확인하세요.
+- 시점({claim_time} vs {evidence_time})이 다르면 
+  "같은 연도 데이터가 아님"을 반드시 명시하세요.
+"""
 
 MULTIHOP_PROMPT = """당신은 팩트체크 전문 작가입니다.
 아래 검증 결과를 독자가 이해하기 쉽게 한국어로 설명하세요.
@@ -91,6 +98,7 @@ UNVERIFIABLE_PROMPT = """당신은 팩트체크 전문 작가입니다.
 [판정: 검증 불가 (UNVERIFIABLE) — 공식 통계를 찾지 못했습니다.]
 주장: "{claim_text}"
 검증 불가 이유: {reason}
+시도한 통계표: {stat_source} 
 시도한 검색어: {search_hint}
 
 [작성 규칙]
@@ -98,7 +106,8 @@ UNVERIFIABLE_PROMPT = """당신은 팩트체크 전문 작가입니다.
 - "사실입니다" 또는 "사실이 아닙니다"라고 단정하지 마세요
 - 왜 공식 통계를 찾지 못했는지만 설명
 - 독자가 직접 KOSIS에서 확인할 방법 제시
-- 수치를 새로 만들어내지 마세요. "100.0°C" 같은 거짓 수치 생성 금지"""
+- 수치를 새로 만들어내지 마세요. 위에 명시된 수치만 사용.
+"""
 
 
 # ── 메인 함수 ─────────────────────────────────────────────────────────────
@@ -221,6 +230,7 @@ def _build_prompt(
         return UNVERIFIABLE_PROMPT.format(
             claim_text=claim.claim_text,
             reason=reason,
+            stat_source=stat_source,
             search_hint=search_hint,
         )
 

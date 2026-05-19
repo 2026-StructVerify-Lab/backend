@@ -15,6 +15,10 @@
 # [DONE] getMeta(PRD/CMMT) 보강
 # [DONE] KOSIS API fetch() Param/statisticsParameterData
 # [TODO] 응답 파싱·obj/itm 매칭 정교화
+# [2026-05-14 | 이수민] memory/v1: category_path 보강 로직 추가
+#   - _lookup_category_path(): kosis_stat_catalog 테이블에서 stat_id로 직접 조회
+#   - search_and_fetch 성공 시 stat_rec.metadata 우선, 없으면 DB 조회로 보강
+#   - working memory 도메인 가드(verifier)에서 활용
 """
 retrieval/kosis_connector.py — KOSIS Open API 커넥터 (v3: CatalogSearchTool + LLM Agent)
 
@@ -44,6 +48,21 @@ retrieval/kosis_connector.py — KOSIS Open API 커넥터 (v3: CatalogSearchTool
 [박재윤 - 2026-05-11]
 - tried_log UnboundLocalError 버그 수정
   · candidates 없을 때 tried_ids, tried_log 초기화 누락 수정
+
+[박재윤 - 2026-05-14 ]_is_table_relevant 국가 불일치 체크 추가
+  · indicator에 외국 국가명 있고 테이블이 국내 통계면 → False
+  · 미국 소비자물가 → 한국 소비자물가 테이블 매칭 방지
+
+_is_table_relevant 해외 지역명 체크 추가
+   · indicator에 국가명 없는데 테이블에 해외 지역명 있으면 → False
+   · 합계출산율 → 합계출산율 남부·동남아시아 테이블 매칭 방지
+
+_AGENT_SELECT_PROMPT 개선
+   · 국가 일치 규칙 추가 (외국 지표 → 국내 테이블 선택 방지)
+   · 지표/시점 일치 규칙 명시
+   · 부적합 후보 NONE 반환 조건 추가
+
+
 """
 from __future__ import annotations
 
@@ -66,13 +85,14 @@ from structverify.utils.logger import get_logger
 logger = get_logger(__name__)
 
 _FETCH_MAX_RETRY  = 2    # 단일 stat_id 내 prd_se 순회 retry
-_MAX_CANDIDATES   = 5    # [v4] 후보 순회 최대 횟수
+_MAX_CANDIDATES   = 8    # [v4] 후보 순회 최대 횟수
 _JSON_HEADERS: dict[str, str] = {
     "Accept":     "application/json, */*;q=0.1",
     "User-Agent": "StructVerify/1.0 (KOSIS OpenAPI; +https://kosis.kr/openapi/)",
 }
 
 # ── LLM Agent 프롬프트 ──────────────────────────────────────────────────────
+# [박재윤 - 2026-05-14]: _AGENT_SELECT_PROMPT 국가/지표/시점 일치 규칙 추가
 
 _AGENT_SELECT_PROMPT = """당신은 한국 공식 통계 전문가입니다.
 아래 검증 주장에 가장 적합한 KOSIS 통계표를 선택하고 조회 파라미터를 결정하세요.
@@ -85,11 +105,21 @@ population: {population}
 후보 통계표:
 {candidates}
 
+[선택 규칙 — 반드시 준수]
+1. 국가 일치: indicator에 미국/일본/중국 등 외국이 명시되면 반드시 국제/해외 통계표 선택.
+   한국 국내 통계표(예: 소비자물가등락률, 경제활동인구) 절대 선택 금지.
+2. 지표 일치: indicator와 테이블명의 측정 대상이 같아야 함.
+   예: indicator=출생아수 → 출생 관련 테이블, indicator=고용률 → 고용 관련 테이블.
+3. 시점 일치: time_period가 "YYYY-MM"이면 prd_se=M(월간), "YYYY"이면 prd_se=Y(연간).
+4. 부적합 후보: 위 조건 불만족 시 stat_id를 "NONE"으로 답하세요.
+5. 장래 추계 데이터 금지: UN/IMF 출처이거나 2050년 이후 데이터가 있는 테이블 선택 금지.
+   실측 통계만 선택하세요.
+
 JSON으로만 답하세요:
 {{
-  "stat_id": "선택한 통계표 ID",
+  "stat_id": "선택한 통계표 ID 또는 NONE",
   "stat_name": "통계표명",
-  "reason": "선택 이유 한 줄",
+  "reason": "선택 이유 한 줄 (국가/지표/시점 일치 여부 포함)",
   "prd_se": "Y(연간)/M(월간)/Q(분기)",
   "start_prd_de": "시작 기간 (예: 2024, 202401)",
   "end_prd_de": "종료 기간"
@@ -132,11 +162,56 @@ def _is_table_relevant(indicator: str, table_name: str) -> bool:
     "연평균기온" vs "종관기상 평년값"    → True
     "평균 최저기온" vs "고온 일수 노출"  → True (기온 그룹)
     "시가총액" vs "산업별 취업자"        → False
+
+    [박재윤 - 2026-05-14]: 국가 불일치 체크 추가
+    indicator에 외국 국가명 있는데 테이블이 국내 통계면 → False
+
+    [박재윤 - 2026-05-18]: 세부 대상 불일치 차단
+    전체 사망자 indicator인데 영아사망 테이블 매칭되는 문제 방지
+
+    [박재윤 - 2026-05-18]: UN/IMF 국제 데이터 테이블 차단
     """
     import re
 
     if not indicator or not table_name:
         return True
+
+    ind_lower = indicator.lower()
+    tbl_lower = table_name.lower()
+
+    # [박재윤 - 2026-05-14]: 국가 불일치 체크
+    _FOREIGN_COUNTRIES = {"미국", "일본", "중국", "독일", "영국", "유럽", "프랑스", "캐나다"}
+    _FOREIGN_TABLE_MARKERS = {"국제", "해외", "외국", "세계"}
+    foreign_in_indicator = any(c in ind_lower for c in _FOREIGN_COUNTRIES)
+    foreign_in_table = any(c in tbl_lower for c in _FOREIGN_COUNTRIES | _FOREIGN_TABLE_MARKERS)
+    if foreign_in_indicator and not foreign_in_table:
+        return False
+
+    # [박재윤 - 2026-05-18]: UN/IMF 국제 데이터 테이블 차단
+    _INTERNATIONAL_MARKERS = {"un ", "imf ", "oecd ", "세계은행", "국제연합"}
+    if any(m in tbl_lower for m in _INTERNATIONAL_MARKERS):
+        return False
+
+    # [박재윤 - 2026-05-14]: 장래 추계 테이블 차단
+    _FORECAST_TABLE_MARKERS = {"장래", "추계", "전망"}
+    if any(r in tbl_lower for r in _FORECAST_TABLE_MARKERS):
+        return False
+
+    # [박재윤 - 2026-05-14]: 해외 지역명 체크 추가
+    _REGION_MARKERS = {"남부·동남아시아", "동남아시아", "동북아시아", "중앙아시아",
+                       "아프리카", "중동", "남미", "북미", "오세아니아", "서남아시아"}
+    region_in_table = any(r in tbl_lower for r in _REGION_MARKERS)
+    if not foreign_in_indicator and region_in_table:
+        return False
+
+    # [박재윤 - 2026-05-18]: 세부 대상 불일치 차단
+    # 전체 사망자/출생아 indicator인데 영아·신생아 테이블 매칭되는 문제
+    _SPECIFIC_SCOPE_MARKERS = {"영아", "신생아", "모성"}
+    table_is_specific = any(m in tbl_lower for m in _SPECIFIC_SCOPE_MARKERS)
+    if table_is_specific:
+        ind_has_specific = any(m in ind_lower for m in _SPECIFIC_SCOPE_MARKERS)
+        if not ind_has_specific:
+            return False
 
     stopwords = {
         "통계", "현황", "조사", "결과", "항목", "지표", "전체", "기타",
@@ -242,6 +317,30 @@ def is_same_unit_type(claim_unit: str, kosis_unit: str) -> bool:
     return (ct == "unknown" or kt == "unknown") or (ct == kt)
 
 
+# ── [이수민 2026-05-14] category_path DB 직접 조회 헬퍼 ─────────────────────
+# stat_rec.metadata에 category_path가 없는 경우 (KOSIS API 검색 결과 등)
+# kosis_stat_catalog 테이블에서 직접 조회. 도메인 가드용.
+async def _lookup_category_path(stat_id: str) -> str | None:
+    try:
+        import asyncpg
+        dsn = os.environ.get(
+            "PGVECTOR_DSN",
+            "postgresql://postgres:1234@localhost:5432/factcheck",
+        )
+        conn = await asyncpg.connect(dsn)
+        try:
+            row = await conn.fetchrow(
+                "SELECT category_path FROM kosis_stat_catalog WHERE stat_id = $1",
+                stat_id,
+            )
+            return row["category_path"] if row else None
+        finally:
+            await conn.close()
+    except Exception as e:
+        logger.debug(f"category_path 조회 실패 ({stat_id}): {e}")
+        return None
+
+
 # ── 기존 헬퍼 (신준수) ───────────────────────────────────────────────────────
 
 def _meta_error_payload(tag: str, exc: Exception | None = None) -> dict[str, Any]:
@@ -290,16 +389,22 @@ async def kosis_get_meta(
     if meta_type == "PRD":
         p["detail"] = "Y"
     url = f"{base.rstrip('/')}/statisticsData.do"
+    logger.info("[ ] 요청: org_id=%s, tbl_id=%s, meta_type=%s", org_id, tbl_id, meta_type)
     try:
         r = await client.get(url, params=p, headers=_JSON_HEADERS, timeout=timeout)
         r.raise_for_status()
+        logger.info("[kosis_get_meta] 응답 raw text (앞 500자): %s", (r.text or "")[:500])
         data = _kosis_text_to_json(r.text or "")
         if data is None:
+            logger.info("[kosis_get_meta] JSON 파싱 실패 (data=None)")
             return _meta_error_payload("parse")
         if isinstance(data, dict) and data.get("err") is not None and "row" not in data:
+            logger.info("[kosis_get_meta] API 오류 응답: err=%s, errMsg=%s", data.get("err"), data.get("errMsg"))
             return {"kosis_error": "api_err", "err": data.get("err"), "errMsg": data.get("errMsg")}
+        logger.info("[kosis_get_meta] 파싱 성공: type=%s, len=%s", type(data).__name__, len(data) if isinstance(data, (list, dict)) else "-")
         return data
     except Exception as e:
+        logger.info("[kosis_get_meta] HTTP 예외: %s", e)
         return _meta_error_payload("http", e)
 
 
@@ -489,9 +594,17 @@ class KOSISConnector(BaseConnector):
                     })
                     continue
 
+                # [이수민 2026-05-14] working memory 도메인 가드용
+                # stat_rec.metadata에 있으면 사용, 없으면 DB 직접 조회로 보강
+                if data.category_path is None:
+                    data.category_path = (stat_rec.metadata or {}).get("category_path")
+                if data.category_path is None:
+                    data.category_path = await _lookup_category_path(selected_id)
+
                 logger.info(
                     f"Evidence 조회 성공 (후보 {round_idx+1}): [{selected_id}] "
-                    f"value={data.official_value} {data.unit or ''}"
+                    f"value={data.official_value} {data.unit or ''} "
+                    f"category={data.category_path}"
                 )
                 return data
 
@@ -820,6 +933,15 @@ class KOSISConnector(BaseConnector):
             population=query.population or "",
             candidates=candidate_text,
         )
+        logger.info(
+            "[LLM 진입 직전 | _agent_select_stat] claim=%r | indicator=%r | time=%r | population=%r | 후보(%d개):\n%s",
+            raw_claim[:200] or query.keyword,
+            query.indicator or "",
+            query.time_period or "",
+            query.population or "",
+            len(candidates),
+            candidate_text,
+        )
         try:
             result = await llm.generate_json(
                 prompt=prompt,
@@ -862,6 +984,15 @@ class KOSISConnector(BaseConnector):
             prev_params=json.dumps(prev_params, ensure_ascii=False)[:300],
             error=error[:200],
             candidates=candidate_text,
+        )
+        logger.info(
+            "[LLM 진입 직전 | _agent_retry_params] claim=%r | 실패 stat_id=%s | prev_params=%s | error=%r | 후보(%d개):\n%s",
+            raw_claim[:200] or query.keyword,
+            prev_stat_id,
+            json.dumps(prev_params, ensure_ascii=False)[:300],
+            error[:200],
+            len(candidates),
+            candidate_text,
         )
         try:
             result = await llm.generate_json(
@@ -918,6 +1049,14 @@ class KOSISConnector(BaseConnector):
             claim_text=raw_claim[:200] or query.keyword,
             tried_list=tried_text,
             remaining_candidates=remaining_text,
+        )
+        logger.info(
+            "[LLM 진입 직전 | _agent_retry_with_rotation] claim=%r | 실패 이력(%d개):\n%s\n남은 후보(%d개):\n%s",
+            raw_claim[:200] or query.keyword,
+            len(tried_log),
+            tried_text,
+            len(remaining),
+            remaining_text,
         )
 
         try:
