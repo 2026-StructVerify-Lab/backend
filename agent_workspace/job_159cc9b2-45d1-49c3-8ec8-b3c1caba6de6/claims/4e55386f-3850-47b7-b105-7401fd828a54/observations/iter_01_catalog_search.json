@@ -1,0 +1,42 @@
+{
+  "iter_num": 1,
+  "action": "catalog_search",
+  "input": {
+    "query": "작년 평균기온",
+    "category": [
+      "기후"
+    ],
+    "top_k": 3
+  },
+  "output": {
+    "source": "kosis",
+    "query": "작년 평균기온",
+    "category": [
+      "기후"
+    ],
+    "candidates": [
+      {
+        "id": "DT_14104_N_001",
+        "name": "[해양기상] 부이 관측값의 지점별 월 통계",
+        "score": 1.0,
+        "raw": "StatRecord(stat_id='DT_14104_N_001', stat_name='[해양기상] 부이 관측값의 지점별 월 통계', org_name='기상청', org_id='141', available_periods=[], relevance_score=1.0, metadata={'source': 'kosis_api', 'ORG_ID': '141', 'ORG_NM': '기상청', 'TBL_ID': 'DT_14104_N_001', 'TBL_NM': '[해양기상] 부이 관측값의 지점별 월 통계', 'STAT_ID': '2006104', 'STAT_NM': '기상관측통계', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '환경 > 기상관측통계', 'FULL_PATH_ID': 'T > T_4', 'CONTENTS': '관측지점별 평균유의파고 평균상대습도 평균수온 일평균풍속의 월최댓값 평균기온 일평균기온의 월최젓값 최대파고 최대파주기 일평균기온의 월최곳값 일평균수온의 월최젓값 평균풍속 평균현지기압 일평균수온의 월최곳값 평균파주기 포항 추자도 통영 남해239 동해57 동해 부안 남해244 거문도 외연도 서귀포 서해190 서해163(연) 덕적도 신안 인천 풍도 삼척 칠발도 거제도 서해170 울릉도 울산 가거도 남해465 동해78 서해192(연) 남해111 마라도 서해206 고성 울진 홍도 ...', 'STRT_PRD_DE': '2012', 'END_PRD_DE': '2024', 'ITEM03': '', 'REC_TBL_SE': 'Y', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=T.1;T_4.2;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=141&tblId=DT_14104_N_001', 'STAT_DB_CNT': '261', 'QUERY': '연평균 기온'})"
+      },
+      {
+        "id": "DT_14104_N_002",
+        "name": "[해양기상] 등표 관측값의 지점별 월 통계",
+        "score": 0.8944444444444445,
+        "raw": "StatRecord(stat_id='DT_14104_N_002', stat_name='[해양기상] 등표 관측값의 지점별 월 통계', org_name='기상청', org_id='141', available_periods=[], relevance_score=0.8944444444444445, metadata={'source': 'kosis_api', 'ORG_ID': '141', 'ORG_NM': '기상청', 'TBL_ID': 'DT_14104_N_002', 'TBL_NM': '[해양기상] 등표 관측값의 지점별 월 통계', 'STAT_ID': '2006104', 'STAT_NM': '기상관측통계', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '환경 > 기상관측통계', 'FULL_PATH_ID': 'T > T_4', 'CONTENTS': '관측지점별 평균해면기압 최대순간풍속 최대파주기 평균수온 최대파고 일평균수온의 월최젓값 평균파주기 최고기온 평균상대습도 최대파고일자 최대순간풍속일자 최저기온일자 평균수위 최대수위 최저기온 최고기온일자 평균기온 평균풍속 일평균수온의 월최곳값 일자 일평균풍속의 월최댓값 평균유의파고 일평균수온의 월최곳값 최대파주기일자 최대수위일자 일평균수온의 월최젓값 일자 일평균풍속의 월최댓값 일자 가대암 갈매여 이덕서 서수도 십이동파 해수서 지귀도 간여암 광안 오륙도', 'STRT_PRD_DE': '2012', 'END_PRD_DE': '2024', 'ITEM03': '', 'REC_TBL_SE': 'Y', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=T.1;T_4.2;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=141&tblId=DT_14104_N_002', 'STAT_DB_CNT': '261', 'QUERY': '연평균 기온'})"
+      },
+      {
+        "id": "DT_14106",
+        "name": "[고층기상] 레윈존데 관측값의 지점별 연·월 통계",
+        "score": 0.788888888888889,
+        "raw": "StatRecord(stat_id='DT_14106', stat_name='[고층기상] 레윈존데 관측값의 지점별 연·월 통계', org_name='기상청', org_id='141', available_periods=[], relevance_score=0.788888888888889, metadata={'source': 'kosis_api', 'ORG_ID': '141', 'ORG_NM': '기상청', 'TBL_ID': 'DT_14106', 'TBL_NM': '[고층기상] 레윈존데 관측값의 지점별 연·월 통계', 'STAT_ID': '2006104', 'STAT_NM': '기상관측통계', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '환경 > 기상관측통계', 'FULL_PATH_ID': 'T > T_4', 'CONTENTS': '지점별 시각별 표준등압면/지상별 평균고도 최고고도 최저고도일자 평균기온 평균현지기압 최저고도 최고기온 평균합성풍속 최고현지기압 최저현지기압 최고기온일자 최저기온 평균이슬점온도 평균남북성분합성풍속 최저기온일자 최고현지기압일자 최고고도일자 최저현지기압일자 최대풍속 최대풍속일자 평균합성풍향 평균풍속 최대풍속풍향 평균동서성분합성풍속 흑산도 창원 북강릉 오산 광주 백령도 포항 국가태풍센터 00UTC 12UTC 100hPa 850hPa 20hPa 30hPa 70hPa 250hPa 1000hPa ...', 'STRT_PRD_DE': '2016', 'END_PRD_DE': '2024', 'ITEM03': '- 관측값에 결측이 있을 경우, 결측을 제외하고 평균값 및 극값을 구한다. - 일 관측값의 누락된 날의 합계가 10일보다 많거나 연속된 5일 이상의 일 관측값이 누락된 경우는 누락된 날을 제외하고 극값 및 평균값을 산출하며, 값 오른쪽에 ＂)＂ 표시를 한다. - 월 평균값 및 극값에 결측이 하나라도 있을 경우 통계처리하지 않고 ＂x＂ 표시를 한다. - 월 평균값 및 극값에 자료부족값이 하나라도 있을 경우 자료부족값을 포함해 연 평균값 및 극값을 구하되 ＂)＂ 표시를 한다. - 연 평균값은 1월부터 12월까지의 매월 월 평균값을 합계한 후 12로 나눈값이며, 월별로 일수의 많고 적음에 따른 평균값의 차이는 고려하지 않는다. - 연 극값은 월별 극값 중에서 구한 최대값 또는 최소값을 말한다. - 관측값이 전부 결측인 경우는 결측 처리하고 ＂x＂ 표시를 한다.  - 월 평균값은 해당월의 1일부터 말일까지 일 관측자료를 산술평균하여, 값의 총합을 관측횟수로 나눈 값이다. - 월 극값은 해당월의 일 관측값 중에서 구한 최대값 또는 최소값을 말한다.', 'REC_TBL_SE': 'N', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=T.1;T_4.2;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=141&tblId=DT_14106', 'STAT_DB_CNT': '261', 'QUERY': '연평균 기온'})"
+      }
+    ],
+    "candidate_count": 3
+  },
+  "summary": "catalog_search(kosis) query='작년 평균기온' → 3개 후보. Top: [DT_14104_N_001] [해양기상] 부이 관측값의 지점별 월 통계 (score=1.000) | [DT_14104_N_002] [해양기상] 등표 관측값의 지점별 월 통계 (score=0.894) | [DT_14106] [고층기상] 레윈존데 관측값의 지점별 연·월 통계 (score=0.789)",
+  "success": true,
+  "error": null
+}

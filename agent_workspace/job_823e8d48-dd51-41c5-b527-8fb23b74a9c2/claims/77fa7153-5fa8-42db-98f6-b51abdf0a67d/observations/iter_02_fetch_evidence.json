@@ -1,0 +1,36 @@
+{
+  "iter_num": 2,
+  "action": "fetch_evidence",
+  "input": {
+    "candidate_id": "DT_XNN0004",
+    "params": {},
+    "_candidate_fallbacks": [
+      "DT_2KAA207",
+      "DT_XNS0004",
+      "DT_1BPA101",
+      "DT_1B81A17"
+    ]
+  },
+  "output": {
+    "source": "kosis",
+    "candidate_id": "DT_XNN0004",
+    "params": {
+      "indicator": "합계출산율",
+      "time_period": "2025-04",
+      "population": "전체",
+      "unit_hint": "명",
+      "_range_start": "2024-04",
+      "_range_end": "2025-04"
+    },
+    "evidence": null,
+    "tried_candidates": [
+      "DT_XNN0004",
+      "DT_2KAA207",
+      "DT_XNS0004",
+      "DT_1BPA101"
+    ]
+  },
+  "summary": "fetch(kosis): 후보 4개 모두 실패 (관련 표 없음)",
+  "success": false,
+  "error": "모든 catalog 후보가 관련성 체크 실패 또는 데이터 없음."
+}

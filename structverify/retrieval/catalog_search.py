@@ -40,6 +40,79 @@ logger = get_logger(__name__)
 # KOSIS 통합검색에서 국가통계만 (지역통계 제외)
 _KOSIS_SEARCH_VW_CD = "MT_ZTITLE"
 
+
+# ── [v6.21] 수록주기 인지 재정렬 ──────────────────────────────────────
+# catalog 인덱스(kosis_stat_catalog)에 수록주기 컬럼이 없어, 표 이름
+# 텍스트에서 추론한다. claim이 월/분기 시점인데 검색 결과 상위가 전부
+# 연 단위 표면 fetch가 모두 실패하므로(표 시점 단위 불일치 거부),
+# 월/분기 claim일 때 월간 신호가 있는 표를 앞으로 끌어올린다.
+# 도메인 무관: 표 이름의 보편적 주기 어휘만 사용 (인구·기온·고용 공통).
+_MONTHLY_NAME_HINTS = ("월별", "월간", "월.", "월·", "/월", "매월", "월말")
+_YEARLY_NAME_HINTS = ("연간", "연도별", "연도말", "장래", "추계", "년간")
+
+
+def _claim_period_unit(time_period: str | None) -> str:
+    """claim time_period의 단위 판별: month / quarter / year / unknown."""
+    if not time_period:
+        return "unknown"
+    s = str(time_period).strip()
+    # YYYY-MM, YYYY.MM, YYYYMM → month
+    if re.match(r"^\d{4}[-./]?\d{2}$", s):
+        return "month"
+    # YYYY-Q1 등 분기
+    if re.search(r"[Qq][1-4]", s) or re.match(r"^\d{4}[-./]?[1-4]$", s):
+        return "quarter"
+    if re.match(r"^\d{4}$", s):
+        return "year"
+    return "unknown"
+
+
+def _name_periodicity(stat_name: str) -> str:
+    """표 이름 텍스트에서 수록주기 추론: monthly / yearly / mixed / unknown.
+
+    "월.분기.연간 인구동향" → mixed (월 신호 있음 → 월 claim에 사용 가능)
+    "장래 합계출산율"        → yearly
+    "시도/혼인종류별 혼인"    → unknown (주기 표기 없음)
+    """
+    if not stat_name:
+        return "unknown"
+    s = str(stat_name)
+    has_month = any(h in s for h in _MONTHLY_NAME_HINTS)
+    has_year = any(h in s for h in _YEARLY_NAME_HINTS)
+    if has_month and has_year:
+        return "mixed"   # "월.분기.연간" — 월 데이터 포함
+    if has_month:
+        return "monthly"
+    if has_year:
+        return "yearly"
+    return "unknown"
+
+
+def _rerank_by_periodicity(
+    records: list[StatRecord], claim_unit: str
+) -> list[StatRecord]:
+    """claim 시점 단위에 맞춰 후보를 재정렬.
+
+    claim이 월/분기인데 상위가 전부 연 단위 표면 검증이 불가능하므로,
+    월간 신호가 있는 표(monthly/mixed)를 앞으로, 명백한 연 단위 표
+    (yearly)를 뒤로 보낸다. embedding 유사도 순서는 같은 등급 안에서 유지.
+
+    claim이 연 단위거나 unknown이면 원순서 그대로 (가드 불필요).
+    """
+    if claim_unit not in ("month", "quarter"):
+        return records
+
+    def _priority(r: StatRecord) -> int:
+        p = _name_periodicity(getattr(r, "stat_name", "") or "")
+        if p in ("monthly", "mixed"):
+            return 0   # 월 데이터 있음 — 최우선
+        if p == "unknown":
+            return 1   # 판별 불가 — 중립
+        return 2       # yearly — 월 claim엔 부적합, 후순위
+
+    # stable sort: 같은 우선순위는 기존(유사도) 순서 유지
+    return sorted(records, key=_priority)
+
 # LLM 카테고리/검색어 추출 프롬프트 (parent_path 없을 때만 fallback으로 사용)
 _CATEGORY_EXTRACT_PROMPT = """다음 뉴스 수치 주장을 KOSIS 검색에 적합한 형태로 분석하세요.
 
@@ -141,6 +214,20 @@ class CatalogSearchTool:
             all_recs = await self._search_pgvector(embedding, category_keywords=None, top_k=5)
             _add(all_recs)
 
+        # [v6.21] 수록주기 인지 재정렬 — claim이 월/분기 시점이면
+        # 월간 데이터가 있는 표를 상위로. 연 단위 표만 상위에 오면
+        # fetch가 모두 '표 시점 단위 불일치'로 거부돼 검증 불가가 된다.
+        claim_unit = _claim_period_unit(getattr(query, "time_period", None))
+        if claim_unit in ("month", "quarter"):
+            before = [r.stat_id for r in results[:3]]
+            results = _rerank_by_periodicity(results, claim_unit)
+            after = [r.stat_id for r in results[:3]]
+            if before != after:
+                logger.info(
+                    f"CatalogSearch 수록주기 재정렬 (claim={claim_unit}): "
+                    f"top3 {before} → {after}"
+                )
+
         logger.info(f"CatalogSearch 완료: {len(results)}개 후보")
         return results[:top_k]
 
@@ -168,8 +255,11 @@ class CatalogSearchTool:
                 search_kw = parts[-1]
                 # 앞 1-2개 노드를 카테고리로
                 category_kws = parts[:-1] if len(parts) > 1 else parts
-                # 박재유 정제 (연도 + 공백)
+                # 노이즈 정제 (연도 + 마크다운 + 공백)
                 search_kw = _minimal_clean(search_kw)
+                category_kws = [
+                    _minimal_clean(c) for c in category_kws if _minimal_clean(c)
+                ]
                 if search_kw:
                     logger.debug(f"parent_path 활용: category={category_kws}, kw={search_kw}")
                     return (category_kws, search_kw)
@@ -212,7 +302,8 @@ class CatalogSearchTool:
             if "카테고리" in line and ":" in line:
                 cats = line.split(":", 1)[1].strip()
                 category_keywords = [
-                    c.strip().strip("\"'") for c in cats.split(",") if c.strip()
+                    _minimal_clean(c) for c in cats.split(",")
+                    if _minimal_clean(c)
                 ]
             elif "검색어" in line and ":" in line:
                 kw = line.split(":", 1)[1].strip().strip("\"'")
@@ -397,9 +488,18 @@ class CatalogSearchTool:
 #     kw = re.sub(r'\s+', ' ', kw)
 
 def _minimal_clean(kw: str) -> str:
-    """LLM 응답에서 명백한 노이즈만 제거 (연도 + 공백). 의미 정제는 LLM 책임."""
+    """LLM 응답에서 명백한 노이즈만 제거 (연도 + 마크다운 + 공백).
+
+    의미 정제는 LLM 책임이지만, planner LLM이 검색어/카테고리에
+    마크다운 강조(**, *, `, #)를 섞어 출력하는 경우가 잦아
+    (예: '** 연평균 기온') 검색을 오염시키므로 여기서 제거한다.
+    """
     if not kw:
         return ""
-    s = re.sub(r"\b\d{4}\b", "", kw).strip()
+    s = str(kw)
+    # 마크다운 강조/머리표 제거: **bold**, *italic*, `code`, # heading, - bullet
+    s = s.replace("*", "").replace("`", "").replace("#", "")
+    s = re.sub(r"^\s*[-•·]\s*", "", s)   # 줄머리 불릿
+    s = re.sub(r"\b\d{4}\b", "", s).strip()
     s = re.sub(r"\s+", " ", s)
-    return s.strip(",·\"' ")
+    return s.strip(",·\"' -")

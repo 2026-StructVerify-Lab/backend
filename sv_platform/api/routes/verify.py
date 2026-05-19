@@ -8,7 +8,7 @@ sv_platform.api.routes.verify — /v1/verify
 """
 from __future__ import annotations
 
-import logging
+from structverify.utils.logger import get_logger
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -22,7 +22,7 @@ from sv_platform.pipeline_runner import run_verification_background
 
 
 router = APIRouter(prefix="/v1", tags=["verify"])
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @router.post("/verify", response_model=JobOut)

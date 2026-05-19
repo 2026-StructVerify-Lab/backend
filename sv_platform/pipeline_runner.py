@@ -16,15 +16,15 @@ sv_platform.pipeline_runner — `structverify` 라이브러리 호출 wrapper
 from __future__ import annotations
 
 import asyncio
-import logging
+from structverify.utils.logger import get_logger
 import re
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
-
+import logging
 from sv_platform.config import settings
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ── 단계별 진행률 매핑 ────────────────────────────────────────────

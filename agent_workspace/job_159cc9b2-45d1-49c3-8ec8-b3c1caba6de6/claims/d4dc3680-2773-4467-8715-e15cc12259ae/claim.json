@@ -1,0 +1,18 @@
+{
+  "claim_id": "d4dc3680-2773-4467-8715-e15cc12259ae",
+  "doc_id": "159cc9b2-45d1-49c3-8ec8-b3c1caba6de6",
+  "block_id": "b0001",
+  "sent_id": "b0001_s0002",
+  "claim_text": "1973년은 기상관측망이 대폭 확충돼 각종 기상기록 기준점이 되는 해다.",
+  "claim_type": "역사적 사실",
+  "canonical_type": null,
+  "schema": null,
+  "source_offset": {
+    "page": null,
+    "char_start": 221,
+    "char_end": 261
+  },
+  "check_worthy_score": 0.8,
+  "graph_anchor_id": "node:b0001_s0002",
+  "context_text": "(서울=연합뉴스) 이재영 기자 = 2024년은 우리나라 연평균 기온이 사상 처음 14도를 돌파해 '압도적으로 뜨거웠던 해'로 남았다. 1일 기상청 기상자료개방포털을 보면 작년 평균기온은 14.5도로 재작년(13.7도)에 이어 2년 연속 '1973년 이후 연평균 기온 신기록'을 갈아치웠다. 1973년은 기상관측망이 대폭 확충돼 각종 기상기록 기준점이 되는 해다."
+}

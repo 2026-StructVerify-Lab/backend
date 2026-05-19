@@ -1,0 +1,14 @@
+{
+  "iter_num": 3,
+  "action": "calculate",
+  "input": {
+    "formula": "mean",
+    "values": [
+      "14.5"
+    ]
+  },
+  "output": {},
+  "summary": "실행 예외: AttributeError: 'list' object has no attribute 'items'",
+  "success": false,
+  "error": "AttributeError: 'list' object has no attribute 'items'"
+}

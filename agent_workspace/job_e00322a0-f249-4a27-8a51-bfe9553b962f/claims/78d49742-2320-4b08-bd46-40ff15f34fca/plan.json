@@ -1,0 +1,45 @@
+{
+  "claim_id": "78d49742-2320-4b08-bd46-40ff15f34fca",
+  "claim_type": "absolute",
+  "required_data": [
+    {
+      "indicator": "평균기온",
+      "time": "2024",
+      "population": "전체",
+      "unit_hint": "도",
+      "resolved_value": null,
+      "resolved_unit": null,
+      "source": null,
+      "source_time": null
+    }
+  ],
+  "initial_steps": [
+    {
+      "action": "catalog_search",
+      "input": {
+        "query": "평균기온",
+        "category": [
+          "기후"
+        ],
+        "top_k": 5
+      },
+      "rationale": "기상청 기상자료개방포털에서 최근 10년간 평균기온 자료 찾기"
+    },
+    {
+      "action": "fetch_evidence",
+      "input": {
+        "candidate_id": "<검색 결과의 표 id>",
+        "params": {}
+      },
+      "rationale": "찾은 자료에서 해당 연도의 평균기온 확인"
+    }
+  ],
+  "fallback": {
+    "use_original_text": true,
+    "alternative_keywords": [],
+    "give_up_after_attempts": 3
+  },
+  "calculation_formula": null,
+  "notes": null,
+  "created_at": "2026-05-18T08:21:40.506090Z"
+}

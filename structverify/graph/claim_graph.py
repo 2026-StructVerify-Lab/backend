@@ -137,6 +137,20 @@ class ClaimGraph:
 
         return None
 
+    def count_temporal_expressions(self, claim: Claim) -> int:
+        """[v6.19] claim의 문장에 달린 TemporalExpr 개수.
+
+        한 문장에 "작년"+"재작년"처럼 시간표현이 여러 개면,
+        temporal_provenance가 어느 것이 이 claim에 맞는지 구분할 수
+        없다(첫 번째를 무조건 반환). 이 경우 schema_inductor가
+        단정적 hint 대신 anchor 변환표만 받아 LLM이 claim 문맥으로
+        직접 고르게 해야 한다.
+        """
+        sent_anchor = self._claim_to_sent_anchor(claim)
+        if not sent_anchor:
+            return 0
+        return len(self.neighbors(sent_anchor, GraphEdgeType.HAS_TEMPORAL))
+
     def temporal_provenance(self, claim: Claim) -> dict | None:
         """
         시점 해소의 근거 (디버깅/설명용).

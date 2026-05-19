@@ -270,7 +270,16 @@ class VerificationResult(BaseModel):
     explanation: str | None = None
     provenance_summary: str | None = None
     reviewer_verdict: VerdictType | None = None
+    # ★ Phase E: growth_rate/diff 같은 계산 검증값
+    computed_value: float | None = None
+    """Calculate tool 결과값 — 주장값 vs 이 값 비교로 verdict 결정."""
+    formula: str | None = None
+    """사용된 수식 (예: '(current - prev) / prev * 100')."""
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    # [Multi-hop GraphRAG - 김예슬 2026-05-08]
+    # 파생 주장(2.6배 등)을 COMPARE 엣지 2-hop으로 검증한 경우 표시
+    multihop_used: bool = False
+    multihop_detail: dict | None = None
 
 
 # ── Feedback / Adaptation ────────────────────────────────────

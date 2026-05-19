@@ -1,0 +1,22 @@
+{
+  "claim_id": "3bd7ba8f-545e-48ab-b5c5-35b65d5230ed",
+  "verdict": "unverifiable",
+  "confidence": 0.3,
+  "explanation": "비교 불가: 주장값=None, KOSIS(DT_MOGE_3000400129_2021_6) 조회값=19.0명.",
+  "data_points": [
+    {
+      "indicator": "중앙행정기관 위원회별 여성참여 현황",
+      "time": "202101",
+      "population": null,
+      "unit_hint": "명",
+      "resolved_value": 19.0,
+      "resolved_unit": "명",
+      "source": "KOSIS:DT_MOGE_3000400129_2021_6",
+      "source_time": "202101"
+    }
+  ],
+  "iterations_used": 3,
+  "total_tokens": 0,
+  "stop_reason": "completed",
+  "created_at": "2026-05-18T08:21:28.951465Z"
+}

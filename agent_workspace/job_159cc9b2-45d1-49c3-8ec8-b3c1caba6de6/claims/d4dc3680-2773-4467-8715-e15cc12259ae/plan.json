@@ -1,0 +1,31 @@
+{
+  "claim_id": "d4dc3680-2773-4467-8715-e15cc12259ae",
+  "claim_type": "unknown",
+  "required_data": [],
+  "initial_steps": [
+    {
+      "action": "catalog_search",
+      "input": {
+        "query": "1973년은 기상관측망이 대폭 확충돼 각종 기상기록 기준점이 되는 해다.",
+        "top_k": 5
+      },
+      "rationale": "[auto-prepended] catalog_search 자동 추가"
+    },
+    {
+      "action": "fetch_evidence",
+      "input": {
+        "candidate_id": "<catalog_search 결과의 top id>",
+        "params": {}
+      },
+      "rationale": "[auto-prepended] 후보 1번 표 데이터 가져오기"
+    }
+  ],
+  "fallback": {
+    "use_original_text": false,
+    "alternative_keywords": [],
+    "give_up_after_attempts": 5
+  },
+  "calculation_formula": null,
+  "notes": null,
+  "created_at": "2026-05-18T08:10:27.616971Z"
+}

@@ -1,0 +1,84 @@
+{
+  "iter_num": 1,
+  "action": "catalog_search",
+  "input": {
+    "query": "조출생률",
+    "category": [
+      "인구동태"
+    ],
+    "top_k": 10
+  },
+  "output": {
+    "source": "kosis",
+    "query": "조출생률",
+    "category": [
+      "인구동태"
+    ],
+    "candidates": [
+      {
+        "id": "DT_1B8000H",
+        "name": "시도/인구동태건수 및 동태율(출생,사망,혼인,이혼)",
+        "score": 1.0,
+        "raw": "StatRecord(stat_id='DT_1B8000H', stat_name='시도/인구동태건수 및 동태율(출생,사망,혼인,이혼)', org_name='국가데이터처', org_id='101', available_periods=[], relevance_score=1.0, metadata={'source': 'kosis_api', 'ORG_ID': '101', 'ORG_NM': '국가데이터처', 'TBL_ID': 'DT_1B8000H', 'TBL_NM': '시도/인구동태건수 및 동태율(출생,사망,혼인,이혼)', 'STAT_ID': '1962004', 'STAT_NM': '인구동향조사', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '인구 > 인구동향조사 > 인구동태건수 및 동태율(출생, 사망, 혼인, 이혼)', 'FULL_PATH_ID': 'A > A_3 > A2_6', 'CONTENTS': '행정구역별 출생건수 (명) 조출생률 (천명당) 사망건수 (명) 조사망률 (천명당) 자연증가건수 (명) 자연증가율 (천명당) 혼인건수 (건) 조혼인율 (천명당) 이혼건수 (건) 조이혼율 (천명당) 합계출산율 전국 서울특별시 부산광역시 대구광역시 인천광역시 광주광역시 대전광역시 울산광역시 세종특별자치시 경기도 강원특별자치도 충청북도 충청남도 전북특별자치도 전라남도 경상북도 경상남도 제주특별자치도 국외', 'STRT_PRD_DE': '1990', 'END_PRD_DE': '2025', 'ITEM03': '○ 혼인, 이혼은 다음해 3월 말, 출생은 다음해 8월 말, 사망은 다음해 9월 말에 확정수치 공표 ○ 본 자료의 출생통계(1981~2008), 사망통계(1983~2007), 혼인통계(1981~2008) 및 이혼통계(1981~2008) 수치는 통계의 일관성을 확보하고 국제비교가 가능하도록 자료원 및 집계방식을 단일화하는 등 시계열을 보정한 결과로 기존의 공표자료와 차이가 있음 □ 출생 및 사망통계 - 총 출생아수와 총 사망자수는 국내 거주 출생아수, 사망자수만을 집계 - 지연신고된 자료 집계 및 사망률, 출산율 산출시 반영 - 출생통계(1981~1996) 및 사망통계(1983~1996)의 자료는 10년간의 지연신고 누적분이 포함된 결과이며, 이후 연도는 동일한 기준으로 시계열을 비교하기 위해 해당연도 다음해 4월 신고분까지 집계한 결과임 □ 혼인 및 이혼통계 - 신고기준 집계 - 남편의 주소지를 기준으로 행정구역 집계 - 1998년 이후 해외 주소 자료 제외 □ 공통사항 - 연앙인구의 자료원(추계인구, 주민인구)과 계산방식(산술평균) 일치 - 항목 표준화 및 산출방식 일치', 'REC_TBL_SE': 'N', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=A.1;A_3.2;A2_6.3;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=101&tblId=DT_1B8000H', 'STAT_DB_CNT': '3940', 'QUERY': '조출생률'})"
+      },
+      {
+        "id": "DT_1B8000I",
+        "name": "시군구/인구동태건수 및 동태율(출생,사망,혼인,이혼)",
+        "score": 0.8944444444444445,
+        "raw": "StatRecord(stat_id='DT_1B8000I', stat_name='시군구/인구동태건수 및 동태율(출생,사망,혼인,이혼)', org_name='국가데이터처', org_id='101', available_periods=[], relevance_score=0.8944444444444445, metadata={'source': 'kosis_api', 'ORG_ID': '101', 'ORG_NM': '국가데이터처', 'TBL_ID': 'DT_1B8000I', 'TBL_NM': '시군구/인구동태건수 및 동태율(출생,사망,혼인,이혼)', 'STAT_ID': '1962004', 'STAT_NM': '인구동향조사', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '인구 > 인구동향조사 > 인구동태건수 및 동태율(출생, 사망, 혼인, 이혼)', 'FULL_PATH_ID': 'A > A_3 > A2_6', 'CONTENTS': '행정구역별 조출생률 (천명당) 자연증가율 (천명당) 자연증가건수 (명) 이혼건수 (건) 조이혼율 (천명당) 혼인건수 (건) 조혼인율 (천명당) 출생건수 (명) 사망건수 (명) 조사망률 (천명당) 종로구 중랑구 도봉구 영등포구 기장군 북구 광주광역시 남구 팔달구 군포시 하남시 화성시 가평군 춘천시 동해시 홍천군 인제군 양양군 서원구 화순군 장흥군 영주시 군위군 청송군 성주군 울진군 진주시 함안군 산청군 국 외 전국 성북구 서초구 송파구 연제구 남구 세종시 수정구 원미구 소사구 ...', 'STRT_PRD_DE': '2000', 'END_PRD_DE': '2025', 'ITEM03': '○ 이 통계표는 수치가 확정되는 시점에 공개됨 - 출생통계(1981~1996) 및 사망통계(1983~1996)의 자료는 10년간의 지연신고 - 출생(다음해 8월), 사망(다음해 9월), 혼인·이혼(다음해 3월) ○ 본 자료의 출생통계(1970~2008), 사망통계(1970~2007), 혼인통계(1981~2008) 및 이혼통계(1970~2008) 수치는 통계의 일관성을 확보하고 국제비교가 가능하도록 자료원 및 집계방식을 단일화하는 등 시계열을 보정한 결과로 기존의 공표자료와 차이가 있음 ○ 한국행정구역분류코드 개정에 따라 ＇23년 군지역 코드 변경 적용 * 시계열 자료 조회시 군지역은 변경전(~＇22년), 변경후(＇23~) 모두 선택 □ 출생 및 사망통계 - 총 출생아수와 총 사망자수는 국내 거주 출생아수, 사망자수만을 집계 - 지연신고된 자료 집계 및 사망률, 출산율 산출시 반영 누적분이 포함된 결과이며, 이후 연도는 동일한 기준으로 시계열을 비교하기 위해 해당연도 다음해 4월 신고분까지 집계한 결과임 □ 혼인 및 이혼통계 - 신고기준 집계 □ 공통사항 - 남편의 주소지를 기준으로 행정구역 집계 - 1998년 이후 해외 주소 자료 제외 - 연앙인구의 자료원(추계인구, 주민인구)과 계산방식(산술평균) 일치 - 항목 표준화 및 산출방식 일치', 'REC_TBL_SE': 'Y', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=A.1;A_3.2;A2_6.3;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=101&tblId=DT_1B8000I', 'STAT_DB_CNT': '3940', 'QUERY': '조출생률'})"
+      },
+      {
+        "id": "DT_1B8000G",
+        "name": "월.분기.연간 인구동향(출생,사망,혼인,이혼)",
+        "score": 0.788888888888889,
+        "raw": "StatRecord(stat_id='DT_1B8000G', stat_name='월.분기.연간 인구동향(출생,사망,혼인,이혼)', org_name='국가데이터처', org_id='101', available_periods=[], relevance_score=0.788888888888889, metadata={'source': 'kosis_api', 'ORG_ID': '101', 'ORG_NM': '국가데이터처', 'TBL_ID': 'DT_1B8000G', 'TBL_NM': '월.분기.연간 인구동향(출생,사망,혼인,이혼)', 'STAT_ID': '1962004', 'STAT_NM': '인구동향조사', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '인구 > 인구동향조사', 'FULL_PATH_ID': 'A > A_3', 'CONTENTS': '종류별 행정구역별 출생,사망,혼인,이혼 합계출산율 일반혼인율(남편) 일반이혼율(남편) 조출생률(천명당) 혼인건수(건) 이혼건수(건) 조혼인율(천명당) 출생아수(명) 일반이혼율(아내) 사망자수(명) 자연증가율(천명당) 일반혼인율(아내) 조사망률(천명당) 자연증가건수(명) 조이혼율(천명당) 인천광역시 경기도 세종특별자치시 경상남도 서울특별시 부산광역시 광주광역시 강원특별자치도 전라남도 전국 충청북도 대전광역시 충청남도 울산광역시 경상북도 제주특별자치도 대구광역시 전북특별자치', 'STRT_PRD_DE': '1981', 'END_PRD_DE': '2026', 'ITEM03': '○ 출생, 사망은 발생월별, 혼인, 이혼은 신고월별 건수임 ○ 통계표에 수록된 잠정자료는 반올림한 값으로, 전체 수치의 합이 일치하지 않을 수 있음 ○ 혼인, 이혼은 다음해 3월 말, 출생은 다음해 8월 말, 사망은 다음해 9월 말에 확정수치 공표 ○ 자연증가율: 조출생률 - 조사망률 ○ 합계출산율(전국) 월간 공표 (25.1월부터~) ○ 합계출산율(시도) 분기 및 연간 공표 ○ 분석기능 활용 시, 조회설정-부가기능-소수점 자릿수 2째자리로 설정 후 적용 (합계출산율이 소수점 2째자리수이기때문에 설정 필요) * 대구광역시 군위군 편입(23.7.1)됨에 따라 23.7월 통계표부터 대구시 편입 반영', 'REC_TBL_SE': 'N', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=A.1;A_3.2;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=101&tblId=DT_1B8000G', 'STAT_DB_CNT': '3940', 'QUERY': '조출생률'})"
+      },
+      {
+        "id": "INH_1B8000F_01",
+        "name": "출생아수, 합계출산율, 자연증가 등",
+        "score": 0.6833333333333333,
+        "raw": "StatRecord(stat_id='INH_1B8000F_01', stat_name='출생아수, 합계출산율, 자연증가 등', org_name='국가데이터처', org_id='101', available_periods=[], relevance_score=0.6833333333333333, metadata={'source': 'kosis_api', 'ORG_ID': '101', 'ORG_NM': '국가데이터처', 'TBL_ID': 'INH_1B8000F_01', 'TBL_NM': '출생아수, 합계출산율, 자연증가 등', 'STAT_ID': '1962004', 'STAT_NM': '인구동향조사', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '인구 > 인구동향조사 > 출생', 'FULL_PATH_ID': 'A > A_3 > A21', 'CONTENTS': '기본항목별 인구동태건수 및 동태율 추이 자연증가건수(명) 출생아수(명) 합계출산율(명) 출생성비(명) 조출생률(천명당) 자연증가율(천명당)', 'STRT_PRD_DE': '1970', 'END_PRD_DE': '2025', 'ITEM03': '', 'REC_TBL_SE': 'N', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=A.1;A_3.2;A21.3;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=101&tblId=INH_1B8000F_01', 'STAT_DB_CNT': '3940', 'QUERY': '조출생률'})"
+      },
+      {
+        "id": "INH_PB0004_2022_38",
+        "name": "장래 인구변동요인(출생, 사망, 인구이동 등)",
+        "score": 0.5777777777777778,
+        "raw": "StatRecord(stat_id='INH_PB0004_2022_38', stat_name='장래 인구변동요인(출생, 사망, 인구이동 등)', org_name='경상남도', org_id='101', available_periods=[], relevance_score=0.5777777777777778, metadata={'source': 'kosis_api', 'ORG_ID': '101', 'ORG_NM': '경상남도', 'TBL_ID': 'INH_PB0004_2022_38', 'TBL_NM': '장래 인구변동요인(출생, 사망, 인구이동 등)', 'STAT_ID': '2016034', 'STAT_NM': '경상남도시군별장래인구추계', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '지역통계 > 인구 및 사회(사회조사 외) > 경상남도 > 경상남도시군별장래인구추계', 'FULL_PATH_ID': 'V > V_3 > V_3_217 > 217_21712', 'CONTENTS': '인구변동요인별 시군구별 인구항목 조출생률(인구천명당) 조사망률(인구천명당) 출생아수(명) 사망자수(명) 인구(명) 순이동자수(명) 양산시 남해군 거창군 함안군 김해시 창원시 함양군 통영시 의령군 산청군 거제시 창녕군 하동군 진주시 사천시 밀양시 고성군 경남 합천군', 'STRT_PRD_DE': '2022', 'END_PRD_DE': '2042', 'ITEM03': '- 작성기준시점 : 2022년 7월 1일 - 작성대상 인구 : 국경과 상관없이 대한민국에 상주하는 인구(외국인 포함) - 2022.7.1. 기준으로 작성되어 군위군은 경상북도 관할로 작성됨(2023.7.1. 군위군 대구광역시로 편입)', 'REC_TBL_SE': 'N', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=V.1;V_3.2;V_3_217.3;217_21712.4;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=101&tblId=INH_PB0004_2022_38', 'STAT_DB_CNT': '3940', 'QUERY': '조출생률'})"
+      },
+      {
+        "id": "INH_PB0004_2022_25",
+        "name": "장래 인구변동요인(출생, 사망, 인구이동 등)",
+        "score": 0.4722222222222222,
+        "raw": "StatRecord(stat_id='INH_PB0004_2022_25', stat_name='장래 인구변동요인(출생, 사망, 인구이동 등)', org_name='대전광역시', org_id='101', available_periods=[], relevance_score=0.4722222222222222, metadata={'source': 'kosis_api', 'ORG_ID': '101', 'ORG_NM': '대전광역시', 'TBL_ID': 'INH_PB0004_2022_25', 'TBL_NM': '장래 인구변동요인(출생, 사망, 인구이동 등)', 'STAT_ID': '2015019', 'STAT_NM': '대전광역시자치구별장래인구추계', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '지역통계 > 인구 및 사회(사회조사 외) > 대전광역시 > 대전광역시자치구별장래인구추계', 'FULL_PATH_ID': 'V > V_3 > V_3_206 > 206_20610', 'CONTENTS': '인구변동요인별 시군구별 인구항목 조출생률(인구천명당) 인구(명) 출생아수(명) 조사망률(인구천명당) 사망자수(명) 순이동자수(명) 대전 유성구 대덕구 동구 서구 중구', 'STRT_PRD_DE': '2022', 'END_PRD_DE': '2042', 'ITEM03': '- 작성기준시점 : 2022년 7월 1일 - 작성대상 인구 : 국경과 상관없이 대한민국에 상주하는 인구(외국인 포함) - 2022.7.1. 기준으로 작성되어 군위군은 경상북도 관할로 작성됨(2023.7.1. 군위군 대구광역시로 편입)', 'REC_TBL_SE': 'N', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=V.1;V_3.2;V_3_206.3;206_20610.4;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=101&tblId=INH_PB0004_2022_25', 'STAT_DB_CNT': '3940', 'QUERY': '조출생률'})"
+      },
+      {
+        "id": "INH_PB0004_2022_32",
+        "name": "장래 인구변동요인(출생, 사망, 인구이동 등)",
+        "score": 0.3666666666666667,
+        "raw": "StatRecord(stat_id='INH_PB0004_2022_32', stat_name='장래 인구변동요인(출생, 사망, 인구이동 등)', org_name='강원특별자치도', org_id='101', available_periods=[], relevance_score=0.3666666666666667, metadata={'source': 'kosis_api', 'ORG_ID': '101', 'ORG_NM': '강원특별자치도', 'TBL_ID': 'INH_PB0004_2022_32', 'TBL_NM': '장래 인구변동요인(출생, 사망, 인구이동 등)', 'STAT_ID': '2017065', 'STAT_NM': '강원특별자치도시군단위장래인구추계', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '지역통계 > 인구 및 사회(사회조사 외) > 강원특별자치도 > 강원특별자치도시군단위장래인구추계', 'FULL_PATH_ID': 'V > V_3 > V_3_211 > 211_01_211009', 'CONTENTS': '인구변동요인별 시군구별 인구항목 조출생률(인구천명당) 조사망률(인구천명당) 사망자수(명) 인구(명) 출생아수(명) 순이동자수(명) 원주시 화천군 양구군 양양군 철원군 속초시 강릉시 동해시 평창군 홍천군 횡성군 영월군 춘천시 삼척시 인제군 태백시 강원 정선군 고성군', 'STRT_PRD_DE': '2022', 'END_PRD_DE': '2042', 'ITEM03': '- 작성기준시점 : 2022년 7월 1일 - 작성대상 인구 : 국경과 상관없이 대한민국에 상주하는 인구(외국인 포함) - 2022.7.1. 기준으로 작성되어 군위군은 경상북도 관할로 작성됨(2023.7.1. 군위군 대구광역시로 편입)', 'REC_TBL_SE': 'N', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=V.1;V_3.2;V_3_211.3;211_01_211009.4;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=101&tblId=INH_PB0004_2022_32', 'STAT_DB_CNT': '3940', 'QUERY': '조출생률'})"
+      },
+      {
+        "id": "INH_PB0004_2022_26",
+        "name": "장래 인구변동요인(출생, 사망, 인구이동 등)",
+        "score": 0.2611111111111112,
+        "raw": "StatRecord(stat_id='INH_PB0004_2022_26', stat_name='장래 인구변동요인(출생, 사망, 인구이동 등)', org_name='울산광역시', org_id='101', available_periods=[], relevance_score=0.2611111111111112, metadata={'source': 'kosis_api', 'ORG_ID': '101', 'ORG_NM': '울산광역시', 'TBL_ID': 'INH_PB0004_2022_26', 'TBL_NM': '장래 인구변동요인(출생, 사망, 인구이동 등)', 'STAT_ID': '2017067', 'STAT_NM': '울산광역시구군단위장래인구추계', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '지역통계 > 인구 및 사회(사회조사 외) > 울산광역시 > 울산광역시구군단위장래인구추계', 'FULL_PATH_ID': 'V > V_3 > V_3_207 > 207_01_001', 'CONTENTS': '인구변동요인별 시군구별 인구항목 조출생률(인구천명당) 사망자수(명) 순이동자수(명) 출생아수(명) 인구(명) 조사망률(인구천명당) 울산 북구 남구 울주군 동구 중구', 'STRT_PRD_DE': '2022', 'END_PRD_DE': '2042', 'ITEM03': '- 작성기준시점 : 2022년 7월 1일 - 작성대상 인구 : 국경과 상관없이 대한민국에 상주하는 인구(외국인 포함) - 2022.7.1. 기준으로 작성되어 군위군은 경상북도 관할로 작성됨(2023.7.1. 군위군 대구광역시로 편입)', 'REC_TBL_SE': 'N', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=V.1;V_3.2;V_3_207.3;207_01_001.4;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=101&tblId=INH_PB0004_2022_26', 'STAT_DB_CNT': '3940', 'QUERY': '조출생률'})"
+      },
+      {
+        "id": "DT_20WBH021",
+        "name": "조출생률(인구 천 명당)",
+        "score": 0.15555555555555567,
+        "raw": "StatRecord(stat_id='DT_20WBH021', stat_name='조출생률(인구 천 명당)', org_name='국가데이터처', org_id='101', available_periods=[], relevance_score=0.15555555555555567, metadata={'source': 'kosis_api', 'ORG_ID': '101', 'ORG_NM': '국가데이터처', 'TBL_ID': 'DT_20WBH021', 'TBL_NM': '조출생률(인구 천 명당)', 'STAT_ID': 'A10120100427103713', 'STAT_NM': 'World Bank', 'VW_CD': 'MT_RTITLE', 'MT_ATITLE': '국제기구별 통계 > World Bank > 건강통계(Health)', 'FULL_PATH_ID': 'R_SUB_OTITLE > R_SUB_OTITLE_OTIT_WBTIT > R_SUB_OTITLE_OTIT_WBTIT_4008', 'CONTENTS': '국가별 조출생률(인구 천 명당) 대한민국 홍콩 이란 요르단 키르기스스탄 방글라데시 북아메리카 아루바 콜롬비아 니카라과 파라과이 도미니카공화국 가이아나 유럽 벨라루스 덴마크 이탈리아 폴란드 유로지역 베냉 카메룬 가봉 모리셔스 니제르 상투메프린시페 차드 부르키나파소 키리바시 팔라우 프랑스령폴리네시아 나우루 바레인 키프로스 조지아 일본 튀르키예 투르크메니스탄 베트남 버뮤다 남아메리카 아르헨티나 볼리비아 칠레 과테말라 페루 벨리즈 세인트빈센트그레나딘 불가리아 그리스 슬로바키아 유고슬라비아 ...', 'STRT_PRD_DE': '1960', 'END_PRD_DE': '2023', 'ITEM03': '조출생률은 연도별 연앙인구 천 명당 해당 연도에 발생한 출생아 수를 나타낸다. 조출생률에서 조사망률을 차감하면 인구의 자연성장률이 구해지며 이는 이주가 없을 때의 인구 변화율과 같다.', 'REC_TBL_SE': 'N', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_02_01&vwcd=MT_RTITLE&parmTabId=M_01_01&parentId=R_SUB_OTITLE.1;R_SUB_OTITLE_OTIT_WBTIT.2;R_SUB_OTITLE_OTIT_WBTIT_4008.3;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=101&tblId=DT_20WBH021', 'STAT_DB_CNT': '3940', 'QUERY': '조출생률'})"
+      },
+      {
+        "id": "DT_1B8000F",
+        "name": "인구동태건수 및 동태율 추이(출생,사망,혼인,이혼)",
+        "score": 0.050000000000000044,
+        "raw": "StatRecord(stat_id='DT_1B8000F', stat_name='인구동태건수 및 동태율 추이(출생,사망,혼인,이혼)', org_name='국가데이터처', org_id='101', available_periods=[], relevance_score=0.050000000000000044, metadata={'source': 'kosis_api', 'ORG_ID': '101', 'ORG_NM': '국가데이터처', 'TBL_ID': 'DT_1B8000F', 'TBL_NM': '인구동태건수 및 동태율 추이(출생,사망,혼인,이혼)', 'STAT_ID': '1962004', 'STAT_NM': '인구동향조사', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '인구 > 인구동향조사 > 인구동태건수 및 동태율(출생, 사망, 혼인, 이혼)', 'FULL_PATH_ID': 'A > A_3 > A2_6', 'CONTENTS': '기본항목별 인구동태건수 및 동태율 추이 계 출생아수(명) 사망자수(명) 자연증가건수(명) 조출생률(천명당) 조사망률(천명당) 자연증가율(천명당) 합계출산율(명) 출생성비(명) 영아사망률(출생아 천명당) 혼인건수(건) 조혼인율(천명당) 이혼건수(건) 조이혼율(천명당) 기대수명(출생시 기대여명) 기대수명(출생시 기대여명) - 남 기대수명(출생시 기대여명) - 여', 'STRT_PRD_DE': '1970', 'END_PRD_DE': '2025', 'ITEM03': '1970~1992년 합계출산율은 소수점 둘째자리까지 산출한 값으로 이용에 유의. - 신고기준 집계 - 1998년 이후는 남편과 처의 주소가 모두 해외 주소 자료 제외 □ 공통사항 - 연앙인구의 자료원(추계인구, 주민인구)과 계산방식(산술평균) 일치 - 항목 표준화 및 산출방식 일치 [기본항목별] 기본항목별>합계출산율 => 합계출산율은 여자 1명이 가임기간 동안 갖게 될 평균 출생아수. ○ 본 자료의 출생통계(1970~2007), 사망통계(1970~2007) 혼인통계(1981~2007) 및 이혼통계(1981~2007) 수치는 통계의 일관성을 확보하고 국제비교가 가능하도록 자료원 및 집계방식을 단일화하는 등 시계열을 보정한 결과로 기존의 공표자료와 차이가 있음 □ 출생 및 사망통계 기본항목별>출생성비 => 출생성비는 여아 100명당 남아수. 기본항목별>영아사망률 => 영아사망률은 출생 후 1년 이내(365일 미만) 사망자 수를 해당 연도의 출생아 수로 나눈 수치를 1,000분비로 표시 □ 혼인 및 이혼통계 - 총 출생아수와 총 사망자수는 국내 거주 출생아수, 사망자수만을 집계 - 지연신고된 자료 집계 및 사망률, 출산율 산출시 반영 - 출생통계(1981~1996) 및 사망통계(1983~1996)의 자료는 10년간의 지연신고 누적분이 포함된 결과이며, 이후 연도는 동일한 기준으로 시계열을 비교하기 □ 혼인, 이혼은 다음해 4월 말, 출생은 다음해 8월 말, 사망은 다음해 9월 말에 확정수치 공표 위해 해당연도 다음해 4월 신고분까지 집계한 결과임', 'REC_TBL_SE': 'Y', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=A.1;A_3.2;A2_6.3;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=101&tblId=DT_1B8000F', 'STAT_DB_CNT': '3940', 'QUERY': '조출생률'})"
+      }
+    ],
+    "candidate_count": 10
+  },
+  "summary": "catalog_search(kosis) query='조출생률' → 10개 후보. Top: [DT_1B8000H] 시도/인구동태건수 및 동태율(출생,사망,혼인,이혼) (score=1.000) | [DT_1B8000I] 시군구/인구동태건수 및 동태율(출생,사망,혼인,이혼) (score=0.894) | [DT_1B8000G] 월.분기.연간 인구동향(출생,사망,혼인,이혼) (score=0.789)",
+  "success": true,
+  "error": null
+}

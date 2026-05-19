@@ -1,0 +1,33 @@
+{
+  "claim_id": "7c7de17a-84e0-4f86-b1f8-4dc04b3da828",
+  "doc_id": "f6f2e012-d90e-4457-8edf-8ca3834ac7ba",
+  "block_id": "b0000",
+  "sent_id": "b0000_s0001",
+  "claim_text": "같은 기간 출생아 \n수는 23만 명으로 1년 전보다 7.7% 줄었다.",
+  "claim_type": "statistic",
+  "canonical_type": null,
+  "schema": {
+    "indicator": "출생아 수 증가율",
+    "time_period": "2023",
+    "unit": "%",
+    "population": "전체",
+    "value": 7.7,
+    "comparison_type": null,
+    "source_reference": null,
+    "graph_schema_candidates": [],
+    "parent_path": "인구 > 출생 > 출생아 수",
+    "is_approximate": false,
+    "modifier": null,
+    "prev_value": null,
+    "prev_time_period": "2022",
+    "prev_phrase": null
+  },
+  "source_offset": {
+    "page": null,
+    "char_start": 71,
+    "char_end": 109
+  },
+  "check_worthy_score": 0.8,
+  "graph_anchor_id": "node:b0000_s0001",
+  "context_text": "통계청이 발표한 2023년 출생 통계에 따르면, 지난해 합계출산율은 \n0.72명으로 전년(0.78명)보다 0.06명 감소했다. 같은 기간 출생아 \n수는 23만 명으로 1년 전보다 7.7% 줄었다."
+}

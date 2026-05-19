@@ -1,0 +1,18 @@
+{
+  "claim_id": "7a889331-42ad-4a4b-a027-ab4b7355e06d",
+  "doc_id": "020a04c5-c649-482e-a32c-3eb558738520",
+  "block_id": "b0000",
+  "sent_id": "b0000_s0000",
+  "claim_text": "# 4월 출생아 수, 34년 만에 최대 증가…혼인도 6년 만에 최고치",
+  "claim_type": "statistic",
+  "canonical_type": null,
+  "schema": null,
+  "source_offset": {
+    "page": null,
+    "char_start": 0,
+    "char_end": 38
+  },
+  "check_worthy_score": 0.8,
+  "graph_anchor_id": "node:b0000_s0000",
+  "context_text": "# 4월 출생아 수, 34년 만에 최대 증가…혼인도 6년 만에 최고치"
+}

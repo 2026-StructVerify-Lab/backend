@@ -1,0 +1,11 @@
+{
+  "claim_id": "4bb92740-e56f-4bec-b6f8-a9219a1d8967",
+  "verdict": "unverifiable",
+  "confidence": 0.25,
+  "explanation": "데이터 조회 실패: fetch(kosis): 후보 4개 모두 실패 (관련 표 없음)",
+  "data_points": [],
+  "iterations_used": 3,
+  "total_tokens": 0,
+  "stop_reason": "completed",
+  "created_at": "2026-05-19T01:26:26.286576Z"
+}

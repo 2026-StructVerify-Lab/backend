@@ -1,0 +1,46 @@
+{
+  "claim_id": "141d3c4a-574b-4fb1-b4c2-8b03fead2721",
+  "claim_type": "absolute",
+  "required_data": [
+    {
+      "indicator": "조출생률",
+      "time": "2023",
+      "population": "전체",
+      "unit_hint": "명",
+      "resolved_value": null,
+      "resolved_unit": null,
+      "source": null,
+      "source_time": null
+    }
+  ],
+  "initial_steps": [
+    {
+      "action": "catalog_search",
+      "input": {
+        "query": "조출생률",
+        "category": [
+          "인구",
+          "출생"
+        ],
+        "top_k": 5
+      },
+      "rationale": "KOSIS에서 조출생률 표 찾기"
+    },
+    {
+      "action": "fetch_evidence",
+      "input": {
+        "candidate_id": "<catalog_search 결과의 top id>",
+        "params": {}
+      },
+      "rationale": "표의 데이터 중 2023년 행의 값 확인"
+    }
+  ],
+  "fallback": {
+    "use_original_text": false,
+    "alternative_keywords": [],
+    "give_up_after_attempts": 5
+  },
+  "calculation_formula": null,
+  "notes": null,
+  "created_at": "2026-05-19T01:31:42.481051Z"
+}

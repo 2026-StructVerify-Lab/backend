@@ -1,0 +1,39 @@
+{
+  "query": "평균기온",
+  "category": [
+    "기후"
+  ],
+  "source": "kosis",
+  "candidates": [
+    {
+      "id": "DT_1YL9801",
+      "name": "기온(시도)",
+      "score": 1.0,
+      "raw": "StatRecord(stat_id='DT_1YL9801', stat_name='기온(시도)', org_name='국가데이터처', org_id='101', available_periods=[], relevance_score=1.0, metadata={'source': 'kosis_api', 'ORG_ID': '101', 'ORG_NM': '국가데이터처', 'TBL_ID': 'DT_1YL9801', 'TBL_NM': '기온(시도)', 'STAT_ID': '9B08007', 'STAT_NM': 'e-지방지표', 'VW_CD': 'MT_GTITLE01', 'MT_ATITLE': '주제별 > 환경', 'FULL_PATH_ID': '111', 'CONTENTS': '행정구역별 기온 대구광역시 충청남도 전라남도 인천광역시 대전광역시 서울특별시 강원특별자치도 전북특별자치도 제주특별자치도 경기도 경상북도 경상남도 울산광역시 부산광역시 광주광역시 충청북도 전국(평균) 세종특별자치시', 'STRT_PRD_DE': '2000', 'END_PRD_DE': '2025', 'ITEM03': '■  자료제공처:  국가데이터처 지역통계기획팀 ■  자료원출처:  기상청(기후통계분석) ■  자료제공주기:  1년 ■  다음자료현행화:  작성기준년도 익년1월 □  정의  - 기온(평균기온): 8회 관측 기온값(03,06,09,12,15,18,21,24시)을 평균한 값 □  의의  - 계절별 기온변화 현황을 통해 기후변화 경향을 파악할 수 있음 □  참고사항  - 기온의 기준: 국제적으로는 지면으로부터 1.25~2.0m의 높이에서 측정하는 것을 기준으로 하고 있으나, 우리나라에서는 1.5m높이를 기준으로 하고있음 - 시도별 평균기온 값은 각 지역에 해당되는 지점들의 평균값임 * 전국(평균) : 62개 지점으로 서울, 인천, 수원, 강화, 양평, 이천, 속초, 강릉, 태백, 철원, 대관령, 춘천, 원주, 인제, 홍천, 충주, 청주, 추풍령, 제천, 보은, 서산, 대전, 천안, 보령, 부여, 금산, 울진, 안동, 포항, 대구, 봉화, 영주, 문경, 영덕, 의성, 구미, 영천, 울산, 창원, 부산, 통영, 진주, 거창, 합천, 밀양, 산청, 거제, 남해, 군산, 전주, 부안, 임실, 정읍, 남원, 장수, 광주, 목포, 여수, 완도, 장흥, 해남, 고흥 * 서울특별시: 서울 * 부산광역시: 부산, 북부산 * 대구광역시: 대구, 대구(기) * 인천광역시: 강화, 백령도, 인천 * 광주광역시: 광주 * 대전광역시: 대전 * 울산광역시: 울산 * 세종특별자치시: 세종 * 경기도: 동두천, 수원, 양평, 이천, 파주 * 강원특별자치도: 강릉, 대관령, 동해, 북강릉, 북춘천, 속초, 영월, 원주, 인제, 정선군, 철원, 춘천, 태백, 홍천 * 충청북도: 보은, 제천, 청주, 추풍령, 충주 * 충청남도: 금산, 보령, 부여, 서산, 천안, 홍성 * 전북특별자치도: 고창, 고창군, 군산, 남원, 부안, 순창군, 임실, 장수, 전주, 정읍 * 전라남도: 강진군, 고흥, 광양시, 목포, 무안, 보성군, 순천, 여수, 영광군, 완도, 장흥, 주암, 진도(첨찰산), 진도군, 해남, 흑산도 * 경상북도: 경주시, 구미, 문경, 봉화, 상주, 안동, 영덕, 영주, 영천, 울릉도, 울진, 의성, 청송군, 포항 * 경상남도: 거제, 거창, 김해시, 남해, 밀양, 북창원, 산청, 양산시, 의령군, 진주, 창원, 통영, 함양군, 합천 * 제주특별자치도: 고산, 서귀포, 성산, 성산포, 제주', 'REC_TBL_SE': 'N', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_03_01&vwcd=MT_GTITLE01&parmTabId=M_01_01&parentId=111.1;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=101&tblId=DT_1YL9801', 'STAT_DB_CNT': '261', 'QUERY': '평균기온'})"
+    },
+    {
+      "id": "DT_141007N_001",
+      "name": "[항공기상] 공항기상관측의 지점별 연·월 통계",
+      "score": 0.8944444444444445,
+      "raw": "StatRecord(stat_id='DT_141007N_001', stat_name='[항공기상] 공항기상관측의 지점별 연·월 통계', org_name='기상청', org_id='141', available_periods=[], relevance_score=0.8944444444444445, metadata={'source': 'kosis_api', 'ORG_ID': '141', 'ORG_NM': '기상청', 'TBL_ID': 'DT_141007N_001', 'TBL_NM': '[항공기상] 공항기상관측의 지점별 연·월 통계', 'STAT_ID': '2006104', 'STAT_NM': '기상관측통계', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '환경 > 기상관측통계', 'FULL_PATH_ID': 'T > T_4', 'CONTENTS': '지점별 평균기온 평균최고기온 최다일강수량일자 최저기온일자 평균풍속 최대순간풍속 합계강수량 평균최저기온 최고기온 최고기온일자 최다일강수량 1시간최다강수량일자 최대순간풍속풍향 최저기온 1시간최다강수량 110 김포공항 128 청주공항 153 김해공항 182 제주공항 113 인천공항 139 포항공항 151 울산공항 142 대구공항 163 무안공항 167 여수공항 092 양양공항 158 광주공항 161 사천공항', 'STRT_PRD_DE': '2016', 'END_PRD_DE': '2024', 'ITEM03': '', 'REC_TBL_SE': 'N', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=T.1;T_4.2;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=141&tblId=DT_141007N_001', 'STAT_DB_CNT': '261', 'QUERY': '평균기온'})"
+    },
+    {
+      "id": "DT_14106",
+      "name": "[고층기상] 레윈존데 관측값의 지점별 연·월 통계",
+      "score": 0.788888888888889,
+      "raw": "StatRecord(stat_id='DT_14106', stat_name='[고층기상] 레윈존데 관측값의 지점별 연·월 통계', org_name='기상청', org_id='141', available_periods=[], relevance_score=0.788888888888889, metadata={'source': 'kosis_api', 'ORG_ID': '141', 'ORG_NM': '기상청', 'TBL_ID': 'DT_14106', 'TBL_NM': '[고층기상] 레윈존데 관측값의 지점별 연·월 통계', 'STAT_ID': '2006104', 'STAT_NM': '기상관측통계', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '환경 > 기상관측통계', 'FULL_PATH_ID': 'T > T_4', 'CONTENTS': '지점별 시각별 표준등압면/지상별 평균고도 최고고도 최저고도일자 평균기온 평균현지기압 최저고도 최고기온 평균합성풍속 최고현지기압 최저현지기압 최고기온일자 최저기온 평균이슬점온도 평균남북성분합성풍속 최저기온일자 최고현지기압일자 최고고도일자 최저현지기압일자 최대풍속 최대풍속일자 평균합성풍향 평균풍속 최대풍속풍향 평균동서성분합성풍속 흑산도 창원 북강릉 오산 광주 백령도 포항 국가태풍센터 00UTC 12UTC 100hPa 850hPa 20hPa 30hPa 70hPa 250hPa 1000hPa ...', 'STRT_PRD_DE': '2016', 'END_PRD_DE': '2024', 'ITEM03': '- 관측값에 결측이 있을 경우, 결측을 제외하고 평균값 및 극값을 구한다. - 일 관측값의 누락된 날의 합계가 10일보다 많거나 연속된 5일 이상의 일 관측값이 누락된 경우는 누락된 날을 제외하고 극값 및 평균값을 산출하며, 값 오른쪽에 ＂)＂ 표시를 한다. - 월 평균값 및 극값에 결측이 하나라도 있을 경우 통계처리하지 않고 ＂x＂ 표시를 한다. - 월 평균값 및 극값에 자료부족값이 하나라도 있을 경우 자료부족값을 포함해 연 평균값 및 극값을 구하되 ＂)＂ 표시를 한다. - 연 평균값은 1월부터 12월까지의 매월 월 평균값을 합계한 후 12로 나눈값이며, 월별로 일수의 많고 적음에 따른 평균값의 차이는 고려하지 않는다. - 연 극값은 월별 극값 중에서 구한 최대값 또는 최소값을 말한다. - 관측값이 전부 결측인 경우는 결측 처리하고 ＂x＂ 표시를 한다.  - 월 평균값은 해당월의 1일부터 말일까지 일 관측자료를 산술평균하여, 값의 총합을 관측횟수로 나눈 값이다. - 월 극값은 해당월의 일 관측값 중에서 구한 최대값 또는 최소값을 말한다.', 'REC_TBL_SE': 'N', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=T.1;T_4.2;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=141&tblId=DT_14106', 'STAT_DB_CNT': '261', 'QUERY': '평균기온'})"
+    },
+    {
+      "id": "DT_14104_N_001",
+      "name": "[해양기상] 부이 관측값의 지점별 월 통계",
+      "score": 0.6833333333333333,
+      "raw": "StatRecord(stat_id='DT_14104_N_001', stat_name='[해양기상] 부이 관측값의 지점별 월 통계', org_name='기상청', org_id='141', available_periods=[], relevance_score=0.6833333333333333, metadata={'source': 'kosis_api', 'ORG_ID': '141', 'ORG_NM': '기상청', 'TBL_ID': 'DT_14104_N_001', 'TBL_NM': '[해양기상] 부이 관측값의 지점별 월 통계', 'STAT_ID': '2006104', 'STAT_NM': '기상관측통계', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '환경 > 기상관측통계', 'FULL_PATH_ID': 'T > T_4', 'CONTENTS': '관측지점별 평균유의파고 평균상대습도 평균수온 일평균풍속의 월최댓값 평균기온 일평균기온의 월최젓값 최대파고 최대파주기 일평균기온의 월최곳값 일평균수온의 월최젓값 평균풍속 평균현지기압 일평균수온의 월최곳값 평균파주기 포항 추자도 통영 남해239 동해57 동해 부안 남해244 거문도 외연도 서귀포 서해190 서해163(연) 덕적도 신안 인천 풍도 삼척 칠발도 거제도 서해170 울릉도 울산 가거도 남해465 동해78 서해192(연) 남해111 마라도 서해206 고성 울진 홍도 ...', 'STRT_PRD_DE': '2012', 'END_PRD_DE': '2024', 'ITEM03': '', 'REC_TBL_SE': 'Y', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=T.1;T_4.2;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=141&tblId=DT_14104_N_001', 'STAT_DB_CNT': '261', 'QUERY': '평균기온'})"
+    },
+    {
+      "id": "DT_14104_N_002",
+      "name": "[해양기상] 등표 관측값의 지점별 월 통계",
+      "score": 0.5777777777777778,
+      "raw": "StatRecord(stat_id='DT_14104_N_002', stat_name='[해양기상] 등표 관측값의 지점별 월 통계', org_name='기상청', org_id='141', available_periods=[], relevance_score=0.5777777777777778, metadata={'source': 'kosis_api', 'ORG_ID': '141', 'ORG_NM': '기상청', 'TBL_ID': 'DT_14104_N_002', 'TBL_NM': '[해양기상] 등표 관측값의 지점별 월 통계', 'STAT_ID': '2006104', 'STAT_NM': '기상관측통계', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '환경 > 기상관측통계', 'FULL_PATH_ID': 'T > T_4', 'CONTENTS': '관측지점별 평균해면기압 최대순간풍속 최대파주기 평균수온 최대파고 일평균수온의 월최젓값 평균파주기 최고기온 평균상대습도 최대파고일자 최대순간풍속일자 최저기온일자 평균수위 최대수위 최저기온 최고기온일자 평균기온 평균풍속 일평균수온의 월최곳값 일자 일평균풍속의 월최댓값 평균유의파고 일평균수온의 월최곳값 최대파주기일자 최대수위일자 일평균수온의 월최젓값 일자 일평균풍속의 월최댓값 일자 가대암 갈매여 이덕서 서수도 십이동파 해수서 지귀도 간여암 광안 오륙도', 'STRT_PRD_DE': '2012', 'END_PRD_DE': '2024', 'ITEM03': '', 'REC_TBL_SE': 'Y', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=T.1;T_4.2;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=141&tblId=DT_14104_N_002', 'STAT_DB_CNT': '261', 'QUERY': '평균기온'})"
+    }
+  ]
+}

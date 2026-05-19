@@ -1,0 +1,22 @@
+{
+  "claim_id": "0699e017-38cb-42ea-b7fb-89f196e66f2c",
+  "verdict": "unverifiable",
+  "confidence": 0.3,
+  "explanation": "비교 불가: 주장값=None, KOSIS(DT_1B8000H) 조회값=238317.0.",
+  "data_points": [
+    {
+      "indicator": "시도/인구동태건수 및 동태율(출생사망혼인이혼)",
+      "time": "2024",
+      "population": null,
+      "unit_hint": null,
+      "resolved_value": 238317.0,
+      "resolved_unit": null,
+      "source": "KOSIS:DT_1B8000H",
+      "source_time": "2024"
+    }
+  ],
+  "iterations_used": 3,
+  "total_tokens": 0,
+  "stop_reason": "completed",
+  "created_at": "2026-05-18T08:28:55.235301Z"
+}

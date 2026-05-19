@@ -1,0 +1,22 @@
+{
+  "claim_id": "7c7de17a-84e0-4f86-b1f8-4dc04b3da828",
+  "verdict": "match",
+  "confidence": 0.8,
+  "explanation": "증가율 직접 검증: 기사 주장 7.7%, KOSIS(DT_1B8000G) 표에서 계산한 값 -7.69% (차이 0.01%p). 표에서 직접 계산: 현재값 230028.0 - 이전값(2022) 249186.0 → 증가율 (230028.0-249186.0)/249186.0×100 = -7.69%",
+  "data_points": [
+    {
+      "indicator": "출생아 수 증가율",
+      "time": "2023",
+      "population": "전체",
+      "unit_hint": "명 건",
+      "resolved_value": 230028.0,
+      "resolved_unit": "명 건",
+      "source": "KOSIS:DT_1B8000G",
+      "source_time": "2023"
+    }
+  ],
+  "iterations_used": 3,
+  "total_tokens": 0,
+  "stop_reason": "completed",
+  "created_at": "2026-05-18T08:28:24.695858Z"
+}

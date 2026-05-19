@@ -130,6 +130,77 @@ def _extract_numeric_values(rows: list[dict]) -> list[dict]:
     return values
 
 
+# ── [v6.15 F1 강화] period 정규화 헬퍼 ──────────────────────────────
+
+def _normalize_period(period: str) -> str:
+    """KOSIS PRD_DE 다양한 형식을 *YYYYMM* 또는 *YYYY*로 정규화.
+
+    지원 형식:
+      "202504"   (6자 숫자)           → "202504"
+      "2025-04"  (7자 하이픈)         → "202504"
+      "2025.04"  (7자 점)             → "202504"
+      "2025M04"  (7자 M 구분)         → "202504"
+      "2025/04"                       → "202504"
+      "2025"     (4자 — 연간 누계)    → "2025"
+      "20251Q"   (6자 분기 — Q 포함)  → "2025"  (분기는 연도 단위로)
+      "2025Q1"                        → "2025"
+      "202504XX" (8자+ — 일별 등)     → "202504"
+    """
+    if not period:
+        return ""
+    p = str(period).strip()
+
+    # 분기 처리: "2025Q1", "20251Q" 등 → "2025"
+    if "Q" in p.upper():
+        return p[:4] if p[:4].isdigit() else ""
+
+    # 구분자 제거: -, ., /, M, _, ' '
+    clean = "".join(c for c in p if c.isdigit())
+
+    if len(clean) >= 6:
+        # YYYYMM 또는 YYYYMMDD 등 → YYYYMM
+        return clean[:6]
+    if len(clean) == 4:
+        # 연도만
+        return clean
+    return clean
+
+
+def _period_is_monthly(period: str) -> bool:
+    """이 period가 *월 단위* row인지 (claim_year_month와 정확 비교 가능한 형식)."""
+    normalized = _normalize_period(period)
+    return len(normalized) == 6 and normalized.isdigit()
+
+
+def _period_is_annual(period: str) -> bool:
+    """이 period가 *연간 누계 또는 연도 단위* row인지.
+
+    claim이 *월값*인데 (claim_year_month 있음) 매칭되면 *후순위*로 처리해야 함.
+    """
+    normalized = _normalize_period(period)
+    return len(normalized) == 4 and normalized.isdigit()
+
+
+def _period_matches_ym(period: str, claim_year_month: str) -> bool:
+    """정규화 후 claim_year_month와 정확히 매칭되는지.
+
+    Args:
+        period: KOSIS PRD_DE (다양한 형식).
+        claim_year_month: 'YYYYMM' (6자).
+
+    Returns:
+        True면 *동일 연-월* (tier 1 후보).
+    """
+    if not period or not claim_year_month:
+        return False
+    normalized = _normalize_period(period)
+    # claim_ym도 정규화 (혹시 "2025-04" 형식으로 들어올 수 있음)
+    claim_norm = _normalize_period(claim_year_month)
+    if len(claim_norm) != 6 or len(normalized) < 6:
+        return False
+    return normalized[:6] == claim_norm[:6]
+
+
 def _find_best_match(
     claimed: float,
     claim_unit: str,
@@ -174,12 +245,15 @@ def _find_best_match(
     zero_filtered = 0
 
     # [v6.14 F1] 시점 tier별 후보 분류
-    # tier 1: 동일 연-월 (가장 정확)
-    # tier 2: 동일 연도 (월 다름)
-    # tier 3: ±2년 안 다른 연도
-    tier1_candidates: list[dict] = []  # 동일 연-월
-    tier2_candidates: list[dict] = []  # 동일 연도
-    tier3_candidates: list[dict] = []  # ±2년
+    # [v6.15 F1 강화] tier 2를 2a (월 row) / 2b (연간 누계)로 분리
+    #   - claim이 *월값*인데 (claim_year_month 있음) 연-월 매칭 실패 시:
+    #     · tier 2a: 같은 연도 + 월 단위 row → 일반적
+    #     · tier 2b: 같은 연도 + 연간 누계 (period 길이 4) → *후순위* (월값과 직접 비교 부적합)
+    #   - 혼인 18921 케이스 (DT_1B8000F): 표에 *연간 누계만* 있어 tier 2b로 fallthrough.
+    tier1_candidates: list[dict] = []   # 동일 연-월 (정규화 후 정확 매칭)
+    tier2a_candidates: list[dict] = []  # 동일 연도 + 월 row
+    tier2b_candidates: list[dict] = []  # 동일 연도 + 연간 누계 (claim 월값일 때 후순위)
+    tier3_candidates: list[dict] = []   # ±2년
 
     for kv in kosis_values:
         # 연도 ±2년 필터
@@ -215,31 +289,53 @@ def _find_best_match(
         kv_with_meta = {**kv, "normalized": normalized, "error_rate": error_rate}
 
         # [F1] 시점 tier 분류
+        # [v6.15 강화] period 정규화 후 매칭 + 연간/월 row 분리
         if claim_year_month and kv_period:
-            # KOSIS PRD_DE 형식: "YYYYMM" 또는 "YYYY"
-            if kv_period.startswith(claim_year_month):
+            # 정규화된 period로 비교 (KOSIS 다양한 형식 대응)
+            if _period_matches_ym(kv_period, claim_year_month):
                 tier1_candidates.append(kv_with_meta)
             elif claim_year and kv_period.startswith(claim_year):
-                tier2_candidates.append(kv_with_meta)
+                # 같은 연도 — 월 row인지 연간 누계인지 분리
+                if _period_is_annual(kv_period):
+                    # 연간 누계 (예: "2025") — claim이 월값일 때 후순위
+                    tier2b_candidates.append(kv_with_meta)
+                else:
+                    # 월/분기 row — 같은 연도 다른 월
+                    tier2a_candidates.append(kv_with_meta)
             else:
                 tier3_candidates.append(kv_with_meta)
         elif claim_year and kv_period and kv_period.startswith(claim_year):
-            tier2_candidates.append(kv_with_meta)
+            # claim이 연도만 갖고 있음 (월 단위 X) → 연도 매칭 자체로 OK
+            tier2a_candidates.append(kv_with_meta)
         else:
             tier3_candidates.append(kv_with_meta)
 
     # [F1] 가장 높은 tier에서 picking
+    # [v6.15] 2a (월 row) → 2b (연간 누계) → 3 순서
     selected_tier = None
     pool: list[dict] = []
     if tier1_candidates:
         pool = tier1_candidates
         selected_tier = "1 (동일 연-월)"
-    elif tier2_candidates:
-        pool = tier2_candidates
-        selected_tier = "2 (동일 연도)"
+    elif tier2a_candidates:
+        pool = tier2a_candidates
+        selected_tier = "2a (동일 연도, 월 row)"
+    elif tier2b_candidates:
+        pool = tier2b_candidates
+        selected_tier = "2b (동일 연도, 연간 누계 — claim 월값과 시점 mismatch 가능)"
     elif tier3_candidates:
         pool = tier3_candidates
         selected_tier = "3 (±2년)"
+
+    # [v6.15] 선택된 tier 번호를 각 후보에 기록 (verdict 가드용)
+    _tier_num = 1
+    if selected_tier:
+        if selected_tier.startswith("2"):
+            _tier_num = 2
+        elif selected_tier.startswith("3"):
+            _tier_num = 3
+    for kv in pool:
+        kv["_tier"] = _tier_num
 
     best_match = None
     best_error = float("inf")
@@ -251,12 +347,14 @@ def _find_best_match(
     candidates = len(pool)
 
     # [v6.14] 진단 로깅
+    # [v6.15] tier 2a/2b 분리 반영
     logger.info(
         f"[verifier] match 탐색: claim={claimed}/{claim_unit!r} year={claim_year} "
         f"ym={claim_year_month} | 전체 row={total_rows} (all_rows_empty={all_rows_empty}) → "
         f"연도제외={year_filtered}, zero제외={zero_filtered}, 단위불일치제외={unit_filtered} | "
-        f"tier1(연-월)={len(tier1_candidates)}, tier2(연도)={len(tier2_candidates)}, "
-        f"tier3(±2년)={len(tier3_candidates)} → 선택 tier={selected_tier}, 최종 후보={candidates}"
+        f"tier1(연-월)={len(tier1_candidates)}, tier2a(연도+월)={len(tier2a_candidates)}, "
+        f"tier2b(연간누계)={len(tier2b_candidates)}, tier3(±2년)={len(tier3_candidates)} → "
+        f"선택 tier={selected_tier}, 최종 후보={candidates}"
     )
     if best_match:
         logger.info(
@@ -292,18 +390,21 @@ def verify_claim(claim: Claim, evidence: Evidence | None,
             claim_id=claim.claim_id, verdict=VerdictType.UNVERIFIABLE,
             confidence=0.3, evidence=evidence)
 
-    # claim schema 없음
+    # claim schema 없음 / value 미추출
+    # [v6.16] value가 없으면 검증 자체를 안 한 것 → 엉뚱한 KOSIS 출처를
+    #   화면에 남기지 않도록 evidence=None (예: value=null인데 '종합부동산세
+    #   196059 백만원'이 출처로 표시되던 문제)
     claimed = claim.schema.value if claim.schema else None
     if claimed is None:
         return VerificationResult(
             claim_id=claim.claim_id, verdict=VerdictType.UNVERIFIABLE,
-            confidence=0.2, evidence=evidence)
+            confidence=0.2, evidence=None)
 
     # value=0.0 → 수치 미추출
     if claimed == 0.0:
         return VerificationResult(
             claim_id=claim.claim_id, verdict=VerdictType.UNVERIFIABLE,
-            confidence=0.2, evidence=evidence)
+            confidence=0.2, evidence=None)
 
     claim_unit = (claim.schema.unit or "") if claim.schema else ""
 
@@ -311,29 +412,42 @@ def verify_claim(claim: Claim, evidence: Evidence | None,
     claim_year = None
     claim_year_month = None  # [v6.14 F1] 동일 연-월 우선 매칭용 (예: "202504")
 
-    # 1) 그래프 멀티홉 traversal 결과 우선
-    if graph is not None:
+    # ── 연도/연-월 추출 ─────────────────────────────────────────────────
+    # [v6.14 I fix] 우선순위 역전:
+    #   1) claim.schema.time_period가 *구체적 시점* (YYYY 또는 YYYY-MM)이면 *우선* 사용
+    #   2) schema가 비어있거나 *상대 표현* ("올해", "작년" 등)이면 graph traversal로 fallback
+    #
+    # 이전 (v6.14 H 이전): graph가 우선이라 한 문장에 두 시점이 있을 때
+    #   ("올 4월 ... 지난해 같은 달") 그래프가 *지난해 같은 달*을 picking하면
+    #   verifier가 *2024*로 검색해서 시점 부정확 매칭 발생.
+    # 수정: schema_inductor가 *문맥 보고 추출한* time_period가 보통 정확하므로 우선.
+    #
+    # [F1] 연도와 연-월 모두 추출 시도.
+
+    schema_tp = (claim.schema.time_period if claim.schema and claim.schema.time_period else "")
+
+    # 1) schema에서 *구체적 시점* 추출 시도
+    if schema_tp:
+        m = re.search(r"(\d{4})", schema_tp)
+        if m:
+            claim_year = m.group(1)
+        ym = re.search(r"(\d{4})[-/]?(\d{2})", schema_tp)
+        if ym:
+            claim_year_month = ym.group(1) + ym.group(2)
+        if claim_year:
+            logger.info(f"[verifier] 시점 해소: schema.time_period={schema_tp!r} → year={claim_year}, ym={claim_year_month}")
+
+    # 2) schema에서 시점 못 뽑으면 (또는 schema가 *상대 표현*만 있으면) → graph fallback
+    if not claim_year and graph is not None:
         resolved = graph.resolve_time_for_claim(claim)
         if resolved:
             m = re.search(r"(\d{4})", resolved)
             if m:
                 claim_year = m.group(1)
-                logger.debug(f"verifier: 그래프에서 resolved year={claim_year} (from {resolved})")
-            # [F1] 연-월도 추출 ("2025-04" → "202504")
+                logger.info(f"[verifier] 시점 해소 (fallback): 그래프에서 resolved year={claim_year} (from {resolved})")
             ym = re.search(r"(\d{4})[-/]?(\d{2})", resolved)
             if ym:
                 claim_year_month = ym.group(1) + ym.group(2)
-
-    # 2) 그래프에서 못 찾으면 schema.time_period에서 추출 (fallback)
-    if not claim_year and claim.schema and claim.schema.time_period:
-        m = re.search(r"(\d{4})", claim.schema.time_period)
-        if m:
-            claim_year = m.group(1)
-    # [F1] schema.time_period에서 연-월 추출도 시도
-    if not claim_year_month and claim.schema and claim.schema.time_period:
-        ym = re.search(r"(\d{4})[-/]?(\d{2})", claim.schema.time_period)
-        if ym:
-            claim_year_month = ym.group(1) + ym.group(2)
 
     # [v6.14 C2] 증가율/차이 자동 계산 분기
     # claim이 증가율(%) 또는 변화량(차이) schema이고 prev_value가 있으면,
@@ -423,8 +537,30 @@ def _verdict_from_error(
       10~30% → UNVERIFIABLE (LLM 재판정 구간 — Step 8에서는 판단 보류)
       30~90% → MISMATCH
       >90%   → UNVERIFIABLE (테이블 매칭 오류)
+
+    [v6.15] 시점 미상 가드:
+      claim에 연도가 없고(claim.schema.time_period 비어있음),
+      best_match가 tier3(±2년 폴백, 시점 매칭 실패)인 경우 →
+      숫자만 우연히 가까운 가짜 매칭일 위험이 큼.
+      이때는 MATCH/MISMATCH를 내리지 않고 UNVERIFIABLE로 강등.
     """
     diff_pct = error_rate * 100
+
+    # [v6.15] 시점 미상 + 시점 매칭 실패 → 신뢰 불가
+    schema_tp = (claim.schema.time_period if claim.schema and claim.schema.time_period else "")
+    has_year = bool(re.search(r"\d{4}", schema_tp))
+    matched_tier3 = bool(best_match and best_match.get("_tier") == 3)
+    if not has_year and matched_tier3:
+        logger.info(
+            f"검증 결과: unverifiable "
+            f"(오차: {diff_pct:.1f}% — 시점 미상 + 시점 매칭 실패, 가짜 매칭 위험) "
+            f"→ 엉뚱한 evidence 제거"
+        )
+        # [v6.16] 시점 매칭 실패로 신뢰 불가 → 엉뚱한 KOSIS 출처를 화면에 남기지 않음
+        #   (예: 공시가격 4.5% claim에 '매매가격지수 102.2'가 출처로 표시되던 문제)
+        return VerificationResult(
+            claim_id=claim.claim_id, verdict=VerdictType.UNVERIFIABLE,
+            confidence=0.25, evidence=None)
 
     if error_rate <= 0.10:
         verdict = VerdictType.MATCH
@@ -559,8 +695,8 @@ def _verify_growth_or_diff(
         return None
 
     # 현재 시점 row 찾기 — unit 검사 우회 (절대값 row 받아들임)
-    # 시점 tier 우선
-    tier1, tier2, tier3 = [], [], []
+    # [v6.15] period 정규화 + 월/연간 분리 적용
+    tier1, tier2a, tier2b, tier3 = [], [], [], []
     for kv in kosis_values:
         kv_period = kv.get("period") or ""
         normalized = normalize_value(kv["value"], kv["unit"])
@@ -574,14 +710,19 @@ def _verify_growth_or_diff(
             except (ValueError, TypeError):
                 pass
         kv_norm = {**kv, "normalized": normalized}
-        if claim_year_month and kv_period.startswith(claim_year_month):
+        # [v6.15] 정규화 헬퍼 사용
+        if claim_year_month and _period_matches_ym(kv_period, claim_year_month):
             tier1.append(kv_norm)
         elif claim_year and kv_period.startswith(claim_year):
-            tier2.append(kv_norm)
+            if claim_year_month and _period_is_annual(kv_period):
+                # claim이 월값인데 row가 연간 누계 → 후순위
+                tier2b.append(kv_norm)
+            else:
+                tier2a.append(kv_norm)
         else:
             tier3.append(kv_norm)
 
-    pool = tier1 or tier2 or tier3
+    pool = tier1 or tier2a or tier2b or tier3
     if not pool:
         logger.info(f"[verifier C2] 증가율 계산: KOSIS에서 현재 시점 row 못 찾음. fallthrough.")
         return None

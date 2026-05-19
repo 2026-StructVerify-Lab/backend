@@ -1,0 +1,58 @@
+{
+  "claim_id": "589c7901-a26e-4954-91be-45b532a50503",
+  "claim_type": "growth_rate",
+  "required_data": [
+    {
+      "indicator": "4월 출생아 수",
+      "time": "2023-04",
+      "population": "전체",
+      "unit_hint": "명",
+      "resolved_value": null,
+      "resolved_unit": null,
+      "source": null,
+      "source_time": null
+    },
+    {
+      "indicator": "4월 출생아 수",
+      "time": "2024-04",
+      "population": "전체",
+      "unit_hint": "명",
+      "resolved_value": null,
+      "resolved_unit": null,
+      "source": null,
+      "source_time": null
+    }
+  ],
+  "initial_steps": [
+    {
+      "action": "catalog_search",
+      "input": {
+        "query": "4월 출생아 수",
+        "category": [
+          "인구동태"
+        ],
+        "top_k": 10
+      },
+      "rationale": "KOSIS에서 4월 출생아 수를 포함하는 표 찾기"
+    },
+    {
+      "action": "fetch_evidence",
+      "input": {
+        "candidate_id": "<검색 결과 상위표 중 하나의 아이디>",
+        "params": {}
+      },
+      "rationale": "찾은 표에서 2023-04와 2024-04의 값을 확인"
+    }
+  ],
+  "fallback": {
+    "use_original_text": true,
+    "alternative_keywords": [
+      "출생아 수 추이",
+      "출생 사망 혼인 이혼"
+    ],
+    "give_up_after_attempts": 3
+  },
+  "calculation_formula": "(current - prev) / prev * 100",
+  "notes": null,
+  "created_at": "2026-05-19T01:32:55.171942Z"
+}

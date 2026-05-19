@@ -1,0 +1,40 @@
+{
+  "query": "기상관측망",
+  "category": [
+    "기후",
+    "환경"
+  ],
+  "source": "kosis",
+  "candidates": [
+    {
+      "id": "DT_MOGE_3000400129_2021_6",
+      "name": "중앙행정기관 위원회별 여성참여 현황",
+      "score": 1.0,
+      "raw": "StatRecord(stat_id='DT_MOGE_3000400129_2021_6', stat_name='중앙행정기관 위원회별 여성참여 현황', org_name='성평등가족부', org_id='154', available_periods=[], relevance_score=1.0, metadata={'source': 'kosis_api', 'ORG_ID': '154', 'ORG_NM': '성평등가족부', 'TBL_ID': 'DT_MOGE_3000400129_2021_6', 'TBL_NM': '중앙행정기관 위원회별 여성참여 현황', 'STAT_ID': '2006228', 'STAT_NM': '중앙행정기관및지방자치단체소속위원회여성참여현황', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '사회일반 > 중앙행정기관및지방자치단체소속위원회여성참여현황', 'FULL_PATH_ID': 'B > B_17', 'CONTENTS': '... 군인재해보상연금재심위원회(舊군인연금급여재심위원회) 소요검증위원회 중앙전공사상심사위원회 국가건축정책위원회 국가교통위원회 자율주행자동차시범운행지구위원회 중앙공동주택관리분쟁조정위원회 중앙산업단지계획심의위원회 항공보안협의회 공적자금관리위원회 증권선물위원회 기상청 공익법인회계기준심의위원회 민간투자사업심의위원회 북방경제협력위원회 특정사회기반시설심의위원회 농림축산식품부 농업·농촌공익기능증진직접지불제도운영심의위원회 농촌진흥사업심의위원회 국가대표선수보상심의위원회 콘텐츠산업진흥위원회 보편적시청권보장위원회 ...', 'STRT_PRD_DE': '2021', 'END_PRD_DE': '2021', 'ITEM03': '', 'REC_TBL_SE': 'N', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=B.1;B_17.2;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=154&tblId=DT_MOGE_3000400129_2021_6', 'STAT_DB_CNT': '12', 'QUERY': '기상관측망'})"
+    },
+    {
+      "id": "DT_MOGE_3000400129_2025_1",
+      "name": "중앙행정기관 위원회별 여성참여 현황",
+      "score": 0.8944444444444445,
+      "raw": "StatRecord(stat_id='DT_MOGE_3000400129_2025_1', stat_name='중앙행정기관 위원회별 여성참여 현황', org_name='성평등가족부', org_id='154', available_periods=[], relevance_score=0.8944444444444445, metadata={'source': 'kosis_api', 'ORG_ID': '154', 'ORG_NM': '성평등가족부', 'TBL_ID': 'DT_MOGE_3000400129_2025_1', 'TBL_NM': '중앙행정기관 위원회별 여성참여 현황', 'STAT_ID': '2006228', 'STAT_NM': '중앙행정기관및지방자치단체소속위원회여성참여현황', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '사회일반 > 중앙행정기관및지방자치단체소속위원회여성참여현황', 'FULL_PATH_ID': 'B > B_17', 'CONTENTS': '... 군인복무정책심의위원회 군책임운영기관운영위원회 특수임무수행자보상심의위원회 공공지원민간임대주택통합심의위원회 공인중개사정책심의위원회 교통영향평가심의위원회 도시재생특별위원회 수도권정비위원회 중앙건설기술심의위원회 중앙공동주택관리분쟁조정위원회 플랫폼운송사업심의위원회 기상청 협동조합정책심의위원회 농수산물품질관리심의회 농지관리위원회 농협경제사업평가협의회 여성농업인육성정책심의회 자유무역협정이행에따른농업인등지원위원회 지리적표시심판위원회 축산발전심의위원회 의료기기산업육성지원위원회 자살예방정책위원회 장기요양위원회...', 'STRT_PRD_DE': '2025', 'END_PRD_DE': '2025', 'ITEM03': '', 'REC_TBL_SE': 'N', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=B.1;B_17.2;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=154&tblId=DT_MOGE_3000400129_2025_1', 'STAT_DB_CNT': '12', 'QUERY': '기상관측망'})"
+    },
+    {
+      "id": "DT_MOGE_3000400129_2024_7",
+      "name": "중앙행정기관 위원회별 여성참여 현황",
+      "score": 0.788888888888889,
+      "raw": "StatRecord(stat_id='DT_MOGE_3000400129_2024_7', stat_name='중앙행정기관 위원회별 여성참여 현황', org_name='성평등가족부', org_id='154', available_periods=[], relevance_score=0.788888888888889, metadata={'source': 'kosis_api', 'ORG_ID': '154', 'ORG_NM': '성평등가족부', 'TBL_ID': 'DT_MOGE_3000400129_2024_7', 'TBL_NM': '중앙행정기관 위원회별 여성참여 현황', 'STAT_ID': '2006228', 'STAT_NM': '중앙행정기관및지방자치단체소속위원회여성참여현황', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '사회일반 > 중앙행정기관및지방자치단체소속위원회여성참여현황', 'FULL_PATH_ID': 'B > B_17', 'CONTENTS': '... 지방대학및지역균형인재육성지원위원회 학자금지원제도심의위원회 문화유산위원회 전북특별자치도지원위원회 중앙행정심판위원회 세무사자격심의위원회 건설기계수급조절위원회 국토정책위원회 노후계획도시정비특별위원회 중앙지적위원회 항공정책위원회 항공철도사고조사위원회 분담금관리위원회 기상관측표준화위원회 기획재정부 농어업인삶의질향상및농어촌지역개발위윈회 농업기계화정책심의회 농지관리위원회 디엔에이신원확인정보데이터베이스관리위원회 문화체육관광부 10·27법난피해자명예회복심의위원회 관광진흥개발기금운용위원회 국어심의회 동학농민혁명참여자명예회복심의위원회 공증인징계위원회 ...', 'STRT_PRD_DE': '2024', 'END_PRD_DE': '2024', 'ITEM03': '', 'REC_TBL_SE': 'N', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=B.1;B_17.2;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=154&tblId=DT_MOGE_3000400129_2024_7', 'STAT_DB_CNT': '12', 'QUERY': '기상관측망'})"
+    },
+    {
+      "id": "DT_MOGE_3000400129_2025_2",
+      "name": "중앙행정기관 위원회별 여성참여 현황",
+      "score": 0.6833333333333333,
+      "raw": "StatRecord(stat_id='DT_MOGE_3000400129_2025_2', stat_name='중앙행정기관 위원회별 여성참여 현황', org_name='성평등가족부', org_id='154', available_periods=[], relevance_score=0.6833333333333333, metadata={'source': 'kosis_api', 'ORG_ID': '154', 'ORG_NM': '성평등가족부', 'TBL_ID': 'DT_MOGE_3000400129_2025_2', 'TBL_NM': '중앙행정기관 위원회별 여성참여 현황', 'STAT_ID': '2006228', 'STAT_NM': '중앙행정기관및지방자치단체소속위원회여성참여현황', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '사회일반 > 중앙행정기관및지방자치단체소속위원회여성참여현황', 'FULL_PATH_ID': 'B > B_17', 'CONTENTS': '... 중앙행정심판위원회 군인재해보상연금재심위원회(舊군인연금급여재심위원회) 비정규군공로자보상심의위원회 건설기계제작결함심사평가위원회 국가지명위원회 중앙도시계획위원회 중앙지적위원회 항공철도사고조사위원회 12ㆍ29여객기참사피해자지원및희생자추모위원회 기상관측표준화위원회 공공기관운영위원회 경마감독위원회 농업재해보험심의회 농지관리위원회 도시농업협의회 여성농업인육성정책심의회 자유무역협정이행에따른농업인등지원위원회 방위사업청 만화진흥위원회 문화다양성위원회 공예문화산업진흥위원회 변호사시험관리위원회 보건복지부 ...', 'STRT_PRD_DE': '2025', 'END_PRD_DE': '2025', 'ITEM03': '', 'REC_TBL_SE': 'N', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=B.1;B_17.2;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=154&tblId=DT_MOGE_3000400129_2025_2', 'STAT_DB_CNT': '12', 'QUERY': '기상관측망'})"
+    },
+    {
+      "id": "DT_MOGE_3000400113",
+      "name": "중앙행정기관 위원회별 여성참여 현황(2017 하반기)",
+      "score": 0.5777777777777778,
+      "raw": "StatRecord(stat_id='DT_MOGE_3000400113', stat_name='중앙행정기관 위원회별 여성참여 현황(2017 하반기)', org_name='성평등가족부', org_id='154', available_periods=[], relevance_score=0.5777777777777778, metadata={'source': 'kosis_api', 'ORG_ID': '154', 'ORG_NM': '성평등가족부', 'TBL_ID': 'DT_MOGE_3000400113', 'TBL_NM': '중앙행정기관 위원회별 여성참여 현황(2017 하반기)', 'STAT_ID': '2006228', 'STAT_NM': '중앙행정기관및지방자치단체소속위원회여성참여현황', 'VW_CD': 'MT_ZTITLE', 'MT_ATITLE': '사회일반 > 중앙행정기관및지방자치단체소속위원회여성참여현황', 'FULL_PATH_ID': 'B > B_17', 'CONTENTS': '주관기관 위원회명 과학기술정보통신부 농촌진흥청 인사혁신처 국무조정실 기상청 농림축산식품부 법무부 법제처 통계청 공정거래위원회 교육부 국방부 해양경찰청 국가보훈처 산림청 식품의약품안전처 통일부 개인정보보호위원회 고용노동부 기획재정부 문화체육관광부 ... 스마트도시위원회구)유비쿼터스도시위원회 중앙건설기술심의위원회 증권선물위원회 공인회계사시험위원회 세무사징계위원회 보조금통합관리망 운영기관 협의회 국제거래가격과세조정심의위원회 부담금운용심의위원회 농업재해대책심의위원회 품종보호심판위원회 농가소득안정심의위원회 ...', 'STRT_PRD_DE': '2017', 'END_PRD_DE': '2017', 'ITEM03': '', 'REC_TBL_SE': 'N', 'TBL_VIEW_URL': 'https://kosis.kr/statisticsList/statisticsListIndex.do?menuId=M_01_01&vwcd=MT_ZTITLE&parmTabId=M_01_01&parentId=B.1;B_17.2;', 'LINK_URL': 'http://kosis.kr/statHtml/statHtml.do?orgId=154&tblId=DT_MOGE_3000400113', 'STAT_DB_CNT': '12', 'QUERY': '기상관측망'})"
+    }
+  ]
+}

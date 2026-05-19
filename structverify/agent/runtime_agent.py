@@ -45,12 +45,14 @@ Thought → Action(Tool Call) → Observation 순환을 통해 파이프라인 �
 from __future__ import annotations
 
 from structverify.core.schemas import (
-    Claim, SIRDocument, VerificationResult, GraphNode, GraphEdge,
+    Claim, SIRDocument, VerificationResult, GraphNode, GraphEdge, Evidence,
+    GraphNodeType, GraphEdgeType,
 )
 from structverify.detection.domain_classifier import classify_domain
 from structverify.detection.claim_detector import detect_claims
 from structverify.detection.schema_inductor import induce_schemas
 from structverify.graph.graph_builder import build_claim_graph
+from structverify.graph.graph_multihop import apply_multihop_verification
 from structverify.graph.document_graph import build_document_temporal_graph
 from structverify.graph.claim_graph import ClaimGraph
 from structverify.retrieval.query_builder import build_query
@@ -78,9 +80,12 @@ class RuntimeAgent:
         }
         self.kosis = KOSISConnector(config=kosis_cfg)
 
-        # TODO [김예슬]: Graph Store 초기화 (Neo4j 노드/엣지 실시간 저장용)
-        # from structverify.graph.graph_store import GraphStore
-        # self.graph_store = GraphStore(config=self.config.get("graph", {}))
+        # [v6.19] Graph Store 초기화 (Neo4j — 옵셔널)
+        #   default.yaml graph.store.enabled=true 일 때만 실제 연결.
+        #   미설정/미설치/연결실패 시 GraphStore 내부에서 안전하게 비활성화됨.
+        from structverify.graph.graph_store import GraphStore
+        graph_store_cfg = (self.config.get("graph") or {}).get("store") or {}
+        self.graph_store = GraphStore(config=graph_store_cfg)
 
     async def process(self, sir_doc: SIRDocument) -> tuple[
         list[Claim], list[VerificationResult], list[GraphNode], list[GraphEdge]
@@ -114,19 +119,6 @@ class RuntimeAgent:
             logger.info("[Agent A] 검증 가능한 주장 없음 — 파이프라인 종료")
             return [], [], [], []
 
-        # ── [v6 멀티홉] Action: build_document_temporal_graph ───────────
-        # Tool: HCX-007 Structured Outputs (v3, 1회 호출)
-        # Thought: "문서 전체에서 anchor 시점 + 모든 시간 표현 + coref를
-        #           한 번에 추출해서 그래프에 박아두자."
-        # Observation: DocumentNode + TemporalExprNodes + ResolvedTimeNodes
-        #
-        # 이 단계가 schema_inductor 앞에 와야 함:
-        #   schema_inductor가 그래프 traverse 결과를 prompt hint로 사용
-        # 룰 매핑 일체 없음 — LLM이 anchor와 모든 표현을 동시에 풀어냄
-        doc_nodes, doc_edges = await build_document_temporal_graph(sir_doc, self.config)
-        logger.info(f"[Agent A] Step 4.5 build_document_temporal_graph → "
-                    f"{len(doc_nodes)} nodes, {len(doc_edges)} edges")
-
         # ── [v4 김예슬] Context Window 부착 ────────────────────────────
         # 각 claim에 앞뒤 문장 context를 붙여서 LLM이 맥락을 이해할 수 있게 함
         # 예: "이는 20년 새 2.6배 증가한 것이다" → 앞 문장 "쉬었음 청년이 21만7천명"도 함께 전달
@@ -134,41 +126,82 @@ class RuntimeAgent:
         for claim in claims:
             claim.context_text = _get_context_window(claim, sir_doc, window=2)
 
-        # [v6] document graph만으로 ClaimGraph facade 생성
-        # 이 시점에서는 claim/metric 노드는 없지만, schema_inductor가
-        # claim.graph_anchor_id로 sentence를 찾아 시점 traverse만 하면 됨
-        pre_graph = ClaimGraph(doc_nodes, doc_edges)
+        # ── Action: build_document_temporal_graph ─────────────────────
+        # Tool: HCX 문서 시간 분석 agent (LLM 1회 호출)
+        # Thought: "기사 작성일/anchor_year를 추출해서 '내년/올해' 같은
+        #           상대 시점을 절대 연도로 풀 수 있게 해야 한다"
+        # Observation: DocumentNode(anchor_year=...) + TemporalExpr 노드
+        # [v6.16] 이 단계가 빠져 있어서 anchor_year가 항상 None이던 버그 수정
+        temporal_graph = None
+        try:
+            t_nodes, t_edges = await build_document_temporal_graph(
+                sir_doc, self.config
+            )
+            if t_nodes:
+                temporal_graph = ClaimGraph(t_nodes, t_edges)
+                logger.info(
+                    f"[Agent A] Step 4.5 temporal graph → "
+                    f"anchor_year={temporal_graph.get_anchor_year()}"
+                )
+        except Exception as e:
+            logger.warning(f"[Agent A] temporal graph 빌드 실패 (계속 진행): {e}")
 
         # ── Action: induce_schemas ───────────────────────────────────
         # Tool: HCX-007 Structured Outputs (v3 API)
-        # [v6] graph 전달 → "작년" 같은 표현이 그래프에서 "2023"으로 resolved
-        #     되어 prompt hint로 들어감. LLM은 그걸 그대로 time_period에 사용.
-        claims = await induce_schemas(claims, self.config, graph=pre_graph)
+        # Thought: "각 주장을 indicator/value/unit/population으로 구조화해야 한다"
+        # Observation: claim.schema = ClaimSchema({indicator, value, ...})
+        # [v4] context_text 포함 → "이는" 같은 대명사 참조 해소
+        # [v6.16] temporal_graph 전달 → 상대 시점 해소 + anchor_year fallback
+        claims = await induce_schemas(claims, self.config, graph=temporal_graph)
         logger.info(f"[Agent A] Step 5 induce_schemas → schemas attached")
 
         # ── Action: build_claim_graph ────────────────────────────────
-        # [v6] 기존 ClaimNode/MetricNode/EntityNode/COMPARE 생성
-        all_nodes, all_edges = build_claim_graph(claims, sir_doc=sir_doc)
-        # document temporal 그래프 합치기
-        all_nodes.extend(doc_nodes)
-        all_edges.extend(doc_edges)
+        # Tool: 내부 로직 (LLM 미사용)
+        # Thought: "ClaimSchema → Knowledge Graph 노드/엣지를 구성해야 한다"
+        # Observation: GraphNode[], GraphEdge[]
+        # TODO [신준수]: graph_builder.py 노드/엣지 타입 완성
+        all_nodes, all_edges = build_claim_graph(claims, sir_doc=sir_doc) # 호출부 로직 변경 [pipeline v3] 김예슬
         logger.info(f"[Agent A] Step 6 build_claim_graph → {len(all_nodes)} nodes")
 
-        # [v6] 전체 그래프로 ClaimGraph 재생성 (verifier/explainer가 사용)
-        full_graph = ClaimGraph(all_nodes, all_edges)
-
-        # ── 각 주장별 Step 7~9 ──────────────────────────────────────
+        # ── Step 7~8: 각 주장별 Evidence 조회 + 검증 ────────────────
+        # [Multi-hop v1] Step 9(설명)는 multi-hop 재검증 후로 분리
+        #   이유: 파생 주장 검증은 다른 claim들의 Step 8 결과가 모두 필요함
+        # [Phase D] config.agent.enabled=true 면 planner+loop 경로 사용:
+        #   - planner가 claim마다 Plan 수립 (ReAct: Thought)
+        #   - agent_loop가 Plan대로 catalog_search → fetch_evidence → verify 순회
+        #   기존 경로(고정 retrieve→verify)는 enabled=false 시 그대로 사용 → 안전 롤백
         results: list[VerificationResult] = []
+        agent_enabled = bool(
+            (self.config.get("agent") or {}).get("enabled", False)
+        )
+
+        # agent 경로에서 쓸 문서 원문 (planner가 source_text로 사용)
+        source_text = self._get_source_text(sir_doc)
+        anchor_year = (
+            temporal_graph.get_anchor_year() if temporal_graph else None
+        )
 
         for claim in claims:
             claim_nid = f"claim:{claim.claim_id.hex[:8]}"
 
+            if agent_enabled:
+                # ── [Phase D] Agent Loop 경로 ──────────────────────────
+                result, ev_nodes, ev_edges = await self._verify_with_agent(
+                    claim, source_text, anchor_year, temporal_graph,
+                    claim_nid=claim_nid,
+                )
+                # [v6.19] agent 경로 evidence도 그래프에 박음 → multihop 활성화
+                all_nodes.extend(ev_nodes)
+                all_edges.extend(ev_edges)
+                logger.info(
+                    f"[Agent A] Step 7~8 agent_loop → {result.verdict.value} "
+                    f"(evidence nodes={len(ev_nodes)})"
+                )
+                results.append(result)
+                continue
+
+            # ── 기존 경로 (고정 retrieve_evidence + verify_claim) ──────
             # Action: retrieve_evidence (KOSIS API)
-            # Tool: KOSIS Open API — pgvector 검색 → LLM 리랭킹 → 실제 수치 조회
-            # Thought: "KOSIS에서 공식 수치를 가져와야 한다"
-            # Observation: Evidence {official_value, stat_table_id, ...}
-            # TODO [신준수]: kosis_connector.py 실제 HTTP 호출 구현
-            # TODO [신준수]: query_builder.py ClaimSchema → KOSIS 파라미터 변환
             query = build_query(claim)
             evidence, ev_nodes, ev_edges = await build_evidence_subgraph(
                 self.kosis, query, claim_nid,
@@ -176,24 +209,261 @@ class RuntimeAgent:
             all_nodes.extend(ev_nodes)
             all_edges.extend(ev_edges)
             logger.info(f"[Agent A] Step 7 retrieve_evidence → {str(evidence)[:80] if evidence else None}")
-            # Action: verify_claim (Deterministic, LLM 미개입)
-            # [v6] graph 전달 → schema.time_period가 "작년"이어도
-            #      그래프에서 멀티홉 traverse로 "2023" 찾아서 KOSIS row 매칭
-            result = verify_claim(claim, evidence, self.config, graph=full_graph)
-            logger.info(f"[Agent A] Step 8 verify_claim → {result.verdict.value}")
 
-            # Action: generate_explanation (LLM)
-            # Tool: HCX-003 (v1, 중량) — verdict별 전용 프롬프트 사용
-            # Thought: "판정 결과를 독자가 이해할 수 있는 설명으로 생성해야 한다"
-            # Observation: 자연어 설명 문자열 + provenance_summary 세팅
+            # Action: verify_claim (Deterministic, LLM 미개입)
+            result = verify_claim(claim, evidence, self.config, graph=temporal_graph)
+            logger.info(f"[Agent A] Step 8 verify_claim → {result.verdict.value}")
+            results.append(result)
+
+        # ── Step 8.5: Multi-hop GraphRAG 파생 주장 재검증 ──────────────
+        # Tool: graph_multihop (LLM 미사용 — 비율/배수 계산은 deterministic)
+        # Thought: "KOSIS로 직접 검증 못한 파생 주장(2.6배 등)을
+        #           COMPARE 엣지 이웃들의 검증된 수치로 재계산할 수 있다"
+        # Observation: UNVERIFIABLE 파생 주장 → MATCH/MISMATCH 가능
+        results = apply_multihop_verification(
+            claims, results, all_edges, self.config
+        )
+
+        # ── Step 9: 각 주장별 설명 생성 ────────────────────────────────
+        for claim, result in zip(claims, results):
             result.explanation = await generate_explanation(claim, result, self.config)
             logger.info(f"[Agent A] Step 9 generate_explanation → {len(result.explanation or '')}자")
 
-            results.append(result)
+        # ── [v6.19] Step 9.5: Graph Store 영속화 (Neo4j — 옵셔널) ──────
+        # graph.store.enabled=true 면 노드/엣지를 Neo4j에 MERGE.
+        # 비활성/실패해도 save_graph 내부에서 흡수 — 검증 결과는 그대로 반환.
+        if self.graph_store.is_active():
+            try:
+                n_saved, e_saved = await self.graph_store.save_graph(
+                    all_nodes, all_edges
+                )
+                logger.info(
+                    f"[Agent A] Step 9.5 graph_store → "
+                    f"Neo4j 저장 노드 {n_saved} / 엣지 {e_saved}"
+                )
+            except Exception as e:
+                logger.warning(f"[Agent A] graph_store 저장 실패 (무시): {e}")
 
         logger.info(f"[Agent A] 완료: claims={len(claims)}, results={len(results)}, "
                     f"nodes={len(all_nodes)}, edges={len(all_edges)}")
+
+        # [v6.19] job 완료 후 agent_workspace 임시 디렉토리 정리.
+        # workspace.cleanup()은 정의돼 있었지만 어디서도 호출되지 않아
+        # job마다 agent_workspace/job_* 디렉토리가 무한 누적 →
+        # "No space left on device"로 agent_loop 전체가 폴백되는 장애 발생.
+        # agent.workspace.persist_after_job=true면 디버깅 위해 보존.
+        agent_cfg = self.config.get("agent") or {}
+        ws_cfg = dict(agent_cfg.get("workspace") or {})
+        if not ws_cfg.get("persist_after_job", False):
+            try:
+                from structverify.agent.workspace import build_workspace
+                # _verify_with_agent와 동일하게 claim.doc_id를 job_id로 사용
+                _job_id = ""
+                if claims:
+                    _job_id = str(getattr(claims[0], "doc_id", "") or "")
+                _ws = build_workspace(job_id=_job_id or "job", config=ws_cfg)
+                _ws.cleanup()
+            except Exception as e:
+                logger.warning(f"[Agent A] workspace 정리 실패 (무시): {e}")
+
         return claims, results, all_nodes, all_edges
+
+    # ── [Phase D] Agent Loop 경로 헬퍼 ──────────────────────────────────────
+
+    def _get_source_text(self, sir_doc: "SIRDocument") -> str:
+        """SIR 문서에서 원문 텍스트 복원 — planner의 source_text로 사용."""
+        parts: list[str] = []
+        for block in getattr(sir_doc, "blocks", []) or []:
+            for sent in getattr(block, "sentences", []) or []:
+                t = getattr(sent, "text", None)
+                if t:
+                    parts.append(t)
+        return " ".join(parts)
+
+    async def _verify_with_agent(
+        self,
+        claim: "Claim",
+        source_text: str,
+        anchor_year: "int | None",
+        temporal_graph: "ClaimGraph | None",
+        claim_nid: str,
+    ) -> "tuple[VerificationResult, list[GraphNode], list[GraphEdge]]":
+        """
+        [Phase D] planner + agent_loop 으로 claim 1건 검증.
+
+        ReAct:
+          Thought  → planner.plan() 이 Plan(검증 전략 + 단계) 수립
+          Action   → agent_loop 이 catalog_search → fetch_evidence 순회
+          Observation → 각 step 결과 누적
+          → AgentVerdict 산출 → VerificationResult 변환
+
+        Returns:
+          (VerificationResult, evidence GraphNode 리스트, GraphEdge 리스트)
+          — [v6.19] evidence를 그래프에 박아 multihop 재검증이 agent 경로에서도
+            동작하게 함. 검증 실패해도 노드는 빈 리스트로 반환(에러 아님).
+
+        실패 시 기존 경로(retrieve_evidence + verify_claim)로 폴백.
+        """
+        from structverify.agent.planner import Planner, PlannerConfig
+        from structverify.agent.loop import agent_loop, LoopConfig
+        from structverify.agent.workspace import build_workspace
+        from structverify.retrieval.registry import build_all_enabled
+        import structverify.retrieval.kosis_source  # noqa: F401 — @register_datasource 트리거
+
+        agent_cfg = self.config.get("agent") or {}
+        llm_cfg   = self.config.get("llm") or {}
+
+        try:
+            # 1) workspace 준비
+            ws_cfg = dict(agent_cfg.get("workspace") or {})
+            workspace = build_workspace(
+                job_id=str(getattr(claim, "doc_id", "") or "job"),
+                config=ws_cfg,
+            )
+            if not workspace.is_initialized():
+                workspace.initialize(source_text=source_text or "")
+            workspace.create_claim_dir(
+                claim.claim_id, claim_data=claim.model_dump(mode="json")
+            )
+
+            # 2) DataSource 등록 (KOSIS)
+            ds_cfg = self.config.get("data_sources") or {}
+            kosis_ds_cfg = dict(ds_cfg.get("kosis") or self.config.get("kosis") or {})
+            datasources = {
+                ds.name: ds
+                for ds in build_all_enabled({
+                    "enabled": ["kosis"],
+                    "kosis": kosis_ds_cfg,
+                })
+            }
+
+            # 3) Planner LLM wiring — 기존 LLMClient 재사용
+            from structverify.utils.llm_client import LLMClient
+            plan_llm = LLMClient(config=llm_cfg)
+
+            async def llm_call_for_plan(prompt: str) -> str:
+                return await plan_llm.generate(
+                    prompt=prompt,
+                    system_prompt="검증 계획 수립 전문가. JSON으로만 답하세요.",
+                )
+
+            planner = Planner(
+                llm_call=llm_call_for_plan,
+                config=PlannerConfig(
+                    model=(llm_cfg.get("plan_model") or "HCX-007"),
+                    temperature=0.1,
+                ),
+            )
+
+            # 4) Plan 생성 (ReAct Thought)
+            plan = await planner.plan(
+                claim, source_text=source_text, anchor_year=anchor_year
+            )
+            workspace.write_plan(claim.claim_id, plan.model_dump(mode="json"))
+            logger.info(
+                f"[planner] {claim.claim_id}: Plan 수립 "
+                f"type={getattr(plan, 'claim_type', None)} "
+                f"steps={len(getattr(plan, 'initial_steps', []) or [])}"
+            )
+
+            # 5) Agent Loop 실행 (ReAct Action/Observation)
+            loop_cfg = agent_cfg.get("loop") or {}
+            verdict = await agent_loop(
+                plan=plan,
+                claim=claim,
+                workspace=workspace,
+                datasources=datasources,
+                config=self.config,
+                reflect_fn=None,  # Phase D = deterministic
+                loop_config=LoopConfig(
+                    max_iterations=int(loop_cfg.get("max_iterations", 10)),
+                    mode="deterministic",
+                ),
+            )
+
+            # 6) AgentVerdict → VerificationResult 변환
+            #    [v6.17] agent_loop이 검증에 쓴 KOSIS 데이터(data_points)를
+            #    Evidence로 복원 → UI '공식 통계 출처' 박스에 표시됨.
+            agent_evidence = None
+            dps = getattr(verdict, "data_points", None) or []
+            if dps:
+                dp = dps[0]  # 단일 fetch — 첫 data point가 검증 근거
+                src = (dp.source or "")
+                stat_id = src.split(":", 1)[1] if ":" in src else (src or None)
+                agent_evidence = Evidence(
+                    source_name="KOSIS",
+                    stat_table_id=stat_id,
+                    official_value=dp.resolved_value,
+                    unit=dp.resolved_unit,
+                    time_period=dp.source_time,
+                )
+
+            # [v6.19] Evidence → 그래프 노드/엣지 (multihop 재검증 입력)
+            ev_nodes, ev_edges = _evidence_to_graph(agent_evidence, claim_nid)
+
+            result = VerificationResult(
+                claim_id=claim.claim_id,
+                verdict=verdict.verdict,
+                confidence=verdict.confidence,
+                explanation=verdict.explanation,
+                evidence=agent_evidence,
+            )
+            return result, ev_nodes, ev_edges
+
+        except Exception as e:
+            # Agent 경로 실패 → 기존 경로로 안전 폴백
+            logger.warning(
+                f"[Agent A] agent_loop 실패 → 기존 경로 폴백: {e}"
+            )
+            query = build_query(claim)
+            evidence, fb_nodes, fb_edges = await build_evidence_subgraph(
+                self.kosis, query, claim_nid,
+            )
+            fb_result = verify_claim(
+                claim, evidence, self.config, graph=temporal_graph
+            )
+            return fb_result, fb_nodes, fb_edges
+
+
+# ── [v6.19] Evidence → 그래프 노드/엣지 변환 ────────────────────────────────
+
+def _evidence_to_graph(
+    evidence: "Evidence | None", claim_nid: str,
+) -> "tuple[list[GraphNode], list[GraphEdge]]":
+    """agent 경로가 얻은 Evidence를 그래프 노드/엣지로 변환.
+
+    기존 경로의 build_evidence_subgraph와 동일한 모양:
+      EVIDENCE 노드 1개 + (claim ─VERIFIED_BY→ evidence) 엣지 1개
+    이렇게 박아야 Step 8.5 multihop이 COMPARE 이웃의 검증 수치를
+    그래프에서 찾아 파생 주장을 재검증할 수 있다.
+
+    evidence가 None이거나 official_value가 없으면 빈 리스트
+    (검증 근거가 없으므로 그래프에 박을 것도 없음).
+    """
+    if evidence is None or getattr(evidence, "official_value", None) is None:
+        return [], []
+
+    stat_id = getattr(evidence, "stat_table_id", None) or "unknown"
+    ev_node_id = f"evidence:{claim_nid}:{stat_id}"
+    ev_node = GraphNode(
+        node_id=ev_node_id,
+        node_type=GraphNodeType.EVIDENCE,
+        label=f"{evidence.source_name or 'KOSIS'}({stat_id})",
+        properties={
+            "official_value": evidence.official_value,
+            "unit": getattr(evidence, "unit", None),
+            "time_period": getattr(evidence, "time_period", None),
+            "stat_table_id": stat_id,
+            "source_name": evidence.source_name,
+        },
+    )
+    ev_edge = GraphEdge(
+        from_node=claim_nid,
+        to_node=ev_node_id,
+        edge_type=GraphEdgeType.VERIFIED_BY,
+    )
+    return [ev_node], [ev_edge]
+
 
 # ── [v4 김예슬] Context Window 헬퍼 ─────────────────────────────────────────
 

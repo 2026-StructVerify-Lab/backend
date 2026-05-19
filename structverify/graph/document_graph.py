@@ -27,6 +27,7 @@ verifier가 KOSIS row 매칭 시 resolved time을 사용
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from structverify.core.schemas import (
@@ -47,10 +48,15 @@ _TEMPORAL_AGENT_PROMPT = """당신은 문서의 시간 정보를 정밀하게 �
 # 추출 대상
 
 ## 1) anchor: 이 문서가 "기준 시점"으로 삼는 시점
-- 본문에 "OOOO년은", "지난 OOOO년", "발행일: OOOO" 등으로 명시된 연도/시점을 우선
+- ⚠️ **최우선 규칙**: 본문에 기사 작성일/발행일이 있으면 (예: "작성일자 2025-01-01",
+  "2025.01.01", "입력 2025-01-01 11:34", "발행: 2025년 1월 1일") **그 날짜의 연도를
+  anchor로 무조건 선택**한다. 본문 내용("작년 기온이 가장 높았다" 등)이 다른 연도를
+  암시하더라도 작성일 연도가 절대 우선이다. "작년/지난해"는 작성일 연도 - 1 이다.
+- 작성일이 없을 때만: 본문에 "OOOO년은", "지난 OOOO년" 등으로 명시된 연도를 anchor로
 - 명시된 anchor가 여러 개라면 본문 서술 시점의 기준이 되는 것을 선택
 - 본문에 명시되지 않은 경우 anchor_year=null
 - 무엇을 근거로 anchor를 정했는지 anchor_evidence에 짧게 기록
+  (작성일을 썼다면 "작성일자 2025-01-01 → anchor_year=2025"처럼 기록)
 
 ## 2) temporal_expressions: 본문의 모든 시간 표현 목록
 모든 시간 표현을 빠짐없이 수집하고, anchor와 다른 문장 참조를 활용해 절대 시점으로 풀어내세요.
@@ -180,13 +186,32 @@ def _materialize_graph(
     # 1) DocumentNode
     doc_node_id = f"node:doc:{sir_doc.doc_id.hex[:8]}"
     anchor_year = agent_result.get("anchor_year")
+    anchor_evidence = agent_result.get("anchor_evidence")
+
+    # ── [v6.19] 작성일 기반 anchor 덮어쓰기 ──────────────────────────────
+    # LLM이 본문 내용에 끌려 anchor를 잘못 잡을 수 있어, 본문에 명시된
+    # 작성일/발행일 연도가 있으면 그것을 anchor로 강제한다.
+    article_year = _extract_article_year(sir_doc)
+    anchor_corrected = False
+    if article_year is not None and article_year != anchor_year:
+        logger.info(
+            f"temporal graph: anchor_year를 작성일 기준으로 보정 "
+            f"{anchor_year} → {article_year} (LLM 추론값 무시)"
+        )
+        anchor_year = article_year
+        anchor_corrected = True
+        anchor_evidence = (
+            f"본문 작성일 기준 anchor_year={article_year} "
+            f"(LLM 추론값 대신 보정)"
+        )
+
     nodes.append(GraphNode(
         node_id=doc_node_id,
         node_type=GraphNodeType.DOCUMENT,
         label=f"Document(anchor_year={anchor_year})",
         properties={
             "anchor_year": anchor_year,
-            "anchor_evidence": agent_result.get("anchor_evidence"),
+            "anchor_evidence": anchor_evidence,
             "source_uri": sir_doc.source_uri,
             "source_type": sir_doc.source_type.value if sir_doc.source_type else None,
         },
@@ -208,6 +233,18 @@ def _materialize_graph(
         resolved = te.get("resolved")
         basis = te.get("resolution_basis", "") or ""
         refers_to = te.get("refers_to_sent_id")
+
+        # [v6.19] anchor가 작성일 기준으로 보정됐으면 상대 표현 resolved도 재계산
+        if anchor_corrected and anchor_year is not None:
+            new_resolved = _recompute_resolved(
+                expression, basis, resolved, anchor_year
+            )
+            if new_resolved != resolved:
+                logger.info(
+                    f"temporal: '{expression}' resolved 재계산 "
+                    f"{resolved!r} → {new_resolved!r} (anchor={anchor_year})"
+                )
+                resolved = new_resolved
 
         if not sent_id or not expression:
             continue
@@ -347,3 +384,104 @@ def _build_sent_anchor_map(sir_doc: SIRDocument) -> dict[str, str]:
             if sent.graph_anchor_id:
                 mapping[sent.sent_id] = sent.graph_anchor_id
     return mapping
+
+# ── [v6.19] 작성일 기반 anchor 보조 가드 ──────────────────────────────────
+# LLM이 본문 내용("작년 가장 더웠다")에 끌려 anchor를 잘못 잡는 경우가 있어
+# (예: 작성일 2025인데 anchor=2024), 본문에 명시된 작성일/발행일 연도를
+# deterministic하게 추출해 anchor를 덮어쓴다.
+
+# "작성일자 2025-01-01", "입력 2025.01.01 11:34", "2025-01-01 11:34" 등
+_DATE_PATTERNS = [
+    re.compile(r"(20\d{2})\s?[.\-/년]\s?\d{1,2}\s?[.\-/월]\s?\d{1,2}"),
+]
+# 작성일 맥락 키워드 — 이 단어 근처의 날짜만 작성일로 인정
+_DATE_CONTEXT = ("작성", "발행", "입력", "등록", "송고", "보도")
+
+
+def _extract_article_year(sir_doc: SIRDocument) -> int | None:
+    """본문에서 기사 작성일/발행일의 연도를 추출.
+
+    작성일 맥락 키워드(_DATE_CONTEXT)가 같은 문장에 있는 날짜를 우선.
+    맥락 키워드가 없으면, 본문 맨 앞쪽(상위 3문장)의 날짜를 후보로 본다
+    (기사 헤더에 날짜만 단독으로 오는 경우 대응).
+    없으면 None — LLM이 뽑은 anchor를 그대로 둔다.
+    """
+    context_year: int | None = None
+    sent_idx = 0
+    for block in sir_doc.blocks:
+        for sent in block.sentences:
+            text = (sent.text or "").strip()
+            sent_idx += 1
+            if not text:
+                continue
+            for pat in _DATE_PATTERNS:
+                m = pat.search(text)
+                if not m:
+                    continue
+                year = int(m.group(1))
+                if not (2000 <= year <= 2099):
+                    continue
+                has_ctx = any(kw in text for kw in _DATE_CONTEXT)
+                if has_ctx:
+                    return year  # 작성일 맥락 — 즉시 확정
+                if context_year is None and sent_idx <= 3:
+                    context_year = year  # 헤더 부근 날짜 — 후보로 보관
+    return context_year
+
+
+# ── [v6.19] anchor 보정 시 상대 시간표현 resolved 재계산 ──────────────────
+# anchor를 작성일 기준으로 덮어쓰면, LLM이 옛 anchor로 풀어둔 resolved 값
+# ("작년"→2023)이 어긋난다. resolution_basis의 offset(anchor-1 등)을 읽어
+# 새 anchor 기준으로 다시 계산한다.
+
+# "작년/지난해/전년" = -1, "재작년" = -2, "올해/금년" = 0, "내년" = +1
+_RELATIVE_OFFSETS = {
+    "재작년": -2, "지지난해": -2,
+    "작년": -1, "지난해": -1, "전년": -1, "지난 해": -1,
+    "올해": 0, "금년": 0, "당해": 0, "올 해": 0,
+    "내년": 1, "명년": 1,
+}
+
+
+def _offset_from_basis(basis: str) -> int | None:
+    """resolution_basis 문자열에서 anchor 대비 offset을 추출.
+
+    "anchor_year - 1 = 2023" → -1, "anchor_year-2(2022)" → -2,
+    "anchor_year" 단독 → 0. 못 찾으면 None.
+    """
+    if not basis or "anchor" not in basis.lower():
+        return None
+    m = re.search(r"anchor[_ ]?year\s*([+\-])\s*(\d+)", basis, re.IGNORECASE)
+    if m:
+        sign = -1 if m.group(1) == "-" else 1
+        return sign * int(m.group(2))
+    # offset 표기 없이 anchor_year만 언급 → 같은 해
+    return 0
+
+
+def _recompute_resolved(
+    expression: str, basis: str, resolved: Any, new_anchor: int,
+) -> Any:
+    """상대 시간표현의 resolved를 new_anchor 기준으로 재계산.
+
+    - expression이 상대 표현(_RELATIVE_OFFSETS)이면 그 offset 우선 사용
+    - 아니면 resolution_basis의 anchor offset 사용
+    - 둘 다 없으면 원본 resolved 유지 (절대 표현 "2024년" 등은 건드리지 않음)
+    """
+    expr = (expression or "").strip()
+    offset: int | None = None
+    for kw, off in _RELATIVE_OFFSETS.items():
+        if kw in expr:
+            offset = off
+            break
+    if offset is None:
+        offset = _offset_from_basis(basis)
+    if offset is None:
+        return resolved  # 절대 표현 — 그대로
+
+    new_year = new_anchor + offset
+    # resolved가 'YYYY-MM' / 'YYYY-MM..YYYY-MM' 형태면 연도 부분만 치환
+    if isinstance(resolved, str) and resolved:
+        # 연도(YYYY)를 new_year로 교체, 월/범위는 유지
+        return re.sub(r"20\d{2}", str(new_year), resolved)
+    return str(new_year)

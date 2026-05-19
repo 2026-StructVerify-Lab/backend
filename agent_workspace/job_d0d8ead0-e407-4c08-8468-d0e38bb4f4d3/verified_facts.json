@@ -1,0 +1,22 @@
+[
+  {
+    "indicator": "합계출산율",
+    "time_period": "2023",
+    "value": 2.251,
+    "unit": "명",
+    "source": "KOSIS:DT_2KAA207",
+    "claim_id": "34f12181-a56b-40ce-9d21-b4406eb82592",
+    "verdict": "mismatch",
+    "recorded_at": "2026-05-19T01:29:55.627338+00:00"
+  },
+  {
+    "indicator": "출생아 수",
+    "time_period": "2023",
+    "value": 230028.0,
+    "unit": "명 건",
+    "source": "KOSIS:DT_1B8000G",
+    "claim_id": "30dadd92-552b-4079-8f60-addcc95cb806",
+    "verdict": "match",
+    "recorded_at": "2026-05-19T01:31:00.989691+00:00"
+  }
+]
