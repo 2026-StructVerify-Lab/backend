@@ -165,6 +165,11 @@ def _is_table_relevant(indicator: str, table_name: str) -> bool:
 
     [박재윤 - 2026-05-14]: 국가 불일치 체크 추가
     indicator에 외국 국가명 있는데 테이블이 국내 통계면 → False
+
+    [박재윤 - 2026-05-18]: 세부 대상 불일치 차단
+    전체 사망자 indicator인데 영아사망 테이블 매칭되는 문제 방지
+
+    [박재윤 - 2026-05-18]: UN/IMF 국제 데이터 테이블 차단
     """
     import re
 
@@ -181,19 +186,32 @@ def _is_table_relevant(indicator: str, table_name: str) -> bool:
     foreign_in_table = any(c in tbl_lower for c in _FOREIGN_COUNTRIES | _FOREIGN_TABLE_MARKERS)
     if foreign_in_indicator and not foreign_in_table:
         return False
-    
+
+    # [박재윤 - 2026-05-18]: UN/IMF 국제 데이터 테이블 차단
+    _INTERNATIONAL_MARKERS = {"un ", "imf ", "oecd ", "세계은행", "국제연합"}
+    if any(m in tbl_lower for m in _INTERNATIONAL_MARKERS):
+        return False
+
     # [박재윤 - 2026-05-14]: 장래 추계 테이블 차단
     _FORECAST_TABLE_MARKERS = {"장래", "추계", "전망"}
     if any(r in tbl_lower for r in _FORECAST_TABLE_MARKERS):
         return False
 
     # [박재윤 - 2026-05-14]: 해외 지역명 체크 추가
-    # indicator에 국가명 없는데 테이블에 해외 지역명 있으면 → 해외 지역 통계 → False
     _REGION_MARKERS = {"남부·동남아시아", "동남아시아", "동북아시아", "중앙아시아",
                        "아프리카", "중동", "남미", "북미", "오세아니아", "서남아시아"}
     region_in_table = any(r in tbl_lower for r in _REGION_MARKERS)
     if not foreign_in_indicator and region_in_table:
         return False
+
+    # [박재윤 - 2026-05-18]: 세부 대상 불일치 차단
+    # 전체 사망자/출생아 indicator인데 영아·신생아 테이블 매칭되는 문제
+    _SPECIFIC_SCOPE_MARKERS = {"영아", "신생아", "모성"}
+    table_is_specific = any(m in tbl_lower for m in _SPECIFIC_SCOPE_MARKERS)
+    if table_is_specific:
+        ind_has_specific = any(m in ind_lower for m in _SPECIFIC_SCOPE_MARKERS)
+        if not ind_has_specific:
+            return False
 
     stopwords = {
         "통계", "현황", "조사", "결과", "항목", "지표", "전체", "기타",
