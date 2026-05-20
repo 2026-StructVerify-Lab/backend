@@ -444,7 +444,14 @@ def _select_best_row(
     # 3차: indicator만 매칭 — 가장 최근 시점 row 우선
     #   [v6.19] 단, claim이 월 단위면 연 단위 row는 제외 (가짜 매칭 방지)
     #   [v6.25] 단위 불일치 row도 제외
-    if ind_norm:
+    #   [패치 3-2] claim에 명시 시점(prd_target)이 있는데 1·2차에서 정확
+    #     매칭 못 했으면, 3차에서 다른 시점 row를 default로 반환하지 않는다.
+    #     이전엔 claim '2024-04'인데 표에 4월 row 없으면 1월 row를 reverse
+    #     sort로 잡아 evidence 반환 → "(connector default value=21412 → override)"
+    #     로그와 함께 calculate가 잘못된 prev값으로 가짜 mismatch를 냈음.
+    #     prd_target가 명시된 경우엔 시점 누수보다 None(검증 불가)이 안전 —
+    #     호출자가 i'' 자동 fallback으로 다음 candidate를 시도하게 한다.
+    if ind_norm and not prd_target:
         matched = [
             r for r in rows
             if _ind_match(r) and _granularity_ok(r) and _unit_match(r)
