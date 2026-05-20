@@ -16,6 +16,7 @@ Phase E에서 reflect_fn으로 *LLM이 다음 step 결정* 가능.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Protocol
 
@@ -835,11 +836,37 @@ async def agent_loop(
 
     # ── 실행 루프 ──
     last_observation: Observation | None = None
+    # B2 sanity check용 — finish 이후의 verdict 검증에 쓰임.
+    # last_observation은 finish 자체로 덮어쓰여 사라지므로 별도 추적.
+    last_fetch_observation: Observation | None = None
     last_result: ToolResult | None = None
     finished = False
     stop_reason = StopReason.MAX_ITERATIONS
     plan_step_idx = 0
     plan_exhausted = False
+
+    # ── [중복 action 차단] reflect 모드 전용 ─────────────────────────
+    # reflect(HCX)가 thought엔 "다른 검색어"라 쓰면서 action.input.query는
+    # 동일하게 두는 일이 잦다 → 같은 catalog_search를 max_iter까지 반복하는
+    # 헛돌이 발생. loop이 결정적으로 차단한다:
+    #   - 같은 (action, input) 조합이 이미 실행됐으면 tool 실행을 스킵하고
+    #     reflect에게 "이미 시도함, 다른 검색어를 쓰라"는 observation을 줌.
+    #   - 연속 중복이 임계치를 넘으면 헛돌이로 보고 loop 종료.
+    _seen_action_keys: set[str] = set()
+    _consecutive_dup = 0
+    _DUP_LIMIT = 2  # 연속 중복 이 횟수 도달 시 종료
+
+    def _action_key(step: PlanStep) -> str:
+        """action + 입력으로 중복 판별 키. 문자열 값은 공백 제거 정규화."""
+        inp = step.input or {}
+        norm = {
+            k: (str(v).strip().replace(" ", "") if isinstance(v, str) else v)
+            for k, v in inp.items()
+        }
+        return (
+            f"{step.action.value}::"
+            f"{json.dumps(norm, sort_keys=True, ensure_ascii=False)}"
+        )
 
     for iter_num in range(1, loop_config.max_iterations + 1):
         # ── 다음 step 결정 ──
@@ -878,6 +905,57 @@ async def agent_loop(
                 plan_exhausted = True
                 stop_reason = StopReason.MAX_ITERATIONS
                 break
+
+        # ── [중복 action 차단] reflect 모드에서만 ──────────────────
+        # 같은 (action, input)이 이미 실행됐으면 tool 실행 스킵.
+        # reflect에게 "이미 시도함" observation을 줘 다른 결정을 유도.
+        if loop_config.mode == "reflect":
+            _akey = _action_key(next_step)
+            if _akey in _seen_action_keys:
+                _consecutive_dup += 1
+                logger.warning(
+                    f"[loop] {claim_id} iter {iter_num}: 중복 action 감지 "
+                    f"(action={next_step.action.value}, 연속 {_consecutive_dup}회) "
+                    f"— tool 실행 스킵"
+                )
+                last_observation = Observation(
+                    iter_num=iter_num,
+                    action=next_step.action,
+                    input=next_step.input,
+                    output={},
+                    summary=(
+                        f"[중복 차단] 이 action({next_step.action.value})과 "
+                        f"동일한 입력은 이미 이전 iter에서 시도했고 결과가 같았습니다. "
+                        f"같은 검색을 반복하지 마세요 — 반드시 *다른 검색어*를 쓰거나 "
+                        f"다른 action(fetch_evidence/read_original/finish)을 선택하세요."
+                    ),
+                    success=False,
+                    error="duplicate_action",
+                )
+                try:
+                    append_iteration(
+                        workspace, claim_id,
+                        iteration_num=last_observation.iter_num,
+                        action=getattr(last_observation.action, "value",
+                                        str(last_observation.action)),
+                        action_input=last_observation.input,
+                        observation_summary=last_observation.summary,
+                        success=last_observation.success,
+                    )
+                except Exception as e:
+                    logger.warning(f"[loop] 중복 observation 기록 실패: {e}")
+                if _consecutive_dup >= _DUP_LIMIT:
+                    logger.warning(
+                        f"[loop] {claim_id}: 중복 action {_consecutive_dup}회 연속 "
+                        f"→ 헛돌이로 판단, iter {iter_num}에서 종료"
+                    )
+                    plan_exhausted = True
+                    stop_reason = StopReason.MAX_ITERATIONS
+                    break
+                continue  # 다음 iter — reflect가 다른 결정을 하도록
+            # 중복 아님 — 키 등록, 연속 카운터 리셋
+            _seen_action_keys.add(_akey)
+            _consecutive_dup = 0
 
         # ── Tool 실행 ──
         logger.info(
@@ -932,15 +1010,26 @@ async def agent_loop(
             success=last_result.success,
             error=last_result.error,
         )
+        # B2 sanity check용 — fetch가 성공할 때마다 갱신 (finish가 덮어쓰지 못하게)
+        if next_step.action == ActionType.FETCH_EVIDENCE and last_result.success:
+            last_fetch_observation = last_observation
         logger.info(
             f"[loop] {claim_id} iter {iter_num} done: "
             f"success={last_result.success} summary={last_result.summary[:200]}"
         )
 
         try:
-            append_iteration(workspace, claim_id, last_observation)
+            append_iteration(
+                workspace, claim_id,
+                iteration_num=last_observation.iter_num,
+                action=getattr(last_observation.action, "value",
+                                str(last_observation.action)),
+                action_input=last_observation.input,
+                observation_summary=last_observation.summary,
+                success=last_observation.success,
+            )
         except Exception as e:
-            logger.debug(f"[loop] memory 기록 실패: {e}")
+            logger.warning(f"[loop] memory 기록 실패: {e}")
 
         # ★ Phase E: observation을 workspace에 저장 (runtime_agent가 Evidence 빌드용으로 read)
         try:
@@ -1038,6 +1127,50 @@ async def agent_loop(
             iterations_used=iter_num,
             stop_reason=stop_reason,
         )
+
+    # ── B2 sanity check (1-2 패치): LLM의 MATCH를 합성 verdict로 검증 ──
+    # LLM이 fetch한 값을 무시하고 article 값을 그대로 답으로 박는 hallucination
+    # 차단. fetch_evidence success가 있었으면 거기서 본 value vs claim value를
+    # 객관적으로 비교(_synthesize_verdict_from_observation)해서, LLM의 MATCH가
+    # 합성 결과와 어긋나면 합성 verdict로 덮어쓴다. 다른 verdict 종류(MISMATCH /
+    # PARTIAL / UNVERIFIABLE)는 false-positive 위험이 낮아 일단 LLM 의견을 존중.
+    if (
+        verdict.verdict == VerdictType.MATCH
+        and last_fetch_observation is not None
+    ):
+        synth = _synthesize_verdict_from_observation(
+            plan=plan,
+            claim=claim,
+            claim_id=claim_id,
+            last_observation=last_fetch_observation,
+            iter_num=iter_num,
+            tolerance=loop_config.value_match_tolerance,
+        )
+        if synth is not None and synth.verdict != VerdictType.MATCH:
+            logger.warning(
+                f"[loop] {claim_id}: LLM finish verdict=match vs 합성 verdict="
+                f"{synth.verdict.value} 불일치 → 합성으로 정정. "
+                f"(LLM explanation: {(verdict.explanation or '')[:120]!r})"
+            )
+            corrected = AgentVerdict(
+                claim_id=verdict.claim_id,
+                verdict=synth.verdict,
+                confidence=synth.confidence,
+                explanation=(
+                    f"[자동 정정] LLM은 '일치'로 보고했으나, 조회된 KOSIS 값으로 "
+                    f"객관 비교 시 결론이 다릅니다.\n\n"
+                    f"합성 판정 근거: {synth.explanation}\n\n"
+                    f"원래 LLM 설명(참고): {(verdict.explanation or '')[:200]}"
+                ),
+                data_points=synth.data_points or verdict.data_points,
+                iterations_used=iter_num,
+                stop_reason=verdict.stop_reason,
+            )
+            try:
+                workspace.write_verdict(claim_id, corrected.model_dump(mode="json"))
+            except Exception as e:
+                logger.debug(f"[loop] 정정 verdict 저장 실패: {e}")
+            verdict = corrected
 
     v_str = getattr(verdict.verdict, "value", str(verdict.verdict))
     logger.info(

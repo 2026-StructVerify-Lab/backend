@@ -444,6 +444,17 @@ class Workspace:
         keys = self.backend.list_keys(prefix)
         return sorted([k.rsplit("/", 1)[-1] for k in keys])
 
+    def read_observation(self, claim_id: str | UUID, name: str) -> dict | None:
+        cid = str(claim_id)
+        key = f"{self._claim_dir(cid)}/observations/{name}"
+        if not self.backend.exists(key):
+            return None
+        try:
+            return json.loads(self.backend.read_text(key))
+        except (json.JSONDecodeError, OSError) as e:
+            logger.debug(f"[workspace] observation 읽기 실패 {name}: {e}")
+            return None
+
     # ── Data points (모은 수치들) ─────────────────────────────
     def write_data_points(self, claim_id: str | UUID, points: list[dict]) -> None:
         self.backend.write_text(

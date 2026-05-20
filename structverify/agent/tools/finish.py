@@ -30,6 +30,33 @@ logger = get_logger(__name__)
 _VALID_VERDICTS = {v.value for v in VerdictType}
 
 
+def _has_successful_fetch_evidence(workspace, claim_id) -> bool:
+    """이 claim에 대해 fetch_evidence가 한 번이라도 success로 끝났는지.
+
+    LLM이 evidence 한 번도 못 받았는데 match/mismatch로 finish 호출하는
+    hallucination을 차단하기 위한 가드. (1-2 A안)
+    """
+    try:
+        names = workspace.list_observations(claim_id)
+    except Exception as e:
+        logger.debug(f"[finish] list_observations 실패: {e}")
+        return False
+    for name in names:
+        if "fetch" not in name.lower():
+            continue
+        data = workspace.read_observation(claim_id, name)
+        if not isinstance(data, dict):
+            continue
+        # 표준 observation 형식
+        if data.get("action") == "fetch_evidence" and data.get("success") is True:
+            return True
+        # 일부 raw 저장 형식 — evidence.value가 있으면 성공으로 간주
+        ev = (data.get("output") or {}).get("evidence") or data.get("evidence") or {}
+        if isinstance(ev, dict) and ev.get("value") is not None:
+            return True
+    return False
+
+
 @register_tool(ActionType.FINISH)
 class FinishTool(ToolBase):
     """검증 종료 + Verdict 확정.
@@ -88,6 +115,25 @@ class FinishTool(ToolBase):
                 success=False,
                 error="explanation은 비울 수 없습니다.",
             )
+
+        # ── 가드 (1-2 A안): evidence 한 번도 fetch 못 했는데 match/mismatch면 강등 ──
+        # LLM이 fetch_evidence success 없이 finish(match, conf=1.0)을 호출하는
+        # hallucination 차단. fetch가 한 번도 success로 끝난 적 없다면 어떤
+        # 결론도 안전하지 않으므로 unverifiable로 강제 변환.
+        if verdict in (VerdictType.MATCH, VerdictType.MISMATCH):
+            if not _has_successful_fetch_evidence(context.workspace, context.claim_id):
+                logger.warning(
+                    f"[finish] {context.claim_id}: LLM verdict={verdict.value} "
+                    f"호출했으나 fetch_evidence success 이력 0건 → unverifiable로 강등"
+                )
+                verdict = VerdictType.UNVERIFIABLE
+                confidence = min(confidence, 0.3)
+                explanation = (
+                    "[자동 강등] LLM이 검증 완료로 보고했으나, 이 claim에 대해 "
+                    "외부 데이터(fetch_evidence)를 한 번도 성공적으로 조회하지 못했습니다. "
+                    "근거 없는 판정이므로 검증 불가로 처리합니다.\n\n"
+                    f"원래 LLM 설명: {explanation[:300]}"
+                )
 
         # data_points 파싱 (옵션)
         data_points_raw = input_data.get("data_points") or []
