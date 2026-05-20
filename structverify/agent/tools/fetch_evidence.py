@@ -27,6 +27,43 @@ from .base import ToolBase, ToolContext, ToolResult, register_tool
 logger = get_logger(__name__)
 
 
+def _autoload_fallback_candidate_ids(
+    workspace, claim_id, current_id: str, limit: int = 4
+) -> list[str]:
+    """LLM이 input에 `_candidate_fallbacks`를 안 넘긴 경우, workspace의
+    가장 최근 catalog_search observation들에서 다른 후보 ids를 자동 추출.
+
+    이 자동 주입이 없으면 fetch_evidence가 top 후보 1개만 시도하고
+    실패하면 reflect가 catalog_search를 반복 호출 → 중복차단 → 강제
+    unverifiable로 죽음. 후보 5개 중 정확한 표가 2~5순위에 있으면
+    영영 도달 못 함.
+    """
+    try:
+        names = workspace.list_observations(claim_id)
+    except Exception:
+        return []
+    cat_names = sorted(
+        [n for n in names if "catalog_search" in n.lower()],
+        reverse=True,
+    )
+    seen = {current_id}
+    out: list[str] = []
+    for name in cat_names:
+        data = workspace.read_observation(claim_id, name)
+        if not isinstance(data, dict):
+            continue
+        cands = (data.get("output") or {}).get("candidates") or []
+        for c in cands:
+            cid = c.get("id") if isinstance(c, dict) else None
+            if not cid or cid in seen:
+                continue
+            out.append(cid)
+            seen.add(cid)
+            if len(out) >= limit:
+                return out
+    return out
+
+
 @register_tool(ActionType.FETCH_EVIDENCE)
 class FetchEvidenceTool(ToolBase):
     """카탈로그 후보의 실제 수치 데이터 조회.
@@ -199,12 +236,26 @@ class FetchEvidenceTool(ToolBase):
 
         # ── [v6.18] 후보 순회 fetch ──────────────────────────────────
         # top 후보가 무관한 표(관련성 체크 거부)거나 데이터 없음이면
-        # _candidate_fallbacks의 다음 후보로 재시도. 최대 4개까지 시도.
+        # _candidate_fallbacks의 다음 후보로 재시도. 최대 5개까지 시도.
         fallback_ids = input_data.get("_candidate_fallbacks") or []
+        # ── i'' 패치: LLM이 _candidate_fallbacks를 안 넘긴 케이스 처리 ──
+        # 비어있으면 workspace의 직전 catalog_search observation에서
+        # 후보 ids를 자동 추출. 안 그러면 top 후보 1개만 시도하고 죽음.
+        # (project_fetch_lockup — reflect의 catalog_search 무한 반복)
+        if not fallback_ids and context.workspace is not None:
+            auto = _autoload_fallback_candidate_ids(
+                context.workspace, context.claim_id, candidate_id, limit=4
+            )
+            if auto:
+                fallback_ids = auto
+                logger.info(
+                    f"[fetch_evidence] _candidate_fallbacks 자동 주입: "
+                    f"{auto} (LLM이 안 넘김 → catalog observation에서 추출)"
+                )
         try_ids = [candidate_id] + [
             fid for fid in fallback_ids if fid and fid != candidate_id
         ]
-        try_ids = try_ids[:4]  # top + fallback 3개
+        try_ids = try_ids[:5]  # top + fallback 4개
 
         evidence = None
         used_id = candidate_id
