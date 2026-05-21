@@ -48,7 +48,13 @@ async def get_job(
             from sv_platform.loaders.workspace_reader import (
                 read_partial_job_workspace,
             )
-            partial = read_partial_job_workspace(str(job_id))
+            # source_text 같이 넘김 — 라이브러리가 자체 doc_id로 워크스페이스를
+            # 만든 경우 sv_platform job_id로 정확 매칭이 안 됨. job.source_data
+            # 와 workspace/<>/source.txt 일치 검사로 정확한 디렉토리 찾음.
+            partial = read_partial_job_workspace(
+                str(job_id),
+                source_text=job.source_data,
+            )
             if partial:
                 out.result = partial
         except Exception:

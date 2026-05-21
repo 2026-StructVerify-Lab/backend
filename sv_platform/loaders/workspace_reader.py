@@ -60,27 +60,65 @@ def _safe_load_json(path: Path) -> dict | None:
     return None
 
 
-def _find_job_dir(job_id: str, base: Path = DEFAULT_WORKSPACE_BASE) -> Path | None:
+def _find_job_dir(
+    job_id: str,
+    base: Path = DEFAULT_WORKSPACE_BASE,
+    source_text: str | None = None,
+) -> Path | None:
     """agent_workspace에서 해당 job_id 디렉토리 찾기.
 
-    agent loop이 job_id를 변환해 디렉토리명을 만들기 때문에 정확 매칭이 아닐 수
-    있음. job_{job_id} 또는 job_{job_id의 일부} 같이 prefix 매칭으로 탐색.
+    매칭 우선순위:
+      1. 정확 매칭: agent_workspace/job_{job_id}/
+      2. source_text 일치: 같은 source_text를 가진 가장 최근 워크스페이스
+         (라이브러리가 sv_platform job_id가 아닌 자체 doc_id로 디렉토리를
+          만들기 때문에 sv_platform job_id로 정확 매칭이 거의 안 됨.
+          같은 텍스트로 검증한 워크스페이스라면 같은 잡으로 간주.)
+      3. prefix 매칭: 디렉토리명에 job_id의 앞 8자 (안전망 — 위험할 수 있어
+         source_text가 None일 때만 시도)
     """
     if not base.exists():
         return None
-    # 정확 매칭 우선
+    # 1. 정확 매칭
     exact = base / f"job_{job_id}"
     if exact.exists():
         return exact
-    # prefix 매칭 (job_id가 변환된 경우)
-    for child in base.iterdir():
-        if not child.is_dir():
-            continue
-        if not child.name.startswith("job_"):
-            continue
-        # 디렉토리명에 job_id의 앞 8자가 들어있으면 매칭
-        if job_id[:8] in child.name:
-            return child
+
+    # 2. source_text 일치 매칭 — 라이브러리가 자체 doc_id로 디렉토리를
+    #    만들었을 때의 안전한 fallback. 텍스트가 정확히 같아야 통과.
+    if source_text:
+        target = source_text.strip()
+        try:
+            dirs = sorted(
+                [
+                    p for p in base.iterdir()
+                    if p.is_dir() and p.name.startswith("job_")
+                ],
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+        except OSError:
+            dirs = []
+        # 최근 20개만 확인 (성능). 더 오래된 잡은 어차피 캐시 만료로 봄.
+        for d in dirs[:20]:
+            src_file = d / "source.txt"
+            if not src_file.exists():
+                continue
+            try:
+                with src_file.open("r", encoding="utf-8") as f:
+                    if f.read().strip() == target:
+                        return d
+            except OSError:
+                continue
+
+    # 3. prefix 매칭 — source_text가 없을 때만 (다른 잡 데이터 끌어올 위험)
+    if not source_text:
+        for child in base.iterdir():
+            if not child.is_dir():
+                continue
+            if not child.name.startswith("job_"):
+                continue
+            if job_id[:8] in child.name:
+                return child
     return None
 
 
@@ -206,12 +244,13 @@ def read_claim_workspace(
     job_id: str,
     claim_id: str,
     base: Path = DEFAULT_WORKSPACE_BASE,
+    source_text: str | None = None,
 ) -> dict[str, Any]:
     """하나의 claim에 대해 plan + trace를 읽어 dict로 반환.
 
     파일 없으면 빈 dict ({plan: None, trace: []}).
     """
-    job_dir = _find_job_dir(job_id, base)
+    job_dir = _find_job_dir(job_id, base, source_text=source_text)
     result: dict[str, Any] = {"plan": None, "trace": []}
     if job_dir is None:
         return result
@@ -262,6 +301,7 @@ def read_job_workspace_for_claims(
     job_id: str,
     claim_ids: list[str],
     base: Path = DEFAULT_WORKSPACE_BASE,
+    source_text: str | None = None,
 ) -> dict[str, dict]:
     """여러 claim에 대해 한 번에 plan/trace를 읽음.
 
@@ -270,7 +310,7 @@ def read_job_workspace_for_claims(
     out: dict[str, dict] = {}
     for cid in claim_ids:
         try:
-            out[cid] = read_claim_workspace(job_id, cid, base)
+            out[cid] = read_claim_workspace(job_id, cid, base, source_text=source_text)
         except Exception as e:
             logger.debug(f"[workspace_reader] claim {cid} 읽기 실패: {e}")
             out[cid] = {"plan": None, "trace": []}
@@ -280,6 +320,7 @@ def read_job_workspace_for_claims(
 def read_partial_job_workspace(
     job_id: str,
     base: Path = DEFAULT_WORKSPACE_BASE,
+    source_text: str | None = None,
 ) -> dict[str, Any] | None:
     """실시간 폴링용 — 잡이 진행 중에도 workspace를 읽어 partial result 생성.
 
@@ -299,7 +340,7 @@ def read_partial_job_workspace(
       }
     또는 None (워크스페이스 없음).
     """
-    job_dir = _find_job_dir(job_id, base)
+    job_dir = _find_job_dir(job_id, base, source_text=source_text)
     if job_dir is None:
         return None
 

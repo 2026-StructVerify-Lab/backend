@@ -126,8 +126,10 @@ async def run_verification_background(
         from structverify.core.pipeline import VerificationPipeline
         pipeline = VerificationPipeline()
         report = await pipeline.run(source_data, source_type)
-        # job_id를 함께 넘겨, agent_workspace에서 claim별 plan/trace 읽어 합침
-        result = _build_response(report, job_id=str(job_id))
+        # job_id + source_text를 함께 넘겨, agent_workspace에서 claim별 plan/trace
+        # 읽어 합침. source_text는 라이브러리가 자체 doc_id로 워크스페이스를
+        # 만든 경우의 fallback 매칭용 (sv_platform job_id로 정확 매칭 실패 시).
+        result = _build_response(report, job_id=str(job_id), source_text=source_data)
 
         # 5) job → completed
         async with _session_factory() as db:
@@ -280,10 +282,15 @@ def _normalize_verdict(val: Any) -> str | None:
     return None
 
 
-def _build_response(report: Any, job_id: str | None = None) -> dict[str, Any]:
+def _build_response(
+    report: Any,
+    job_id: str | None = None,
+    source_text: str | None = None,
+) -> dict[str, Any]:
     """라이브러리 report → 프론트 호환 dict. claims+results inner join + 경량화.
 
     [확장] job_id 주어지면 agent_workspace에서 claim별 plan/trace 읽어 합침 (A-1).
+    source_text 같이 주면 라이브러리 doc_id 워크스페이스를 fallback으로 매칭.
     프론트는 ClaimResult에 `plan`, `trace` 필드 추가로 받음.
     """
     full = _safe_serialize(report, set())
@@ -315,7 +322,9 @@ def _build_response(report: Any, job_id: str | None = None) -> dict[str, Any]:
                 for c in claims_raw
                 if isinstance(c, dict) and c.get("claim_id")
             ]
-            workspace_by_cid = read_job_workspace_for_claims(job_id, all_cids)
+            workspace_by_cid = read_job_workspace_for_claims(
+                job_id, all_cids, source_text=source_text,
+            )
         except Exception as e:
             logger.debug(f"[_build_response] workspace 읽기 실패: {e}")
 
