@@ -26,6 +26,44 @@ from .base import ToolBase, ToolContext, ToolResult, register_tool
 logger = get_logger(__name__)
 
 
+def _read_last_explore_categories(workspace, claim_id, top_n: int = 2) -> list[str]:
+    """[R1.5] 같은 claim의 직전 explore_catalog observation에서 top N 카테고리 추출.
+
+    explore_catalog가 만든 observation은 name이 'iter{NNN}_explore_catalog' 형식.
+    가장 최근(iter 큰) 것을 골라서 categories[].category_label top_n개 반환.
+    LLM이 catalog_search에 category를 안 넘기거나 KOSIS 어휘와 안 맞는 자유어를
+    넘겨도, 시스템이 임베딩으로 찾은 정확한 KOSIS 카테고리를 보강할 수 있도록.
+    """
+    if workspace is None or not claim_id:
+        return []
+    try:
+        names = workspace.list_observations(claim_id)
+    except Exception:
+        return []
+    # iter 큰(가장 최근) explore observation 우선
+    explore_names = sorted(
+        [n for n in names if "explore_catalog" in n.lower()],
+        reverse=True,
+    )
+    if not explore_names:
+        return []
+    for name in explore_names:
+        data = workspace.read_observation(claim_id, name)
+        if not isinstance(data, dict):
+            continue
+        cats = (data.get("output") or {}).get("categories") or []
+        labels: list[str] = []
+        for c in cats[:top_n]:
+            if not isinstance(c, dict):
+                continue
+            lbl = c.get("category_label")
+            if lbl:
+                labels.append(str(lbl))
+        if labels:
+            return labels
+    return []
+
+
 @register_tool(ActionType.CATALOG_SEARCH)
 class CatalogSearchTool(ToolBase):
     """데이터 소스 카탈로그(표 목록) 검색.
@@ -71,6 +109,30 @@ class CatalogSearchTool(ToolBase):
             top_k = 5
         top_k = max(1, min(top_k, 20))
 
+        # ── [패치 R1.5] explore_catalog 결과 자동 활용 ─────────────────
+        # LLM이 explore_catalog 결과를 무시하고 자기 머릿속 카테고리 어휘를
+        # 그대로 catalog_search에 넘기는 케이스가 잦다 (예: ['기후 변화', '날씨 정보']).
+        # 직전 explore observation을 자동 읽어, LLM 카테고리에 explore가 추천한
+        # top 2 카테고리를 union으로 추가. 임베딩 의미 검색이 찾아준 정확한
+        # KOSIS 카테고리 어휘 (예: '기상관측통계')가 ILIKE 필터에 들어가
+        # 무관한 카테고리만 봐서 헛돌이가 되는 걸 방지.
+        try:
+            explored_cats = _read_last_explore_categories(
+                context.workspace, context.claim_id, top_n=2,
+            )
+        except Exception as e:
+            logger.debug(f"[catalog_search] explore observation 읽기 실패: {e}")
+            explored_cats = []
+        if explored_cats:
+            existing = set(category or [])
+            new_cats = [c for c in explored_cats if c and c not in existing]
+            if new_cats:
+                category = list(category or []) + new_cats
+                logger.info(
+                    f"[catalog_search] 직전 explore_catalog top 카테고리 자동 추가: "
+                    f"{new_cats} → 최종 category={category}"
+                )
+
         # source 선택
         ds_config = context.config.get("data_sources", {}) if context.config else {}
         default_source = ds_config.get("default_source", "kosis")
@@ -110,6 +172,62 @@ class CatalogSearchTool(ToolBase):
             # dict이거나 dict-like
             d = dict(c) if hasattr(c, "items") else {}
             normalized.append(d)
+
+        # ── [패치 D] job에서 이미 fetch 성공한 stat_id를 결과 맨 앞에 prepend ──
+        # 같은 KOSIS 표가 여러 지표(출생아 수/합계출산율/혼인 건수)를 같이
+        # 갖고 있는데 catalog는 검색어별로 다른 표를 top으로 주는 경우 대응.
+        # 예: '합계출산율' 검색 시 catalog top은 'DT_XNN0004(해외)'인데
+        # 같은 job의 다른 claim이 이미 'DT_1B8000G(국내 인구동향)'에서
+        # 성공했고 그 표 안에 합계출산율 row가 있으므로 이걸 1순위로
+        # 노출시켜 reflect agent가 fetch_evidence를 호출하게 유도.
+        try:
+            prior_ids = context.workspace.read_successful_stat_ids() if context.workspace else []
+        except Exception:
+            prior_ids = []
+        if prior_ids:
+            existing_ids = {c.get("id") for c in normalized if c.get("id")}
+            # [패치 D'] prepend 시 진짜 stat_name도 같이 보여줘서 LLM이
+            # "이 표 안에 다른 지표도 있을 가능성"을 판단할 수 있게 한다.
+            # workspace에 저장한 catalog observation에서 stat_id의 name을 찾아옴.
+            stat_names: dict[str, str] = {}
+            try:
+                for other_cid in context.workspace.list_claims():
+                    for obs_name in context.workspace.list_observations(other_cid):
+                        if "catalog_search" not in obs_name.lower():
+                            continue
+                        data = context.workspace.read_observation(other_cid, obs_name)
+                        if not isinstance(data, dict):
+                            continue
+                        for cd in (data.get("output") or {}).get("candidates") or []:
+                            sid = cd.get("id") if isinstance(cd, dict) else None
+                            nm = cd.get("name") if isinstance(cd, dict) else None
+                            if sid and nm and sid not in stat_names:
+                                stat_names[sid] = nm
+                    if len(stat_names) > 50:
+                        break  # 충분히 많이 모음
+            except Exception as e:
+                logger.debug(f"[catalog_search] stat_name lookup 실패: {e}")
+            prepend: list[dict[str, Any]] = []
+            for sid in prior_ids:
+                if sid in existing_ids:
+                    continue
+                real_name = stat_names.get(sid, sid)
+                # 진짜 이름 + hint를 같이. LLM이 보고 fetch 시도하도록 유도.
+                prepend.append({
+                    "id": sid,
+                    "name": (
+                        f"{real_name} [같은 job에서 다른 claim이 이 표에서 데이터 "
+                        f"가져왔음 — 표 안에 '{query}' 관련 row 있을 가능성]"
+                    ),
+                    "score": 1.5,  # 명시적 prior — top 위로 가도록 1.0 초과
+                    "raw": {"from_job_success": True},
+                })
+            if prepend:
+                logger.info(
+                    f"[catalog_search] job-success stat_id {[p['id'] for p in prepend]} "
+                    f"를 결과 맨 앞에 prepend (진짜 이름 포함)"
+                )
+                normalized = prepend + normalized
 
         # workspace observation 저장 (raw)
         try:

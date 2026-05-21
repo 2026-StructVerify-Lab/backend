@@ -67,6 +67,14 @@ class ActionType(str, Enum):
     CATALOG_SEARCH = "catalog_search"
     """지정된 데이터 소스의 카탈로그(표 목록)에서 검색."""
 
+    EXPLORE_CATALOG = "explore_catalog"
+    """[패치 Q] 카탈로그의 카테고리 분포 + 대표 표를 탐색.
+
+    LLM이 어떤 카테고리 어휘를 써야 할지 모를 때(예: '기상관측통계' vs '기후 변화')
+    먼저 이 도구를 호출해 카탈로그가 실제로 어떤 분류·어휘를 쓰는지 파악한 뒤,
+    그 정보를 바탕으로 정확한 catalog_search query/category를 만든다.
+    룰베이스 도메인 매핑 없이도 DataSource 어휘를 자가학습."""
+
     FETCH_EVIDENCE = "fetch_evidence"
     """카탈로그에서 찾은 후보의 실제 데이터 조회."""
 

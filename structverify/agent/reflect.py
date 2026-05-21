@@ -91,6 +91,7 @@ def _parse_reflect_decision(response_text: str) -> ReflectDecision | None:
     raw_action = (data.get("action") or "").strip().lower()
     action_map = {
         "catalog_search": ActionType.CATALOG_SEARCH,
+        "explore_catalog": ActionType.EXPLORE_CATALOG,
         "fetch_evidence": ActionType.FETCH_EVIDENCE,
         "read_original": ActionType.READ_ORIGINAL,
         "calculate": ActionType.CALCULATE,
