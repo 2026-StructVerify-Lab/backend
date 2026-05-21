@@ -275,3 +275,98 @@ def read_job_workspace_for_claims(
             logger.debug(f"[workspace_reader] claim {cid} 읽기 실패: {e}")
             out[cid] = {"plan": None, "trace": []}
     return out
+
+
+def read_partial_job_workspace(
+    job_id: str,
+    base: Path = DEFAULT_WORKSPACE_BASE,
+) -> dict[str, Any] | None:
+    """실시간 폴링용 — 잡이 진행 중에도 workspace를 읽어 partial result 생성.
+
+    agent_workspace 디렉토리를 직접 스캔해서:
+      - 각 claim 디렉토리(claims/<cid>/)에서 claim.json + plan.json + trace + verdict.json
+        (있는 만큼)을 읽어 합침.
+      - 잡이 진행 중이라 verdict.json이 아직 없을 수도 있음 — 그래도 plan+trace만으로
+        부분 진행 상황 노출.
+      - claim 디렉토리 자체가 없으면 None 반환 (Step 7 이전).
+
+    Returns dict 형태:
+      {
+        "claims": [
+          {claim_id, claim_text, sent_id, schema, plan?, trace?, verdict?, ...},
+          ...
+        ]
+      }
+    또는 None (워크스페이스 없음).
+    """
+    job_dir = _find_job_dir(job_id, base)
+    if job_dir is None:
+        return None
+
+    claims_dir = job_dir / "claims"
+    if not claims_dir.exists() or not claims_dir.is_dir():
+        return None
+
+    partial_claims: list[dict[str, Any]] = []
+    # 잡 안의 모든 claim 디렉토리 (mtime 정렬 — agent loop이 만든 순서)
+    try:
+        claim_subdirs = sorted(
+            [p for p in claims_dir.iterdir() if p.is_dir()],
+            key=lambda p: p.stat().st_mtime,
+        )
+    except OSError:
+        return None
+
+    for cdir in claim_subdirs:
+        cid = cdir.name
+        merged: dict[str, Any] = {"claim_id": cid}
+
+        # claim.json — sent_id, claim_text, schema 등 기본 정보
+        claim_data = _safe_load_json(cdir / "claim.json")
+        if claim_data:
+            for k in ("doc_id", "block_id", "sent_id", "claim_text",
+                      "claim_type", "schema"):
+                if k in claim_data:
+                    merged[k] = claim_data[k]
+
+        # plan.json — Planner 결과 (있으면)
+        plan_data = _safe_load_json(cdir / "plan.json")
+        if plan_data:
+            merged["plan"] = _summarize_plan(plan_data)
+
+        # observations/iter_*.json — trace (있는 만큼)
+        obs_dir = cdir / "observations"
+        if obs_dir.exists():
+            iter_files: dict[int, Path] = {}
+            iter_files_fb: dict[int, Path] = {}
+            for fp in obs_dir.iterdir():
+                m = _ITER_FILENAME_RE.match(fp.name)
+                if not m:
+                    continue
+                n = int(m.group(1))
+                if fp.name.startswith("iter_"):
+                    iter_files[n] = fp
+                else:
+                    iter_files_fb.setdefault(n, fp)
+            for n, fp in iter_files_fb.items():
+                iter_files.setdefault(n, fp)
+            trace: list[dict] = []
+            for n in sorted(iter_files.keys()):
+                obs = _safe_load_json(iter_files[n])
+                if obs is None:
+                    continue
+                trace.append(_summarize_observation(obs))
+            if trace:
+                merged["trace"] = trace
+
+        # verdict.json — 잡이 진행 중이면 없을 수도 있음
+        verdict_data = _safe_load_json(cdir / "verdict.json")
+        if verdict_data:
+            for k in ("verdict", "confidence", "explanation",
+                      "iterations_used", "stop_reason"):
+                if k in verdict_data:
+                    merged[k] = verdict_data[k]
+
+        partial_claims.append(merged)
+
+    return {"claims": partial_claims} if partial_claims else None

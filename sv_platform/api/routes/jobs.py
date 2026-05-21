@@ -27,14 +27,35 @@ async def get_job(
     ctx: AuthContext = Depends(get_auth),
     db: AsyncSession = Depends(get_session),
 ) -> JobOut:
-    """Job 상세. 다른 tenant의 job 접근 시 404 (정보 누설 방지)."""
+    """Job 상세. 다른 tenant의 job 접근 시 404 (정보 누설 방지).
+
+    [실시간 plan/trace 노출] 잡이 진행 중(status=pending/running)이면
+    agent_workspace에서 partial plan/trace를 읽어 result에 채워 보냄.
+    프론트는 폴링하면서 claim별 진행 상황을 progressively 렌더 가능.
+    """
     job = await db.get(Job, job_id)
     if job is None or job.tenant_id != ctx.tenant_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Job not found",
         )
-    return JobOut.model_validate(job)
+
+    out = JobOut.model_validate(job)
+
+    # 진행 중일 때 workspace에서 partial 데이터 enrich
+    if job.status in ("pending", "running") and not out.result:
+        try:
+            from sv_platform.loaders.workspace_reader import (
+                read_partial_job_workspace,
+            )
+            partial = read_partial_job_workspace(str(job_id))
+            if partial:
+                out.result = partial
+        except Exception:
+            # 워크스페이스 읽기 실패해도 폴링 응답 자체는 막지 않음
+            pass
+
+    return out
 
 
 @router.get("", response_model=list[JobOut])
