@@ -1,9 +1,0 @@
-{
-  "iter_num": 3,
-  "action": "calculate",
-  "input": {},
-  "output": {},
-  "summary": "실패: expression 비어있음",
-  "success": false,
-  "error": "expression이 비어있습니다."
-}
