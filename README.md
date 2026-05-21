@@ -331,8 +331,10 @@ Claim + ClaimSchema
 
 ---
 
-### Step 7: Retrieval + Evidence Subgraph — `retrieval/`
-**담당: 신준수**
+### Step 7: Retrieval + Evidence Subgraph — `retrieval/` + `agent/loop.py`
+**담당: 신준수 · 김예슬**
+
+`config.agent.enabled=true`이면 `agent_loop`가 reflect 모드로 도구를 자율 호출 (자세한 흐름은 위 "Agent Loop의 Reflect 모드" 섹션 참고). 그렇지 않으면 기존 deterministic retrieve→verify 경로:
 
 ```
 ClaimSchema
@@ -478,6 +480,32 @@ LLM이 단순히 답변을 생성하는 것이 아니라, 매 스텝마다 "무�
 
 > **중요**: `verify_claim`(Step 8)은 의도적으로 LLM을 사용하지 않습니다.
 > 수치 비교는 LLM이 hallucination을 일으킬 수 있으므로 deterministic 로직으로만 처리합니다.
+
+---
+
+### Agent Loop의 Reflect 모드 — 자율 도구 호출
+
+Step 7~8(retrieve+verify)은 **`agent/loop.py`의 reflect 모드**가 실행합니다. 매 iteration마다 LLM이 다음 도구를 자율 선택 (ReAct): catalog 탐색 → fetch → 계산 → finish.
+
+#### 도구 목록 (`agent/tools/`)
+
+| ActionType | 도구 | 설명 |
+|---|---|---|
+| `explore_catalog` | `ExploreCatalogTool` | **임베딩 기반 카탈로그 어휘 탐색**. KOSIS 카테고리 분포 + 대표 표 미리보기. 첫 iter에 사용 권장 — LLM이 정확한 카테고리 어휘를 자율 학습. |
+| `catalog_search` | `CatalogSearchTool` | DataSource 카탈로그(표) 검색. **직전 explore 결과의 top 카테고리를 자동 union**해 LLM 어휘 부정확 시 보강. |
+| `fetch_evidence` | `FetchEvidenceTool` | 후보 표에서 실제 수치 조회. claim 간 fetch 성공한 stat_id를 prior_success로 자동 우선 시도. |
+| `calculate` | `CalculateTool` | 증가율/차이 등 수식 계산 (안전한 expression evaluator). |
+| `read_original` | `ReadOriginalTool` | 원문 기사 추가 컨텍스트 읽기. |
+| `finish` | `FinishTool` | verdict + explanation 확정 후 loop 종료. |
+
+#### 자기보강 메커니즘 (룰베이스 X, 데이터 기반)
+
+- **claim 간 데이터 공유** (`workspace`): job 안의 모든 claim이 verified_facts·successful_stat_ids 공유. 한 claim이 fetch한 KOSIS 표가 다른 claim의 검색 후보 1순위로 자동 prepend.
+- **StatRecord 클래스 캐시** (`kosis_source._record_cache`): claim마다 새 `KOSISDataSource`를 만들어도 KOSIS 메타데이터(org_id 등) 공유 → cross-claim fetch 시 placeholder 침묵 실패 차단.
+- **Aggregated rows 풀** (`loop._aggregate_rows_from_fetches`): 같은 claim의 모든 성공 fetch rows를 합쳐 풀로 만들고, matched_row criteria(ITM_NM·C1~C4_NM)로 같은 지표 row를 정확히 매칭 → 시점/지표 어긋남 차단.
+- **Verdict 자동 합성** (`loop._synthesize_verdict_from_observation/_calculate`): LLM이 finish 안 부르고 헛돌이로 max_iter 도달해도, fetch evidence + claim.value를 직접 비교하거나 `_try_growth_rate_from_rows`로 직접 계산해 verdict 합성.
+- **부호 방향 가드** (증가율/감소율): indicator suffix에 따라 `calc_rate` 부호와 claim 방향 일치 검사. `abs()` 비교 가짜 match 차단.
+- **표 관련성 가드** (`_is_table_relevant`, `_indicator_in_rows`): 표 이름과 indicator 의미 매칭 + length ratio guard. 짧은 지역명('전국') 우연 매칭으로 무관 도메인(범죄 표 등) 결과 들어오는 것 차단.
 
 ---
 

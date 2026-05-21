@@ -487,38 +487,13 @@ class KOSISConnector(BaseConnector):
 
         if not candidates:
             logger.warning(f"후보 없음: {query.keyword}")
-            # [v5] - 박재윤: tried_log 초기화 (candidates 없을 때 UnboundLocalError 수정)
-            tried_ids: set[str] = set()
-            tried_log: list[dict] = []
-            # ── [v6] LLM Agent 검색어 재생성 ─────────────────────────────────
-            simplified = await self._agent_simplify_keyword(query, tried_log)
-            if simplified and simplified != (query.indicator or query.keyword or ""):
-                logger.info(f"[재검색] Agent 검색어 변경: '{query.keyword}' → '{simplified}'")
-                from structverify.retrieval.base_connector import ConnectorQuery
-                retry_query = ConnectorQuery(
-                    keyword=simplified,
-                    indicator=simplified,
-                    time_period=query.time_period,
-                    population=query.population,
-                    extra_params=query.extra_params,
-                )
-                retry_candidates = await self.catalog.search(retry_query, top_k=5)
-                retry_candidates = [c for c in retry_candidates if c.stat_id not in tried_ids]
-
-                for rc in retry_candidates[:3]:
-                    if not _is_table_relevant(simplified, rc.stat_name):
-                        continue
-                    data = await self._fetch_with_retry(
-                        stat_id=rc.stat_id, stat_rec=rc, query=query,
-                        prd_se_hint="Y",
-                        start_prd_de=query.time_period or "",
-                        end_prd_de=query.time_period or "",
-                    )
-                    if data and data.official_value is not None:
-                        logger.info(f"[재검색] 성공: [{rc.stat_id}] {rc.stat_name}")
-                        return data
-
-            logger.warning(f"최종 Evidence 없음 ({len(tried_ids)}개 시도): {query.keyword}")
+            # [v6.1] 후보 없음 → 검색어 단순화 재검색 (공용 헬퍼)
+            retried = await self._retry_with_simplified_keyword(
+                query, set(), []
+            )
+            if retried is not None:
+                return retried
+            logger.warning(f"최종 Evidence 없음: {query.keyword}")
             return None
 
         # 2단계: getMeta 보강 (PRD/CMMT)
@@ -651,7 +626,89 @@ class KOSISConnector(BaseConnector):
                 f"{stat_rec.stat_name} | {last_error}"
             )
 
+        # ── [v6.1] 후보 전부 실패 → LLM Agent 검색어 재생성 후 재검색 ──────
+        # 기존엔 candidates가 빈 경우에만 재검색 → 22개 후보가 전부
+        # 관련성 없음으로 skip되는 경우 재검색이 안 돌던 버그 수정.
+        retried = await self._retry_with_simplified_keyword(
+            query, tried_ids, tried_log
+        )
+        if retried is not None:
+            return retried
+
         logger.warning(f"최종 Evidence 없음 ({len(tried_ids)}개 시도): {query.keyword}")
+        return None
+
+    async def _retry_with_simplified_keyword(
+        self,
+        query: "ConnectorQuery",
+        tried_ids: set[str],
+        tried_log: list[dict],
+    ) -> "StatData | None":
+        """
+        [v6.1] 검색어 단순화 재검색.
+
+        후보가 전혀 없거나(candidates 빈 경우),
+        모든 후보가 관련성 없음으로 skip된 경우 호출.
+
+        LLM Agent가 실패 이력을 보고 더 단순한 검색어를 생성
+        ("서울 표준주택 공시가격 변동률" → "공시가격") → 재검색.
+        """
+        simplified = await self._agent_simplify_keyword(query, tried_log)
+        original_kw = query.indicator or query.keyword or ""
+        if not simplified or simplified == original_kw:
+            return None
+
+        logger.info(f"[재검색] Agent 검색어 변경: '{original_kw}' → '{simplified}'")
+        from structverify.retrieval.base_connector import ConnectorQuery
+
+        retry_query = ConnectorQuery(
+            keyword=simplified,
+            indicator=simplified,
+            time_period=query.time_period,
+            population=query.population,
+            extra_params=query.extra_params,
+        )
+        retry_candidates = await self.catalog.search(retry_query, top_k=8)
+        retry_candidates = [
+            c for c in retry_candidates if c.stat_id not in tried_ids
+        ]
+        if not retry_candidates:
+            logger.info("[재검색] 새 후보 없음")
+            return None
+
+        # [수정 v6.22] 재검색 경로도 claim 시점 단위를 존중 — 'Y' 하드코딩 제거.
+        # [BEFORE] prd_se_hint="Y" 하드코딩 → 월별 claim도 연간부터 시도.
+        # [AFTER] query.time_period가 'YYYY-MM'이면 'M', 분기면 'Q', 아니면 'Y'.
+        _tp = str(query.time_period or "").strip()
+        if re.match(r"^\d{4}[-./]?\d{2}$", _tp):
+            _retry_prd = "M"
+        elif re.search(r"[Qq][1-4]", _tp) or re.match(r"^\d{4}[-./]?[1-4]$", _tp):
+            _retry_prd = "Q"
+        else:
+            _retry_prd = "Y"
+
+        # 단순화한 검색어 기준으로 관련성 체크 + fetch
+        for rc in retry_candidates[:5]:
+            if not _is_table_relevant(simplified, rc.stat_name):
+                continue
+            data = await self._fetch_with_retry(
+                stat_id=rc.stat_id, stat_rec=rc, query=query,
+                prd_se_hint=_retry_prd,  # [수정 v6.22] 'Y' 하드코딩 → 시점 추론
+                start_prd_de=query.time_period or "",
+                end_prd_de=query.time_period or "",
+            )
+            if data and data.official_value is not None:
+                # 재검색 결과도 원래 indicator 기준으로 관련성 재확인
+                indicator = query.indicator or query.keyword or ""
+                if not _is_table_relevant(indicator, rc.stat_name):
+                    if not _is_table_relevant(simplified, rc.stat_name):
+                        continue
+                logger.info(
+                    f"[재검색] 성공: [{rc.stat_id}] {rc.stat_name} "
+                    f"value={data.official_value}"
+                )
+                return data
+        logger.info("[재검색] 단순화 후에도 적합 후보 없음")
         return None
 
     # ── prd_se 순회 + objL 점진 fetch (factcheck_test.py 참고) ───────────────
@@ -675,23 +732,38 @@ class KOSISConnector(BaseConnector):
         year_m = re.search(r"(\d{4})", start_prd_de or time_ref)
         year = year_m.group(1) if year_m else "2024"
 
-        # prd_se 순회 전략
+        # ── [수정 v6.22] prd_se 순회 전략 — claim 시점 단위를 최우선 존중 ──
+        # [BEFORE 버그] prd_se_hint가 'M'(월)이어도 아래처럼 'Y'를 맨 앞에
+        #   insert(0, ...)했음:
+        #       if prd_se_hint != "Y":
+        #           prd_strategies.insert(0, {"prdSe": "Y", ...})
+        #   → 연간 데이터도 가진 표(예: '월.분기.연간 인구동향' DT_1B8000G)는
+        #     'Y' 요청이 먼저 성공 → 연 데이터 반환 → period guard가
+        #     '연 단위 표'로 거부 → 월별 claim이 영영 검증 불가.
+        # [AFTER 수정] prd_se_hint(claim에서 유래한 시점 단위)를 1순위로
+        #   고정하고, 나머지 주기는 그 '뒤'에만 폴백으로 둔다. claim이
+        #   월이면 월을 먼저 시도해야 월 데이터를 받는다.
+        #   도메인 무관 — 시점 단위 우선순위만 다룸.
         prd_strategies = [
             {"prdSe": prd_se_hint, "startPrdDe": start_prd_de or year,
              "endPrdDe": end_prd_de or year},
         ]
-        # hint가 Y가 아니면 Y도 시도
-        if prd_se_hint != "Y":
-            prd_strategies.insert(0, {"prdSe": "Y", "startPrdDe": year, "endPrdDe": year})
-        # M, Q 추가
-        for prd, sp, ep in [("M", f"{year}01", f"{year}12"), ("Q", f"{year}01", f"{year}04")]:
+        # 나머지 주기는 hint 뒤로만 추가 (hint가 항상 우선).
+        _other_periods = [
+            ("M", f"{year}01", f"{year}12"),
+            ("Q", f"{year}01", f"{year}04"),
+            ("Y", year, year),
+        ]
+        for prd, sp, ep in _other_periods:
             if prd != prd_se_hint:
                 prd_strategies.append({"prdSe": prd, "startPrdDe": sp, "endPrdDe": ep})
 
-        # 기간 지정 실패 시 최신 데이터 폴백
+        # 기간 지정 실패 시 최신 데이터 폴백 — 여기서도 hint 주기를 먼저.
+        # [수정 v6.22] 폴백 순서도 ["Y","M","Q"] 고정 → hint 우선으로 변경.
+        _fb_order = [prd_se_hint] + [p for p in ["M", "Q", "Y"] if p != prd_se_hint]
         fallbacks = [
             {"prdSe": p, "newEstPrdCnt": "3"}
-            for p in ["Y", "M", "Q"]
+            for p in _fb_order
         ]
 
         org_id = (
@@ -784,6 +856,15 @@ class KOSISConnector(BaseConnector):
         """KOSIS Param/statisticsParameterData.do 단일 호출"""
         public_req = {k: v for k, v in params.items() if k != "apiKey"}
         tnm = getattr(stat_rec, "stat_name", stat_id) or stat_id
+
+        # [디버그] KOSIS API에 실제로 보내는 시점 파라미터 확인용
+        logger.info(
+            f"[KOSISConnector] _call_kosis_param 요청: stat_id={stat_id} "
+            f"prdSe={public_req.get('prdSe')!r} "
+            f"startPrdDe={public_req.get('startPrdDe')!r} "
+            f"endPrdDe={public_req.get('endPrdDe')!r} "
+            f"newEstPrdCnt={public_req.get('newEstPrdCnt')!r}"
+        )
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -1081,8 +1162,8 @@ class KOSISConnector(BaseConnector):
     async def fetch(self, stat_id: str, params: dict[str, Any]) -> StatData:
         """BaseConnector 인터페이스 유지 (search_and_fetch 내부에서 직접 사용)"""
         stat_rec = params.get("stat_record") or StatRecord(
-            stat_id=stat_id, stat_name=stat_id
-        )
+                    stat_id=stat_id, stat_name=stat_id, org_name="",   # ★ ADD org_name=""
+                )
         query = params.get("query") or ConnectorQuery(keyword=stat_id)
         prd_se = params.get("prdSe", "Y")
         sp     = params.get("startPrdDe", "")

@@ -1,0 +1,299 @@
+"""Reflect Agent 프롬프트 (Phase E).
+
+ReAct 패턴의 *Reflect* 단계 — 매 iter 시작 시 LLM이 다음 action을 동적 결정.
+
+설계:
+  - 매 iter에 *모든 컨텍스트* 제공: claim, plan, memory, last_observation
+  - LLM이 *5개 action 중 하나* 선택 + 그 input을 *직접 채움* (KOSIS prdSe까지)
+  - JSON 응답 형식 강제 → ReflectDecision으로 파싱
+
+룰베이스 fallback과 차이:
+  - 룰베이스: prdSe="M" 한 가지만 시도. 한국어 indicator를 substring 매칭.
+  - LLM Reflect: 사용 가능한 모든 candidate 보고 *최적 fetch params* 직접 생성.
+                 row sample 보고 정확한 indicator/카테고리 추론.
+                 growth_rate면 두 시점 fetch 동적으로 계획.
+"""
+from __future__ import annotations
+
+import json
+from typing import Any
+
+
+# ── Reflect Prompt 본체 ──────────────────────────────────────────────
+
+REFLECT_PROMPT_TEMPLATE = """당신은 한국 통계 팩트체크 시스템의 *Reflect Agent*입니다.
+지금까지 수행한 action 결과를 보고 *다음에 무엇을 할지* 결정하세요.
+
+## 현재 검증 대상 Claim
+
+원문: {claim_text}
+
+검증 schema:
+- indicator: {indicator}
+- value (주장값): {claim_value} {unit}
+- time_period: {time_period}
+- population: {population}
+- prev_value (이전 시점 값, 있으면): {prev_value}
+- prev_time_period: {prev_time_period}
+
+## Plan 정보 (이전에 만든 계획)
+
+- claim_type: {claim_type} (absolute / growth_rate / difference / comparison / ranking)
+- required_data: {required_data_json}
+- calculation_formula: {calculation_formula}
+
+## 지금까지의 진행 상황
+
+현재 iteration: {iter_num} / {max_iterations}
+
+### 이전 observation 요약 (memory)
+{memory_text}
+
+### 직전 observation (가장 중요)
+{last_observation_block}
+
+## 사용 가능한 Action
+
+### `catalog_search` — KOSIS 표 후보 검색
+input: {{"query": "<검색 키워드>", "category": ["<분류>"], "top_k": 5}}
+
+### `fetch_evidence` — 후보 표에서 실제 수치 조회
+input: {{
+  "candidate_id": "<catalog_search 결과의 stat_id 예: DT_1B8000G>",
+  "params": {{
+    "indicator": "<지표명, claim과 일치>",
+    "time_period": "<YYYY-MM 또는 YYYY>",
+    "prdSe": "<M / Q / Y>",
+    "startPrdDe": "<YYYYMM 또는 YYYY>",
+    "endPrdDe": "<startPrdDe와 같게>"
+  }}
+}}
+
+### `calculate` — 확보된 데이터로 수식 계산 (growth_rate, difference에 필수)
+input: {{
+  "expression": "(current - prev) / prev * 100",
+  "variables": {{"current": <number>, "prev": <number>}}
+}}
+**중요**: 키 이름은 반드시 `expression` (formula 아님). 주석(`//...`) 절대 금지 — 순수 JSON만.
+
+### `read_original` — 원문 기사 더 읽기 (claim 외 정보 필요할 때)
+input: {{"context_chars": 500}}
+
+### `finish` — 검증 종료 + 최종 verdict 확정
+input: {{
+  "verdict": "match / mismatch / partial / unverifiable",
+  "confidence": 0.0~1.0,
+  "explanation": "<독자에게 보일 자연어 설명, KOSIS 출처 포함>",
+  "data_points": [{{"indicator": "...", "time": "...", "resolved_value": ..., "source": "kosis:DT_..."}}]
+}}
+
+## 결정 가이드
+
+**iter 1 (시작)**: 보통 catalog_search 먼저.
+
+**catalog_search 직후**: last_observation.output["candidates"]에서 *가장 적합한 표*의 id를 골라
+fetch_evidence 호출. params는 claim의 indicator/time_period 그대로 넣되,
+prdSe는 time_period 형식에 맞춰 (YYYY-MM이면 "M", YYYY-Q1이면 "Q", YYYY면 "Y").
+
+**fetch_evidence 직후**:
+  - evidence value가 claim과 일치하고 시점도 맞음 → finish (match)
+  - 값은 받았는데 시점/단위가 잘못됨 → 다른 row 시도 (다른 indicator/time params로 또 fetch_evidence)
+  - claim_type이 growth_rate/difference이고 prev 시점 데이터 아직 없음 → 또 fetch_evidence (prev_time_period로)
+  - 다른 표를 시도해야겠음 → catalog_search 다시
+
+**두 값 다 모음 (current + prev)**: calculate (formula 적용) → finish.
+
+**시도 횟수 거의 다 씀 (iter >= max-2)** 또는 *데이터 도저히 못 찾음*: finish (unverifiable).
+
+## ★ 중복 action 방지 (매우 중요)
+
+memory를 보고 **이미 같은 action을 같은 input으로 호출한 기록이 있으면 다른 시도를 하세요**:
+  - 같은 catalog_search query 반복 X → 검색어 바꾸거나 fetch로 넘어가기
+  - 같은 candidate에 같은 params로 fetch_evidence 반복 X → params 바꾸거나 (prdSe/startPrdDe 다르게)
+    다른 candidate 시도하거나 finish로 넘어가기
+  - calculate가 "expression 비어있음"으로 실패하면 → **다음 시도엔 반드시 input.expression 채워서 보내기**
+    (formula 아님!)
+
+## ★ 한국어/KOSIS 특수성
+
+- KOSIS 표 column에서 indicator는 ITM_NM, C1_NM, C2_NM 등 여러 column에 분산.
+- 정확한 indicator를 input.params.indicator에 넣으면 시스템이 자동으로 모든 column 탐색.
+- KOSIS 표는 종종 출생/사망/혼인/이혼 통합 — indicator를 정확히 명시해야 정확한 row 매칭.
+- catalog_search 후보 이름이 너무 광범위(예: "월·분기·연간 인구동향(출생,사망,혼인,이혼)")해도
+  fetch params의 indicator로 좁힐 수 있음.
+
+## 출력 형식
+
+다른 텍스트 없이 **JSON 한 개**만:
+
+```json
+{{
+  "thought": "현재 상태 + 다음 단계 추론 (1-3문장)",
+  "action": "catalog_search | fetch_evidence | calculate | read_original | finish",
+  "input": {{...}},
+  "confidence_so_far": 0.0,
+  "proposed_verdict": null,
+  "proposed_explanation": null
+}}
+```
+
+**JSON 규칙 (엄격)**:
+- 주석(`//`, `/* */`) 절대 금지 — JSON 파싱 실패함
+- trailing comma 금지
+- 모든 string은 큰따옴표 `"..."` 사용
+- 추측값 사용 금지 — 모르면 catalog_search나 fetch_evidence로 진짜 데이터 확보 후 사용
+
+`action == "finish"`인 경우에만 `proposed_verdict` + `proposed_explanation` 채움
+(input.verdict / input.explanation과 동일해도 됨).
+"""
+
+
+def _format_last_observation(last_observation: Any) -> str:
+    """직전 observation을 prompt용 텍스트로 정리."""
+    if last_observation is None:
+        return "(없음 — 첫 iteration)"
+
+    action = getattr(last_observation, "action", None)
+    action_str = action.value if hasattr(action, "value") else str(action)
+    success = getattr(last_observation, "success", True)
+    summary = getattr(last_observation, "summary", "") or ""
+    output = getattr(last_observation, "output", {}) or {}
+
+    parts = [
+        f"- action: {action_str}",
+        f"- success: {success}",
+        f"- summary: {summary[:300]}",
+    ]
+
+    # 핵심 output 발췌 (token 절약)
+    if action_str == "catalog_search":
+        cands = output.get("candidates") or []
+        if cands:
+            top_lines = []
+            for i, c in enumerate(cands[:5]):
+                if not isinstance(c, dict):
+                    continue
+                cid = c.get("id", "")
+                name = (c.get("name") or "")[:80]
+                score = c.get("score", 0)
+                top_lines.append(f"  [{i+1}] id={cid!r} name={name!r} score={score:.3f}")
+            parts.append("- candidates (top 5):")
+            parts.extend(top_lines)
+
+    elif action_str == "fetch_evidence":
+        ev = output.get("evidence") or {}
+        if ev:
+            parts.append(
+                f"- evidence: value={ev.get('value')!r} unit={ev.get('unit')!r} "
+                f"time_period={ev.get('time_period')!r} "
+                f"stat_table_id={ev.get('stat_table_id')!r}"
+            )
+            matched = ev.get("matched_row")
+            if matched and isinstance(matched, dict):
+                key_fields = {
+                    k: matched.get(k) for k in
+                    ("ITM_NM", "C1_NM", "C2_NM", "PRD_DE", "DT", "UNIT_NM")
+                    if k in matched
+                }
+                parts.append(f"- matched_row: {key_fields}")
+            rows = ev.get("rows") or []
+            # row sample (매칭 실패 케이스에서 LLM이 직접 보고 결정하라고)
+            if rows and not matched:
+                sample_keys = list((rows[0] or {}).keys())[:8]
+                sample = [
+                    {k: r.get(k) for k in sample_keys if k in r}
+                    for r in rows[:3]
+                ]
+                parts.append(f"- row sample (first 3 of {len(rows)}): {sample}")
+
+    elif action_str == "calculate":
+        parts.append(f"- result: {output.get('result')!r}")
+
+    return "\n".join(parts)
+
+
+def _format_memory(memory_text: str, max_chars: int = 1500) -> str:
+    """memory를 prompt에 넣을 만큼 truncate."""
+    if not memory_text:
+        return "(아직 기록 없음)"
+    if len(memory_text) <= max_chars:
+        return memory_text
+    # 앞 1/3 + 뒤 2/3 (최근이 중요)
+    head = memory_text[: max_chars // 3]
+    tail = memory_text[-(max_chars - max_chars // 3):]
+    return f"{head}\n\n... (중간 생략) ...\n\n{tail}"
+
+
+def build_reflect_prompt(
+    claim: Any,
+    plan: Any,
+    memory_text: str,
+    last_observation: Any,
+    iter_num: int,
+    max_iterations: int = 10,
+) -> str:
+    """Reflect Agent에 보낼 prompt 조립.
+
+    Args:
+        claim: structverify Claim (schema 포함)
+        plan: Plan 객체 (claim_type, required_data, formula)
+        memory_text: workspace.read_memory(claim_id) 결과
+        last_observation: 직전 Observation 또는 None
+        iter_num: 현재 iteration (1-based)
+        max_iterations: 최대 iter
+    """
+    schema = getattr(claim, "schema", None)
+    claim_text = getattr(claim, "claim_text", "") or ""
+
+    indicator = (getattr(schema, "indicator", None) if schema else None) or "(미지정)"
+    claim_value = getattr(schema, "value", None) if schema else None
+    unit = (getattr(schema, "unit", None) if schema else None) or ""
+    time_period = (getattr(schema, "time_period", None) if schema else None) or "(미지정)"
+    population = (getattr(schema, "population", None) if schema else None) or "(미지정)"
+    prev_value = getattr(schema, "prev_value", None) if schema else None
+    prev_time = (getattr(schema, "prev_time_period", None) if schema else None) or "(없음)"
+
+    claim_type = "unknown"
+    required_data_json = "[]"
+    formula = "(없음)"
+    if plan is not None:
+        ct = getattr(plan, "claim_type", None)
+        claim_type = ct.value if hasattr(ct, "value") else str(ct or "unknown")
+        req = getattr(plan, "required_data", []) or []
+        req_simplified = []
+        for d in req:
+            if hasattr(d, "model_dump"):
+                d_dict = d.model_dump()
+            elif isinstance(d, dict):
+                d_dict = d
+            else:
+                continue
+            # 필요한 필드만
+            req_simplified.append({
+                k: d_dict.get(k) for k in
+                ("indicator", "time", "population", "unit_hint", "resolved_value")
+                if d_dict.get(k) is not None
+            })
+        try:
+            required_data_json = json.dumps(req_simplified, ensure_ascii=False)
+        except Exception:
+            required_data_json = str(req_simplified)
+        formula = getattr(plan, "calculation_formula", None) or "(없음)"
+
+    return REFLECT_PROMPT_TEMPLATE.format(
+        claim_text=claim_text,
+        indicator=indicator,
+        claim_value=claim_value if claim_value is not None else "(미지정)",
+        unit=unit,
+        time_period=time_period,
+        population=population,
+        prev_value=prev_value if prev_value is not None else "(없음)",
+        prev_time_period=prev_time,
+        claim_type=claim_type,
+        required_data_json=required_data_json,
+        calculation_formula=formula,
+        iter_num=iter_num,
+        max_iterations=max_iterations,
+        memory_text=_format_memory(memory_text or ""),
+        last_observation_block=_format_last_observation(last_observation),
+    )
