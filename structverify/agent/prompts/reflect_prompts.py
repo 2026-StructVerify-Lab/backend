@@ -54,20 +54,8 @@ REFLECT_PROMPT_TEMPLATE = """당신은 한국 통계 팩트체크 시스템의 *
 
 ## 사용 가능한 Action
 
-### `explore_catalog` — 카탈로그 어휘 탐색 (catalog_search 전에 권장)
-input: {{"query": "<관심 키워드 또는 빈 문자열>", "top_categories": 5}}
-
-용도: KOSIS 카탈로그가 실제로 쓰는 *분류 어휘*와 대표 표 미리보기.
-LLM이 추측한 카테고리(예: '기후 변화', '날씨 정보')가 실제 KOSIS 분류
-('기상관측통계' 같은)와 다르면 catalog_search가 빗나간다. 그 전에 한 번
-이걸로 카탈로그의 진짜 어휘를 확인하고, 그 결과의 category_label을
-catalog_search의 category 인자에 그대로 넣어라.
-
-**호출 권장**: 첫 iter에 도메인 어휘를 모를 때(예: 기상/부동산/임의 새 도메인).
-인구·출산 같이 표 이름에 키워드가 직접 들어가는 익숙한 도메인은 생략 가능.
-
 ### `catalog_search` — KOSIS 표 후보 검색
-input: {{"query": "<검색 키워드>", "category": ["<분류 — explore_catalog 결과의 category_label>"], "top_k": 5}}
+input: {{"query": "<검색 키워드>", "category": ["<분류>"], "top_k": 5}}
 
 ### `fetch_evidence` — 후보 표에서 실제 수치 조회
 input: {{
@@ -101,13 +89,7 @@ input: {{
 
 ## 결정 가이드
 
-**iter 1 (시작)**:
-- 익숙한 도메인(인구·출생·혼인 등 표 이름에 키워드가 직접 들어감) → 곧장 catalog_search.
-- 익숙지 않은 도메인(기상·부동산·기타 새 도메인) → explore_catalog로 카탈로그 어휘 먼저 확인.
-
-**explore_catalog 직후**: output["categories"]에서 claim과 가장 가까운 카테고리 1~2개를 골라
-catalog_search 호출 시 *그 category_label을 그대로 category 인자에* 넣어라.
-(예: explore가 'MT_ZTITLE > 기상관측통계' 반환했으면 → category=["기상관측통계"])
+**iter 1 (시작)**: 보통 catalog_search 먼저.
 
 **catalog_search 직후**: last_observation.output["candidates"]에서 *가장 적합한 표*의 id를 골라
 fetch_evidence 호출. params는 claim의 indicator/time_period 그대로 넣되,
