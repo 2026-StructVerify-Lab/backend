@@ -126,7 +126,8 @@ async def run_verification_background(
         from structverify.core.pipeline import VerificationPipeline
         pipeline = VerificationPipeline()
         report = await pipeline.run(source_data, source_type)
-        result = _build_response(report)
+        # job_id를 함께 넘겨, agent_workspace에서 claim별 plan/trace 읽어 합침
+        result = _build_response(report, job_id=str(job_id))
 
         # 5) job → completed
         async with _session_factory() as db:
@@ -279,8 +280,12 @@ def _normalize_verdict(val: Any) -> str | None:
     return None
 
 
-def _build_response(report: Any) -> dict[str, Any]:
-    """라이브러리 report → 프론트 호환 dict. claims+results inner join + 경량화."""
+def _build_response(report: Any, job_id: str | None = None) -> dict[str, Any]:
+    """라이브러리 report → 프론트 호환 dict. claims+results inner join + 경량화.
+
+    [확장] job_id 주어지면 agent_workspace에서 claim별 plan/trace 읽어 합침 (A-1).
+    프론트는 ClaimResult에 `plan`, `trace` 필드 추가로 받음.
+    """
     full = _safe_serialize(report, set())
     if not isinstance(full, dict):
         full = {}
@@ -297,6 +302,22 @@ def _build_response(report: Any) -> dict[str, Any]:
         cid = r.get("claim_id")
         if cid:
             result_by_claim_id[str(cid)] = r
+
+    # [A-1] 모든 claim_id를 모아 workspace에서 plan/trace 일괄 읽기
+    workspace_by_cid: dict[str, dict] = {}
+    if job_id:
+        try:
+            from sv_platform.loaders.workspace_reader import (
+                read_job_workspace_for_claims,
+            )
+            all_cids = [
+                str(c.get("claim_id"))
+                for c in claims_raw
+                if isinstance(c, dict) and c.get("claim_id")
+            ]
+            workspace_by_cid = read_job_workspace_for_claims(job_id, all_cids)
+        except Exception as e:
+            logger.debug(f"[_build_response] workspace 읽기 실패: {e}")
 
     # claim + result 합치기 + verdict 정규화 + evidence 경량화
     distribution = {"match": 0, "mismatch": 0, "partial": 0, "unverifiable": 0}
@@ -325,6 +346,13 @@ def _build_response(report: Any) -> dict[str, Any]:
         #   - official_value, unit (비교 대상 수치)
         #   - time_period (KOSIS 시점)
         merged["evidence"] = _summarize_evidence(merged.get("evidence"))
+
+        # ── [A-1] plan + trace 합치기 ──
+        ws_info = workspace_by_cid.get(str(cid), {}) if cid else {}
+        if ws_info.get("plan"):
+            merged["plan"] = ws_info["plan"]
+        if ws_info.get("trace"):
+            merged["trace"] = ws_info["trace"]
 
         merged_claims.append(merged)
 
