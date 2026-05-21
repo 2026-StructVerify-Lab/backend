@@ -47,6 +47,13 @@ DEFAULT_WORKSPACE_BASE = Path(
 # (agent_loop이 정식 저장하는 `iter_NN_X` 우선, 도구가 따로 저장하는 `iterNNN_X`는 폴백)
 _ITER_FILENAME_RE = re.compile(r"^iter_?(\d{2,3})_(.+)\.json$")
 
+_WS_RE = re.compile(r"\s+")
+
+
+def _normalize_ws(s: str) -> str:
+    """공백/개행/탭을 단일 스페이스로 정규화 후 strip."""
+    return _WS_RE.sub(" ", s).strip()
+
 
 def _safe_load_json(path: Path) -> dict | None:
     """JSON 안전 로드 — 파일 없거나 파싱 실패 시 None."""
@@ -84,15 +91,18 @@ def _find_job_dir(
         return exact
 
     # 2. source_text 일치 매칭 — 라이브러리가 자체 doc_id로 디렉토리를
-    #    만들었을 때의 안전한 fallback. 텍스트가 정확히 같아야 통과.
+    #    만들었을 때의 안전한 fallback.
+    #
+    # ★ Whitespace 정규화 비교: 라이브러리가 source 저장 시 newline을 공백으로
+    # 압축해 single-line으로 쓰는 반면 sv_platform 입력엔 `\n\n` 등이 그대로
+    # 있어 strict equality는 거의 실패함. 모든 연속 whitespace를 단일 공백으로
+    # 치환한 후 비교.
     #
     # ★ 같은 source_text로 여러 워크스페이스(과거 잡 + 새 잡)가 있을 수 있음.
-    # 부모 디렉토리 mtime만 보면 옛 잡이 선택되는 경우 발생 (workspace_dir
-    # 재사용 버그로 새 잡의 claim이 다른 디렉토리에 추가될 수도 있음).
-    # 따라서 source_text 일치하는 *모든* 워크스페이스를 모은 뒤, 그 안의
-    # claims/ 디렉토리 mtime을 비교해 가장 최근 활동(=현재 진행 중 잡)을 선택.
+    # source_text 일치 워크스페이스를 모두 모은 뒤, 그 안의 claims/ 디렉토리
+    # mtime을 비교해 가장 최근 활동(=현재 진행 중 잡) 선택.
     if source_text:
-        target = source_text.strip()
+        target = _normalize_ws(source_text)
         try:
             dirs = [
                 p for p in base.iterdir()
@@ -107,7 +117,7 @@ def _find_job_dir(
                 continue
             try:
                 with src_file.open("r", encoding="utf-8") as f:
-                    if f.read().strip() != target:
+                    if _normalize_ws(f.read()) != target:
                         continue
             except OSError:
                 continue

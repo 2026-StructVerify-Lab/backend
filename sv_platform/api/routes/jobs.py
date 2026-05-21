@@ -64,11 +64,53 @@ async def get_job(
             )
             if partial:
                 out.result = partial
+                # ★ library logger의 propagate=False 때문에 sv_platform이
+                # 부모 로거에 붙인 progress handler가 안 깨어남.
+                # partial.claims 상태에서 진행률을 역추정해 화면에 반영.
+                _enriched_progress, _enriched_step = _estimate_progress_from_partial(
+                    partial
+                )
+                if _enriched_progress > out.progress:
+                    out.progress = _enriched_progress
+                    out.current_step = _enriched_step
         except Exception:
             # 워크스페이스 읽기 실패해도 폴링 응답 자체는 막지 않음
             pass
 
     return out
+
+
+def _estimate_progress_from_partial(
+    partial: dict,
+) -> tuple[int, str]:
+    """partial.claims 상태로 진행률 추정 (DB의 progress가 5%에 멈춰 있을 때 사용).
+
+    구간:
+      - claims 자체가 없음 → 30%, "검증 가능 주장 탐지"
+      - claim에 plan만 있음 → 50%, "Claim 그래프 빌드"
+      - claim에 trace 일부 → 50~80%, "공식 통계 조회"/"수치 검증"
+      - 모든 claim에 verdict → 95%, "근거 설명 생성"
+
+    DB 값보다 큰 경우에만 caller가 덮어쓰도록 단순 튜플 반환.
+    """
+    claims = (partial or {}).get("claims") or []
+    total = len(claims)
+    if total == 0:
+        return 30, "검증 가능 주장 탐지"
+    with_verdict = sum(1 for c in claims if c.get("verdict"))
+    with_trace = sum(1 for c in claims if c.get("trace"))
+    with_plan = sum(1 for c in claims if c.get("plan"))
+    if with_verdict == total:
+        return 95, "근거 설명 생성"
+    if with_verdict > 0:
+        # 65~90% 사이 — verdict 비율에 비례
+        return 65 + int(25 * with_verdict / total), "수치 검증"
+    if with_trace > 0:
+        # agent loop 진행 중
+        return 50 + int(15 * with_trace / total), "공식 통계 조회"
+    if with_plan > 0:
+        return 50, "Claim 그래프 빌드"
+    return 40, "스키마 유도"
 
 
 @router.get("", response_model=list[JobOut])
