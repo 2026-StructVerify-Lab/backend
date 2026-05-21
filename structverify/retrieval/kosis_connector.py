@@ -857,6 +857,15 @@ class KOSISConnector(BaseConnector):
         public_req = {k: v for k, v in params.items() if k != "apiKey"}
         tnm = getattr(stat_rec, "stat_name", stat_id) or stat_id
 
+        # [디버그] KOSIS API에 실제로 보내는 시점 파라미터 확인용
+        logger.info(
+            f"[KOSISConnector] _call_kosis_param 요청: stat_id={stat_id} "
+            f"prdSe={public_req.get('prdSe')!r} "
+            f"startPrdDe={public_req.get('startPrdDe')!r} "
+            f"endPrdDe={public_req.get('endPrdDe')!r} "
+            f"newEstPrdCnt={public_req.get('newEstPrdCnt')!r}"
+        )
+
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 r = await client.get(

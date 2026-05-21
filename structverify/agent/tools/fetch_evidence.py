@@ -37,30 +37,52 @@ def _autoload_fallback_candidate_ids(
     실패하면 reflect가 catalog_search를 반복 호출 → 중복차단 → 강제
     unverifiable로 죽음. 후보 5개 중 정확한 표가 2~5순위에 있으면
     영영 도달 못 함.
+
+    [패치 C] 현재 claim의 catalog observation에서 충분한 후보를 못
+    얻으면 같은 job의 다른 claim들의 catalog observation에서도 후보를
+    수집해 합친다. 같은 KOSIS 표가 여러 지표를 가진 케이스에서, 한
+    claim의 검색이 우연히 정답 표를 top으로 못 잡았더라도 다른 claim의
+    catalog가 그 표를 후보로 가졌으면 활용 가능.
     """
-    try:
-        names = workspace.list_observations(claim_id)
-    except Exception:
-        return []
-    cat_names = sorted(
-        [n for n in names if "catalog_search" in n.lower()],
-        reverse=True,
-    )
     seen = {current_id}
     out: list[str] = []
-    for name in cat_names:
-        data = workspace.read_observation(claim_id, name)
-        if not isinstance(data, dict):
-            continue
-        cands = (data.get("output") or {}).get("candidates") or []
-        for c in cands:
-            cid = c.get("id") if isinstance(c, dict) else None
-            if not cid or cid in seen:
+
+    def _collect_from(claim_cid: str) -> None:
+        try:
+            names = workspace.list_observations(claim_cid)
+        except Exception:
+            return
+        cat_names = sorted(
+            [n for n in names if "catalog_search" in n.lower()],
+            reverse=True,
+        )
+        for name in cat_names:
+            data = workspace.read_observation(claim_cid, name)
+            if not isinstance(data, dict):
                 continue
-            out.append(cid)
-            seen.add(cid)
-            if len(out) >= limit:
-                return out
+            cands = (data.get("output") or {}).get("candidates") or []
+            for c in cands:
+                cid = c.get("id") if isinstance(c, dict) else None
+                if not cid or cid in seen:
+                    continue
+                out.append(cid)
+                seen.add(cid)
+                if len(out) >= limit:
+                    return
+
+    # 1차: 현재 claim의 catalog observations
+    _collect_from(claim_id)
+    if len(out) >= limit:
+        return out
+    # 2차: 같은 job의 다른 claim들 — 표 다양성 확보
+    try:
+        other_cids = [c for c in workspace.list_claims() if c != str(claim_id)]
+    except Exception:
+        other_cids = []
+    for other in other_cids:
+        if len(out) >= limit:
+            break
+        _collect_from(other)
     return out
 
 
@@ -122,6 +144,24 @@ class FetchEvidenceTool(ToolBase):
                 params["population"] = schema.population
             if not params.get("unit_hint") and getattr(schema, "unit", None):
                 params["unit_hint"] = schema.unit
+            # [패치] derived claim (~증가율 등)의 unit_hint='%'는 KOSIS 표의
+            # base 단위 row(명/건) 매칭을 막아 evidence 0건 → unverifiable로
+            # 죽이는 원인. derived claim에서는 fetch 시 base row를 받아야
+            # loop의 growth_rate/difference 직접계산 경로가 작동한다.
+            # claim.schema.indicator(원본)에 derived suffix가 있으면
+            # unit_hint를 비워 _select_best_row의 unit 가드를 우회한다.
+            _DERIVED_SUFFIXES = (
+                "증가율", "감소율", "증감률", "변화율", "상승률", "하락률",
+            )
+            _claim_ind = (getattr(schema, "indicator", "") or "").strip()
+            if any(_claim_ind.endswith(s) for s in _DERIVED_SUFFIXES):
+                if params.get("unit_hint"):
+                    logger.info(
+                        f"[fetch_evidence] derived claim '{_claim_ind}' — "
+                        f"unit_hint={params.get('unit_hint')!r} 제거 "
+                        f"(base 단위 row 매칭 위해)"
+                    )
+                params.pop("unit_hint", None)
             # ── [v6.17] growth_rate 직접계산용 — fetch 범위 확장 ──────────
             # claim에 prev_time_period가 있으면(증가율/변화량 claim),
             # startPrdDe를 prev 시점까지 당겨서 현재+이전 시점을 한 번에
@@ -252,18 +292,46 @@ class FetchEvidenceTool(ToolBase):
                     f"[fetch_evidence] _candidate_fallbacks 자동 주입: "
                     f"{auto} (LLM이 안 넘김 → catalog observation에서 추출)"
                 )
-        try_ids = [candidate_id] + [
-            fid for fid in fallback_ids if fid and fid != candidate_id
-        ]
-        try_ids = try_ids[:5]  # top + fallback 4개
+        # ── [패치 A] job 안에서 이미 fetch 성공한 stat_id를 1순위 fallback ──
+        # 같은 KOSIS 표가 여러 지표(출생아 수/합계출산율/혼인 건수)를 같이
+        # 갖고 있는데 catalog는 검색어별로 다른 표를 top으로 주는 경우 대응.
+        # 다른 claim이 표 X에서 성공했다면, 현재 claim의 top 후보가 부적절
+        # 해도 표 X를 우선 시도한다. (candidate_id 자체가 표 X면 영향 없음.)
+        prior_success_ids: list[str] = []
+        if context.workspace is not None:
+            try:
+                prior_success_ids = context.workspace.read_successful_stat_ids()
+            except Exception as e:
+                logger.debug(f"[fetch_evidence] successful_stat_ids 읽기 실패: {e}")
+                prior_success_ids = []
+        if prior_success_ids:
+            logger.info(
+                f"[fetch_evidence] 직전 success stat_id 우선 시도: "
+                f"{prior_success_ids} (job 공유)"
+            )
+        # try_ids: top → prior_success → catalog fallback. 중복 제거.
+        try_ids: list[str] = []
+        for sid in [candidate_id] + prior_success_ids + list(fallback_ids):
+            if sid and sid not in try_ids:
+                try_ids.append(sid)
+        try_ids = try_ids[:5]  # 상한 5개 유지
 
         evidence = None
         used_id = candidate_id
         last_err: str | None = None
+        # [패치 E] prior_success_ids로 들어온 stat_id는 표 이름 기반 관련성
+        # 가드를 우회하기 위해 params에 플래그를 단다. 같은 job에서 이미
+        # 한 번 fetch 성공한 표는 row data 안에 indicator가 있을 가능성이
+        # 입증된 것이므로, 표 이름이 indicator와 안 닿더라도 일단 fetch
+        # 시도해서 _select_best_row가 진짜 row를 찾게 한다.
+        prior_id_set = set(prior_success_ids)
         for idx, try_id in enumerate(try_ids):
             try:
+                call_params = dict(params)
+                if try_id in prior_id_set:
+                    call_params["_from_prior_success"] = True
                 ev = await source.fetch_evidence(
-                    candidate_id=try_id, params=params,
+                    candidate_id=try_id, params=call_params,
                 )
             except Exception as e:
                 logger.warning(
@@ -323,6 +391,13 @@ class FetchEvidenceTool(ToolBase):
             )
         except Exception as e:
             logger.debug(f"[fetch_evidence] observation 저장 실패: {e}")
+
+        # [패치 A] job-level successful stat_id 저장 (다음 claim이 이 표를 1순위로)
+        try:
+            sid_for_save = evidence_dict.get("stat_table_id") or candidate_id
+            context.workspace.append_successful_stat_id(str(sid_for_save))
+        except Exception as e:
+            logger.debug(f"[fetch_evidence] successful_stat_id 저장 실패: {e}")
 
         # 요약
         value = evidence_dict.get("value")

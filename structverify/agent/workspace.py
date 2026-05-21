@@ -309,6 +309,44 @@ class Workspace:
     def _facts_key(self) -> str:
         return f"{self._prefix}/verified_facts.json"
 
+    def _successful_stat_ids_key(self) -> str:
+        return f"{self._prefix}/successful_stat_ids.json"
+
+    def read_successful_stat_ids(self) -> list[str]:
+        """[패치 A] job에서 fetch_evidence가 성공한 stat_table_id 목록.
+
+        같은 KOSIS 표(예: DT_1B8000G)에 출생아 수, 합계출산율, 혼인 건수가
+        모두 있는데 catalog는 검색어별로 다른 표를 top으로 줘서 같은 표 다른
+        row를 못 받는 케이스 대응. 한 claim이 표에서 성공하면 그 stat_id를
+        저장해 두고, 다음 claim의 fetch fallback 후보 맨 앞에 prepend한다.
+        """
+        key = self._successful_stat_ids_key()
+        if not self.backend.exists(key):
+            return []
+        try:
+            data = json.loads(self.backend.read_text(key))
+            return data if isinstance(data, list) else []
+        except Exception:
+            return []
+
+    def append_successful_stat_id(self, stat_id: str) -> None:
+        """fetch_evidence success 시 stat_id를 job 공유 list에 추가 (중복 X)."""
+        sid = (stat_id or "").strip()
+        if not sid:
+            return
+        ids = self.read_successful_stat_ids()
+        if sid in ids:
+            return
+        ids.append(sid)
+        self.backend.write_text(
+            self._successful_stat_ids_key(),
+            json.dumps(ids, ensure_ascii=False, indent=2),
+        )
+        logger.info(
+            f"[workspace] successful_stat_id 저장: {sid!r} "
+            f"(누적 {len(ids)}개) — 다음 claim fetch fallback 1순위로 사용"
+        )
+
     def read_verified_facts(self) -> list[dict]:
         """job에서 지금까지 검증된 사실 목록.
 

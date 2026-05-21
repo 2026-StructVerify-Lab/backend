@@ -237,13 +237,24 @@ def _indicator_in_rows(rows: list[dict], indicator: str | None) -> bool:
     ITM_NM·C1_NM~C4_NM 값을 정규화해서 indicator와 비교한다.
     - 정규화 후 한쪽이 다른 쪽에 포함되면 매칭 (표기차 흡수).
     True면 '표 이름이 안 맞아도 데이터 안에 지표가 있는 표'.
+
+    [패치 M] length ratio guard 추가. 이전엔 row 컬럼이 indicator의 *극히
+    일부분*만 포함해도 통과시켜 도메인이 완전히 다른 표를 잘못 인정했다.
+    예: indicator='전국 표준단독주택 공시가격 상승률'(정규화 16자) 대해
+    C1_NM='전국'(2자, 지역명)만 매칭돼도 → True → 범죄 통계표 통과 →
+    부동산 claim에 범죄 row가 evidence로 박히는 가짜 매칭 발생.
+    이제 양쪽 길이 비율이 너무 차이나면(짧은 쪽 / 긴 쪽 < 0.5) 거부.
     """
     if not rows or not indicator:
         return False
     ind_norm = _normalize_korean(str(indicator).strip())
-    if not ind_norm:
+    if not ind_norm or len(ind_norm) < 2:
         return False
     _FIELDS = ("ITM_NM", "C1_NM", "C2_NM", "C3_NM", "C4_NM")
+    # 매칭 비율 가드: row 컬럼과 indicator의 길이 차이가 2배 이상이면 부정합
+    # (지역명/단위 같은 짧은 단어가 긴 indicator 안에 우연히 들어있어
+    #  잘못 매칭되는 케이스 차단)
+    _MIN_LEN_RATIO = 0.5
     for r in rows:
         if not isinstance(r, dict):
             continue
@@ -254,6 +265,9 @@ def _indicator_in_rows(rows: list[dict], indicator: str | None) -> bool:
             fn = _normalize_korean(str(raw))
             if not fn:
                 continue
+            shorter, longer = min(len(fn), len(ind_norm)), max(len(fn), len(ind_norm))
+            if shorter / longer < _MIN_LEN_RATIO:
+                continue  # 길이 차 너무 큼 — 짧은 키워드 우연 매칭 차단
             # 정규화 후 양방향 substring (예: '평균소비성향' in '가구당평균소비성향')
             if ind_norm in fn or fn in ind_norm:
                 return True
@@ -395,9 +409,26 @@ def _select_best_row(
     from structverify.retrieval.kosis_connector import is_same_unit_type
     _unit_hint = (unit_hint or "").strip()
 
+    # ── [패치 3-2b] derived indicator(~증가율 등)면 unit 가드 완화 ──
+    # claim이 '출생아 수 증가율'(unit=%) 같은 파생 지표일 때, KOSIS 표엔
+    # 증가율 row가 없고 base 값(명/건) row만 있음. unit_hint='%'를 그대로
+    # 적용하면 모든 row가 탈락 → 매칭 실패 → unverifiable. loop의
+    # _try_growth_rate_from_rows가 prev/current 두 시점 base 값으로 직접
+    # 비율을 계산하는 경로가 있으므로, derived indicator에서는 단위 다른
+    # base row를 받아들이고 비율 계산은 그 다음 단계에 맡긴다.
+    _DERIVED_SUFFIXES = (
+        "증가율", "감소율", "증감률", "변화율", "상승률", "하락률",
+    )
+    _indicator_raw = (indicator or "").strip()
+    _is_derived_indicator = any(
+        _indicator_raw.endswith(s) for s in _DERIVED_SUFFIXES
+    )
+
     def _unit_match(row: dict) -> bool:
         if not _unit_hint:
             return True  # claim 단위 정보 없음 — 가드 불가
+        if _is_derived_indicator:
+            return True  # 파생 지표 — base 단위 row를 받아 다음 단계에 맡김
         row_unit = str(row.get("UNIT_NM", "") or "").strip()
         if not row_unit:
             return True  # 행 단위 미상 — 막지 않음
@@ -503,6 +534,17 @@ class KOSISDataSource(BaseDataSource):
 
     name = "kosis"
 
+    # ── [패치 F] _record_cache를 클래스 레벨로 — claim 간 StatRecord 공유 ──
+    # _verify_with_agent는 claim마다 KOSISDataSource를 새로 만든다.
+    # 인스턴스 별 _record_cache면, claim A의 catalog_search가 캐싱한
+    # DT_1B8000G StatRecord(org_id 포함)가 claim B 인스턴스에는 없어,
+    # claim B가 prior_success로 DT_1B8000G를 fetch할 때 stat_record=None →
+    # connector가 빈 StatRecord(org_id 없음) 생성 → _fetch_with_retry가
+    # org_id 없음으로 즉시 None 반환 → 빈 rows → value=None.
+    # 클래스 레벨로 공유하면, claim A가 채운 캐시를 claim B가 그대로 본다.
+    # (같은 프로세스 안에서만 공유; cross-process는 workspace 영속 필요.)
+    _record_cache: dict[str, Any] = {}   # stat_id → StatRecord (class-level)
+
     def __init__(self, connector: Any = None, **kwargs: Any):
         """
         Args:
@@ -511,10 +553,10 @@ class KOSISDataSource(BaseDataSource):
         """
         self._connector = connector
         self._connector_config = kwargs
-        self._record_cache: dict[str, Any] = {}   # stat_id → StatRecord
 
         logger.info(
-            f"[KOSISDataSource] 초기화. connector={'주입됨' if connector else 'lazy 생성 예정'}"
+            f"[KOSISDataSource] 초기화. connector={'주입됨' if connector else 'lazy 생성 예정'}, "
+            f"shared _record_cache 크기={len(KOSISDataSource._record_cache)}"
         )
 
     def _get_connector(self):
@@ -534,6 +576,64 @@ class KOSISDataSource(BaseDataSource):
             time_period=kwargs.get("time_period"),
             population=kwargs.get("population"),
             extra_params=kwargs.get("extra_params", {}),
+        )
+
+    async def _lookup_stat_record_by_id(self, stat_id: str) -> Any | None:
+        """[패치 F-2] kosis_stat_catalog 테이블에서 stat_id로 StatRecord 직접 조회.
+
+        용도: prior_success로 들어온 stat_id가 클래스 캐시에도 없을 때
+              (cross-process / restart) DB에서 한 번 끌어와 placeholder
+              fetch가 빈 rows로 침묵 실패하는 걸 방지.
+        """
+        if not stat_id:
+            return None
+        try:
+            import asyncpg
+        except ImportError:
+            return None
+        connector = self._get_connector()
+        catalog = getattr(connector, "catalog", None)
+        pg_dsn = getattr(catalog, "pg_dsn", None) if catalog else None
+        if not pg_dsn:
+            return None
+        try:
+            conn = await asyncpg.connect(pg_dsn)
+        except Exception as e:
+            logger.debug(f"[_lookup_stat_record_by_id] DB 연결 실패: {e}")
+            return None
+        try:
+            row = await conn.fetchrow(
+                """
+                SELECT stat_id, stat_name, org_id, org_name, category_path, keywords
+                FROM kosis_stat_catalog
+                WHERE stat_id = $1
+                LIMIT 1
+                """,
+                stat_id,
+            )
+        except Exception as e:
+            logger.debug(f"[_lookup_stat_record_by_id] 쿼리 실패: {e}")
+            row = None
+        finally:
+            try:
+                await conn.close()
+            except Exception:
+                pass
+        if not row:
+            return None
+        from structverify.retrieval.base_connector import StatRecord
+        return StatRecord(
+            stat_id=row["stat_id"],
+            stat_name=row["stat_name"],
+            org_id=row["org_id"],
+            org_name=row["org_name"] or "",
+            available_periods=[],
+            relevance_score=1.0,
+            metadata={
+                "source": "pgvector_lookup_by_id",
+                "category_path": row.get("category_path"),
+                "keywords": row.get("keywords"),
+            },
         )
 
     # ── BaseDataSource 인터페이스 ──
@@ -590,6 +690,35 @@ class KOSISDataSource(BaseDataSource):
             cached = self._record_cache.get(candidate_id)
             if cached is not None:
                 params = {**params, "stat_record": cached}
+                logger.info(
+                    f"[KOSISDataSource] stat_record 캐시 적중: {candidate_id} "
+                    f"(org_id={getattr(cached, 'org_id', None)!r})"
+                )
+            else:
+                # ── [패치 F-2] 캐시 미스 → DB에서 stat_id 직접 lookup ──
+                # 클래스 레벨 캐시(F)에도 없으면(예: 다른 프로세스/restart),
+                # pgvector 카탈로그 DB에서 stat_id로 직접 StatRecord를 조회.
+                # 없으면 placeholder StatRecord로 fetch가 빈 rows 반환 →
+                # value=None 침묵 실패가 나므로, 여기서 한 번 강제 enrich한다.
+                try:
+                    fetched = await self._lookup_stat_record_by_id(candidate_id)
+                except Exception as e:
+                    logger.debug(
+                        f"[KOSISDataSource] stat_id lookup 실패: {candidate_id} — {e}"
+                    )
+                    fetched = None
+                if fetched is not None:
+                    self._record_cache[candidate_id] = fetched   # 다음 호출 캐시
+                    params = {**params, "stat_record": fetched}
+                    logger.info(
+                        f"[KOSISDataSource] stat_record DB 복원 성공: {candidate_id} "
+                        f"(org_id={getattr(fetched, 'org_id', None)!r})"
+                    )
+                else:
+                    logger.warning(
+                        f"[KOSISDataSource] stat_record 캐시·DB 모두 미스: {candidate_id} "
+                        f"— connector가 placeholder로 fetch 시도하지만 org_id 없어 실패 가능"
+                    )
 
         cq = params.get("query")
         if cq is None:
@@ -613,12 +742,24 @@ class KOSISDataSource(BaseDataSource):
         fetch_params.update({k: v for k, v in params.items() if k not in fetch_params})
 
         # time_period → KOSIS API 파라미터 자동 변환
+        # [패치] 이전엔 `not params.get("prdSe")`로 가드해서, prdSe가 명시되면
+        # _parse_time_period가 발동 안 하고 params에 들어온 잘못된 startPrdDe
+        # ('202401' 같은 1월 값)가 그대로 KOSIS에 전송 → 4월 row 못 받음.
+        # 이제 time_period가 있으면 무조건 _parse_time_period 결과로 덮어씀.
+        # 변환에 성공한 경우에만 적용 (잘못된 형식은 기존 값 유지).
         tp = params.get("time_period")
-        if tp and not params.get("prdSe"):
+        if tp:
             prd_se, start, end = _parse_time_period(tp)
-            fetch_params["prdSe"] = prd_se
-            fetch_params["startPrdDe"] = start
-            fetch_params["endPrdDe"] = end
+            if prd_se and start and end:
+                fetch_params["prdSe"] = prd_se
+                fetch_params["startPrdDe"] = start
+                fetch_params["endPrdDe"] = end
+                logger.info(
+                    f"[KOSISDataSource] time_period={tp!r} → "
+                    f"prdSe={prd_se!r} startPrdDe={start!r} endPrdDe={end!r} "
+                    f"(params에 prdSe={params.get('prdSe')!r} "
+                    f"startPrdDe={params.get('startPrdDe')!r} 있어도 덮어씀)"
+                )
             # ── [v6.17] growth_rate 범위 확장 — prev 시점까지 받아오기 ──
             # fetch_evidence 도구가 _range_start/_range_end를 넣어줬으면
             # startPrdDe/endPrdDe를 그 범위로 덮어쓴다. 현재+이전 시점을
@@ -729,6 +870,15 @@ class KOSISDataSource(BaseDataSource):
                     f"[KOSISDataSource] 표 이름엔 지표 없으나 행 데이터에 "
                     f"'{claim_indicator}' 존재 → 관련 표로 인정: [{stat_id_str}]"
                 )
+            elif params.get("_from_prior_success"):
+                # [패치 E] 같은 job의 다른 claim이 이미 fetch 성공한 표는 표
+                # 이름이 indicator와 안 닿더라도 row 안에 indicator가 있을
+                # 가능성이 입증됨. row 매칭은 _select_best_row가 책임진다.
+                # (안전성: row 매칭이 None을 반환하면 어차피 evidence는 None.)
+                logger.info(
+                    f"[KOSISDataSource] 표 관련성 가드 우회 (prior_success): "
+                    f"[{stat_id_str}] — row 매칭 단계에서 indicator 검증"
+                )
             else:
                 logger.warning(
                     f"[KOSISDataSource] 테이블 관련성 없음 → fetch 거부: "
@@ -801,11 +951,20 @@ class KOSISDataSource(BaseDataSource):
         else:
             # ★ 매칭 실패 시 row sample 로그 — KOSIS 표 column 구조 파악용 (한 번만 보면 됨)
             if rows:
-                sample_keys = list((rows[0] or {}).keys())[:10]
+                all_keys = list((rows[0] or {}).keys())
+                sample_keys = all_keys[:10]
                 logger.warning(
                     f"[KOSISDataSource] indicator/time 매칭 row 못 찾음 "
                     f"(rows={len(rows)}, indicator={params.get('indicator')!r}, "
                     f"time={params.get('time_period')!r}) — evidence 없음 처리."
+                )
+                logger.warning(f"  row[0] 전체 키({len(all_keys)}개): {all_keys}")
+                sample_prds = sorted(
+                    set(str(r.get("PRD_DE", "MISSING")) for r in rows[:200])
+                )
+                logger.warning(
+                    f"  PRD_DE 분포 (상위 200 row 중 unique {len(sample_prds)}개, "
+                    f"앞 20개): {sample_prds[:20]}"
                 )
                 for i, r in enumerate(rows[:3]):
                     snippet = {k: r.get(k) for k in sample_keys if k in r}
