@@ -4,8 +4,102 @@ app:
   version: "0.2.0"
   debug: true
 
-# backend/config/default.yaml
-# llm 섹션을 아래로 교체
+# ────────────────────────────────────────────────────────────────────────
+# Phase A 추가 섹션 — config/default.yaml 끝에 *추가*하세요.
+# 기존 섹션 (llm, embedding, kosis, ...) 은 *그대로* 유지.
+# ────────────────────────────────────────────────────────────────────────
+
+# === Agent (멀티턴 + memory + agentic 검증) ===
+# Phase A에서는 *자리만* 추가. 실제 호출은 Phase D (loop) 통합 후.
+agent:
+  enabled: true                              # Phase A는 false 유지. Phase D에서 true.
+
+  workspace:
+    backend: "local"                          # local | minio | s3 (지금은 local만 구현)
+    local_path: "./agent_workspace"           # workspace 디렉토리
+    persist_after_job: true                   # dev=true (디버깅), prod=false (정리)
+    cleanup_after_days: 7                     # persist=false 시 며칠 후 자동 삭제
+
+  memory:
+    backend: "file"                           # file | redis (지금은 file만)
+    max_length_chars: 50000                   # memory.md 읽을 때 LLM에 넘기는 상한
+    summarize_threshold: 30000                # 이 이상이면 LLM 요약 (Phase D+)
+
+  loop:
+    mode: "reflect"
+    max_iterations: 10                        # claim당 reflect 최대 횟수
+    enable_reflection: true                   # false면 plan만 따라감 (멀티턴 X)
+    single_pass_fallback: true                # agent 실패/예산 초과 시 v6.14 단일 패스
+    early_stop_on_confidence: 0.9             # 이상이면 finish 권장
+
+  llm:
+    # llm.models 에서 *이름*만 참조 — 기존 인프라 재사용
+    plan_model: "structured"                  # → HCX-007 (JSON 정확)
+    reflect_model: "light"                    # → HCX-DASH-002 (비용 ↓, 반복 호출)
+    explain_model: "heavy"                    # → HCX-003
+
+  budget:
+    max_tokens_per_job: 100000
+    max_concurrent_claims: 3                  # 동시 처리 claim 수
+    cost_alert_threshold_krw: 1000
+
+  cache:
+    enabled: true
+    ttl_hours: 24
+    backend: "memory"                         # memory | redis
+
+# === Data sources (KOSIS만 → multi-source 일반화) ===
+# 기존 kosis: 섹션은 *그대로 유지*. 여기서는 *추상화 레이어*만 추가.
+data_sources:
+  enabled: ["kosis"]                          # 회사: ["custom_db", "custom_csv"]
+  default_source: "kosis"
+
+  # custom_csv — 회사 업로드 파일
+  custom_csv:
+    enabled: false
+    base_path: "./uploads/custom"
+    catalog_json: ""                          # 표 목록 JSON (필수)
+    embedding_cached: true
+
+  # custom_db — 회사 자체 DB
+  custom_db:
+    enabled: false
+    dsn_env: "CUSTOM_DB_DSN"                  # .env에서 로드
+    catalog_table: "stat_tables"
+    data_table_prefix: "data_"
+
+  # 외부 API plugin (확장 자리)
+  external:
+    world_bank:
+      enabled: false
+      base_url: "https://api.worldbank.org/v2"
+    oecd:
+      enabled: false
+
+# === Domain (도메인/언어 일반화) ===
+# 한국어 KOSIS 도메인 외 — 회사가 *자체 라벨/분류체계* 사용 가능.
+domain:
+  language: "ko"                              # ko | en | mixed
+
+  # 분류 라벨 (현재 코드에 하드코딩된 것 → config로)
+  classifier_labels_path: ""                  # YAML 파일 경로, 빈 값이면 inline 사용
+  classifier_labels:
+    - id: "population"
+      desc: "인구/가구 (출생, 사망, 혼인, 고령화, 인구구조)"
+    - id: "economy"
+      desc: "경제/산업/금융"
+    - id: "labor"
+      desc: "노동/고용"
+    - id: "health"
+      desc: "보건/복지"
+    - id: "education"
+      desc: "교육/문화"
+    # 회사 추가 예:
+    # - id: "internal_sales"
+    #   desc: "사내 매출/판매 지표"
+
+  schema_taxonomy_path: ""                    # parent_path 트리 YAML (선택)
+  extra_schema_fields: []                     # ClaimSchema 확장 필드 이름들
 
 llm:
   provider: "hcx"                    # openai → hcx 로 변경
@@ -31,6 +125,7 @@ reranker:
 kosis:
   base_url: "https://kosis.kr/openapi"
   api_key_env: "KOSIS_API_KEY"
+  pgvector_dsn_env: "PGVECTOR_DSN"
   timeout: 30
   catalog:
     rebuild: false          # true: 강제 재수집, false: DB에 있으면 skip
@@ -38,7 +133,7 @@ kosis:
     min_rows: 1000          # 이 수 이상이면 "이미 구축됨"으로 판단
 
 database:
-  url: "postgresql+asyncpg://user:pass@localhost:5432/structverify"
+  url: "postgresql://structverify:svpass123@localhost:5432/structverify"
 
 graph:
   provider: "neo4j"             # "neo4j" | "memgraph"
@@ -88,3 +183,5 @@ observability:
 preprocessing:
   sandbox_backend: "docker"      # "exec" | "docker" | "e2b"
   use_llm_clean: true
+  
+enable_feedback: false   # 피드백/학습 루프 비활성화

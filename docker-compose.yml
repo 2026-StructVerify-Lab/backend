@@ -15,16 +15,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
-  # 나중에 주석 해제
-  # backend:
-  #   build: .
-  #   container_name: factcheck-api
-  #   env_file:
-  #     - .env
-  #   ports:
-  #     - "8000:8000"
-  #   depends_on:
-  #     - db
+
 
 volumes:
   pgdata:
