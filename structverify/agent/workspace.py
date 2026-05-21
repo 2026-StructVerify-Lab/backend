@@ -388,6 +388,79 @@ class Workspace:
             f"indicator={ind!r} time={tp!r} value={fact.get('value')}"
         )
 
+    # ── [S 패치 2026-05-21] sent_id 기반 sibling evidence 공유 ────────
+    # schema_inductor가 한 문장(sent_id) → N sub-claim 분기할 때, 같은 sent_id의
+    # base/derived sub-claim은 *형제(sibling)* 관계. base가 KOSIS fetch로 얻은
+    # evidence를 derived가 *추가 fetch 없이* 재활용하려면 sent_id로 매핑이 필요.
+    # 기존 verified_facts는 (indicator, time) 키라 base "출생아 수" → derived
+    # "출생아 수 증가율" 매핑이 안 됨. sent_id 기반 별도 캐시.
+    def _sibling_evidence_key(self) -> str:
+        return f"{self._prefix}/sibling_evidence.json"
+
+    def record_sibling_evidence(
+        self,
+        sent_id: str,
+        role: str,
+        evidence: dict,
+    ) -> None:
+        """같은 sent_id의 sibling sub-claim들이 활용할 evidence 기록.
+
+        Args:
+            sent_id: claim의 sent_id (예: "b0002_s0000")
+            role: value_role ("base" / "derived_rate" / "derived_difference")
+            evidence: {indicator, value, unit, time_period, stat_id, claim_id, verdict}
+        """
+        sent_id = (sent_id or "").strip()
+        if not sent_id or not evidence or evidence.get("value") is None:
+            return
+        key = self._sibling_evidence_key()
+        if self.backend.exists(key):
+            try:
+                store = json.loads(self.backend.read_text(key))
+                if not isinstance(store, dict):
+                    store = {}
+            except Exception:
+                store = {}
+        else:
+            store = {}
+        entries = store.setdefault(sent_id, [])
+        # 같은 role 중복 저장 방지 (최초 결과 우선)
+        if any(e.get("role") == role for e in entries):
+            return
+        record = dict(evidence)
+        record["role"] = role
+        record.setdefault("recorded_at", datetime.now(timezone.utc).isoformat())
+        entries.append(record)
+        self.backend.write_text(
+            key,
+            json.dumps(store, ensure_ascii=False, indent=2, default=str),
+        )
+        logger.info(
+            f"[workspace] sibling_evidence 저장: sent_id={sent_id!r} "
+            f"role={role!r} indicator={evidence.get('indicator')!r} "
+            f"value={evidence.get('value')}"
+        )
+
+    def read_sibling_evidence(self, sent_id: str) -> list[dict]:
+        """sent_id의 sibling evidence 목록 (자기 자신 포함, 호출자가 필터).
+
+        Returns: [{role, indicator, value, unit, time_period, stat_id, ...}, ...]
+        """
+        sent_id = (sent_id or "").strip()
+        if not sent_id:
+            return []
+        key = self._sibling_evidence_key()
+        if not self.backend.exists(key):
+            return []
+        try:
+            store = json.loads(self.backend.read_text(key))
+            if isinstance(store, dict):
+                entries = store.get(sent_id) or []
+                return entries if isinstance(entries, list) else []
+        except Exception:
+            pass
+        return []
+
     def lookup_verified_fact(
         self, indicator: str, time_period: str, unit_hint: str | None = None
     ) -> dict | None:

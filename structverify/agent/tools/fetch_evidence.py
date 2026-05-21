@@ -100,8 +100,15 @@ class FetchEvidenceTool(ToolBase):
         "claim.schema에서 자동 보강됨."
     )
     input_schema = {
-        "candidate_id": "catalog_search 결과의 id. 예: 'DT_1B8000G'",
-        "params": "(선택) source별 파라미터 dict. 모르면 {}",
+        "candidate_id": "catalog_search 결과의 id",
+        "params": (
+            "(선택) source별 파라미터 dict. indicator/time_period/population은 "
+            "claim.schema에서 자동 보강됨. 핵심 옵션 match_criteria: 직전 fetch의 "
+            "row sample 컬럼명을 본 뒤 어떤 컬럼이 어떤 값과 매칭돼야 하는지 dict로 "
+            "명시. row 매칭이 모든 criteria 만족 row로 좁혀짐. "
+            "형식 예: {\"match_criteria\": {\"<column_name>\": \"<expected_substring>\"}}. "
+            "컬럼명은 row sample에 노출된 키를 그대로 사용 — 도메인 무관."
+        ),
         "source": "(선택) 데이터 소스 이름. catalog_search와 동일하게.",
     }
 
@@ -140,8 +147,25 @@ class FetchEvidenceTool(ToolBase):
                 params["indicator"] = schema.indicator
             if not params.get("time_period") and getattr(schema, "time_period", None):
                 params["time_period"] = schema.time_period
-            if not params.get("population") and getattr(schema, "population", None):
-                params["population"] = schema.population
+            # ── [L 패치 2026-05-21] population은 schema 강제 덮어쓰기 ──
+            # LLM이 claim_text 전체(여러 region 등장)를 보고 sub-claim의 schema와
+            # *다른 region*을 fetch에 박는 케이스가 잦음 (의료장비 서울 claim에
+            # population='강원도' 박아 강원 row 1336 가져옴 → evidence pool 오염
+            # → LLM이 finish할 때 헷갈려 잘못된 mismatch).
+            # sub-claim의 정체성(population)은 schema가 진실. LLM이 다른 값을
+            # 명시했더라도 schema 우선으로 덮어씀. schema 값이 "전체"/None 같은
+            # 비특정 값이면 LLM 값 유지.
+            # 주의: time_period는 *growth_rate/difference에서 LLM이 prev 시점을
+            # 의도적으로* 박아야 하므로 덮어쓰지 *않음* (기존 누락 보강만).
+            _sch_pop = (getattr(schema, "population", None) or "").strip()
+            if _sch_pop and _sch_pop not in ("전체", "전국", "계", "total"):
+                _llm_pop = (params.get("population") or "").strip()
+                if _llm_pop and _llm_pop != _sch_pop:
+                    logger.info(
+                        f"[fetch_evidence] population LLM={_llm_pop!r} → "
+                        f"schema {_sch_pop!r} 덮어씀 (sub-claim 정체성 우선)"
+                    )
+                params["population"] = _sch_pop
             if not params.get("unit_hint") and getattr(schema, "unit", None):
                 params["unit_hint"] = schema.unit
             # [패치] derived claim (~증가율 등)의 unit_hint='%'는 KOSIS 표의

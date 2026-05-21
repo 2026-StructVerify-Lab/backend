@@ -280,6 +280,7 @@ def _select_best_row(
     time_period: str | None,
     population: str | None = None,
     unit_hint: str | None = None,
+    match_criteria: dict[str, Any] | None = None,
 ) -> dict | None:
     """KOSIS row 목록에서 indicator + time_period 매칭 row 1개 선택.
 
@@ -299,6 +300,11 @@ def _select_best_row(
     한국어 정규화: '출생아 수' = '출생아수' = '출생아·수'. 공백/특수문자 차이를
     흡수해서 KOSIS 표기차로 매칭 실패하지 않도록 함.
 
+    [2026-05-21 추가] match_criteria: LLM이 row sample 보고 직접 명시한 *컬럼-값 매칭
+    제약*. {col_name: expected_value} 형태. 예: {"C1_NM": "강원", "ITM_NM": "주요의료장비"}.
+    한 row가 모든 criteria를 만족(substring 매칭, 한국어 정규화)해야 채택됨. 도메인별
+    하드코딩(C1_NM=지역) 없이, LLM이 매번 표 구조 보고 적절한 컬럼/값을 박는 방식.
+
     Returns:
         매칭된 row dict 또는 None.
     """
@@ -309,6 +315,42 @@ def _select_best_row(
     ind_norm_raw = (indicator or "").strip()
     ind_norm = _normalize_korean(ind_norm_raw)
     pop_norm = _normalize_korean((population or "").strip())
+
+    # ── [2026-05-21] match_criteria 사전 필터 ────────────────────────
+    # LLM이 명시한 {col: value} 제약을 *모든 row에 한 번에* 적용. 한 row가
+    # 모든 criteria를 정규화 후 substring 매칭해야 통과. criteria가 비어있으면
+    # noop. domain-specific 가드 없이 LLM 판단으로 row 좁히는 메커니즘.
+    if match_criteria:
+        criteria_norm = {
+            str(k): _normalize_korean(str(v))
+            for k, v in match_criteria.items()
+            if v is not None and str(v).strip()
+        }
+        if criteria_norm:
+            def _criteria_match(row: dict) -> bool:
+                for col, expected in criteria_norm.items():
+                    raw = row.get(col)
+                    if raw is None:
+                        return False
+                    actual = _normalize_korean(str(raw))
+                    if expected not in actual and actual not in expected:
+                        return False
+                return True
+
+            filtered = [r for r in rows if _criteria_match(r)]
+            if filtered:
+                logger.info(
+                    f"[_select_best_row] match_criteria {criteria_norm} 적용: "
+                    f"{len(rows)} → {len(filtered)} rows"
+                )
+                rows = filtered
+            else:
+                # criteria 다 만족하는 row가 한 개도 없음 → 표 부적합
+                logger.warning(
+                    f"[_select_best_row] match_criteria {criteria_norm} "
+                    f"만족하는 row 없음 → 매칭 실패 (호출자가 다음 candidate 시도)"
+                )
+                return None
 
     # KOSIS row에서 indicator를 담을 가능성이 있는 모든 string column
     _INDICATOR_FIELDS = ("ITM_NM", "C1_NM", "C2_NM", "C3_NM", "C4_NM")
@@ -460,6 +502,47 @@ def _select_best_row(
                 f"대한민국 행 없음 → 해외 전용 표, 국내 claim 부적합"
             )
             return None
+
+    # ── [2026-05-21 I 패치] pop + indicator pre-filter ──────────────
+    # 기존: 1·2·3차는 가드 검사, 4차(시점만)는 pop/indicator 무시하고 첫 row 반환.
+    # 이로 인해:
+    #   - 서울 claim에 강원 row(1336)가 누수 (의료장비 #2 케이스)
+    #   - '의료장비 수' claim에 ITM_NM='진료실인원수'(DT_35003_A10) 누수 (#3)
+    # 처방: pop/indicator가 명시되어 있고 *그 어떤 row도* 매칭 안 되면 표 자체
+    # 부적합 → None 반환해 호출자가 다음 candidate 시도. 매칭 row가 있으면
+    # 그것만 후보로 좁혀서 모든 차수 매칭에 사용 (4차 fallback도 좁혀진 안에서).
+    # 도메인 무관: pop/indicator는 KOSIS 표준 신호, value_role/도메인 무관.
+    if pop_norm and pop_norm not in ("전체", "전국", "계", "total"):
+        pop_matched = [r for r in rows if _pop_match(r)]
+        if not pop_matched:
+            logger.warning(
+                f"[_select_best_row] population={pop_norm!r} 매칭 row 없음 "
+                f"({len(rows)} rows 검사) → 표 부적합, 다음 candidate 시도"
+            )
+            return None
+        if len(pop_matched) < len(rows):
+            logger.info(
+                f"[_select_best_row] population={pop_norm!r} pre-filter: "
+                f"{len(rows)} → {len(pop_matched)} rows"
+            )
+            rows = pop_matched
+
+    # indicator pre-filter — derived 지표(~증가율)는 base 단위 row를 받아야
+    # 하므로 ind_match 가드 우회 (기존 _is_derived_indicator 로직과 일관).
+    if ind_norm and not _is_derived_indicator:
+        ind_matched = [r for r in rows if _ind_match(r)]
+        if not ind_matched:
+            logger.warning(
+                f"[_select_best_row] indicator={ind_norm!r} 매칭 row 없음 "
+                f"({len(rows)} rows 검사) → 표 부적합, 다음 candidate 시도"
+            )
+            return None
+        if len(ind_matched) < len(rows):
+            logger.info(
+                f"[_select_best_row] indicator={ind_norm!r} pre-filter: "
+                f"{len(rows)} → {len(ind_matched)} rows"
+            )
+            rows = ind_matched
 
     # 1차: indicator + 정확 시점 (+ population + 단위)
     for r in rows:
@@ -916,6 +999,7 @@ class KOSISDataSource(BaseDataSource):
                 time_period=params.get("time_period"),
                 population=params.get("population"),
                 unit_hint=params.get("unit_hint"),
+                match_criteria=params.get("match_criteria"),
             )
 
         if best_row is not None:

@@ -80,8 +80,11 @@ class LoopConfig:
     fail_fast: bool = False
     """True면 첫 Tool 실패 시 즉시 unverifiable. False면 계속 다음 step 시도."""
 
-    value_match_tolerance: float = 0.01
-    """auto verdict 합성 시 값 매칭 허용 오차 (1% 기본)."""
+    value_match_tolerance: float = 0.05
+    """[2026-05-21 완화] auto verdict 합성 시 값 매칭 허용 오차 (5% 기본).
+    기존 1%는 너무 strict해서 schema=0.79 vs fetch=0.8 (1.3% 차이) 같은
+    실질적 일치도 mismatch로 떨어졌음. KOSIS 데이터의 통계적 변동/시점 차이를
+    감안해 5%로 완화. 더 strict한 매칭이 필요하면 호출자가 인자로 override."""
 
 
 # ── Step input 보간 (deterministic mode 보조) ────────────────────
@@ -263,7 +266,7 @@ def _evidence_to_data_points(evidence: dict, claim: Any) -> list[DataPointSpec]:
 
 
 def _save_verified_facts(
-    workspace: Any, verdict: Any, claim_id: str
+    workspace: Any, verdict: Any, claim_id: str, claim: Any | None = None,
 ) -> None:
     """[v6.21] verdict의 data_points에서 검증된 수치를 job 공유 저장소에 기록.
 
@@ -272,17 +275,29 @@ def _save_verified_facts(
     다음 claim이 같은 수치를 catalog_search 없이 재사용할 수 있다.
 
     UNVERIFIABLE은 공식 수치가 없으므로 저장하지 않는다.
+
+    [S 패치 2026-05-21] claim이 전달되면 sent_id 기반 sibling_evidence에도 같이
+    기록해 같은 sent_id의 형제 sub-claim들이 활용할 수 있도록 한다.
     """
     try:
         v_type = getattr(verdict.verdict, "value", str(verdict.verdict))
         if v_type not in ("match", "mismatch"):
             return  # 검증 실패 — 신뢰할 수치 없음
         dps = getattr(verdict, "data_points", None) or []
+
+        # sibling_evidence용 sent_id / value_role 추출
+        _sent_id = ""
+        _role = ""
+        if claim is not None:
+            _sent_id = str(getattr(claim, "sent_id", "") or "").strip()
+            _schema = getattr(claim, "schema", None)
+            _role = (getattr(_schema, "value_role", None) or "") if _schema else ""
+
         for dp in dps:
             val = getattr(dp, "resolved_value", None)
             if val is None:
                 continue
-            workspace.append_verified_fact({
+            _fact = {
                 "indicator": getattr(dp, "indicator", "") or "",
                 "time_period": (getattr(dp, "source_time", None)
                                 or getattr(dp, "time", "") or ""),
@@ -291,7 +306,13 @@ def _save_verified_facts(
                 "source": getattr(dp, "source", None) or "KOSIS",
                 "claim_id": str(claim_id),
                 "verdict": v_type,
-            })
+            }
+            workspace.append_verified_fact(_fact)
+            # [S] sent_id 매핑에도 저장 — base 결과를 sibling derived가 활용
+            if _sent_id and _role:
+                workspace.record_sibling_evidence(
+                    sent_id=_sent_id, role=_role, evidence=_fact,
+                )
     except Exception as e:
         logger.debug(f"[loop] verified_fact 저장 실패 (무시): {e}")
 
@@ -1236,6 +1257,47 @@ async def agent_loop(
             # Phase E: LLM Reflect Agent
             try:
                 memory_text = workspace.read_memory(claim_id)
+                # [S 패치 2026-05-21] 같은 sent_id의 sibling base evidence를
+                # memory_text 상단에 inject → derived claim이 추가 fetch 없이
+                # base의 KOSIS 값을 활용해 즉시 calculate 가능.
+                try:
+                    _schema = getattr(claim, "schema", None)
+                    _role = (getattr(_schema, "value_role", None) or "") if _schema else ""
+                    _sent_id = str(getattr(claim, "sent_id", "") or "").strip()
+                    if _role in ("derived_rate", "derived_difference") and _sent_id:
+                        _sibs = workspace.read_sibling_evidence(_sent_id) or []
+                        _base_sibs = [s for s in _sibs if s.get("role") == "base"]
+                        if _base_sibs and iter_num == 1:
+                            # 첫 iter에만 inject (이후엔 last_observation으로 전달됨)
+                            _sib_lines = []
+                            for _s in _base_sibs:
+                                _sib_lines.append(
+                                    f"  - role={_s.get('role')!r} "
+                                    f"indicator={_s.get('indicator')!r} "
+                                    f"value={_s.get('value')} "
+                                    f"unit={_s.get('unit')!r} "
+                                    f"time_period={_s.get('time_period')!r} "
+                                    f"source={_s.get('source')!r}"
+                                )
+                            _sib_block = (
+                                "## 같은 sent_id의 sibling base 검증 결과 (S 패치)\n"
+                                "이 derived claim과 같은 문장에서 분기된 *base sub-claim*이\n"
+                                "KOSIS에서 이미 검증한 값:\n"
+                                + "\n".join(_sib_lines) + "\n\n"
+                                "★ 활용 방법:\n"
+                                "  - 이 base value가 derived의 *current 시점* 값입니다.\n"
+                                "  - claim.schema.prev_value가 원문에 있으면 그 값과 함께\n"
+                                "    *추가 fetch 없이* calculate (또는 finish) 가능합니다.\n"
+                                "  - prev fetch가 필요하면 같은 stat_id로 한 번만.\n\n"
+                                "---\n\n"
+                            )
+                            memory_text = _sib_block + (memory_text or "")
+                            logger.info(
+                                f"[loop] {claim_id}: sibling base evidence "
+                                f"{len(_base_sibs)}건 inject (sent_id={_sent_id!r})"
+                            )
+                except Exception as _e:
+                    logger.debug(f"[loop] sibling inject 실패 (무시): {_e}")
                 decision = await reflect_fn(plan, memory_text, last_observation, iter_num)
             except Exception as e:
                 logger.warning(f"[loop] reflect_fn 실패: {e}, deterministic fallback")
@@ -1265,6 +1327,51 @@ async def agent_loop(
                 plan_exhausted = True
                 stop_reason = StopReason.MAX_ITERATIONS
                 break
+
+        # ── [J 패치 2026-05-21] absolute claim에서 calculate 액션 차단 ──
+        # plan.claim_type=ABSOLUTE인데 reflect LLM이 자율적으로 calculate를
+        # 부르는 케이스 (출생아 수 base 20717명: fetch 후 자율 calc → unverifiable).
+        # absolute는 단일 값 비교라 수식 계산이 필요 없음. tool 실행 스킵 +
+        # "absolute니 finish 하라" observation 전달해 다음 iter에 finish 유도.
+        # G 패치(prompt 가이드)로 LLM 자제 시도했으나 무시되는 케이스가 잦아
+        # loop 단에서 결정론적 차단.
+        if (
+            loop_config.mode == "reflect"
+            and plan.claim_type == ClaimType.ABSOLUTE
+            and next_step.action == ActionType.CALCULATE
+        ):
+            logger.warning(
+                f"[loop] {claim_id} iter {iter_num}: "
+                f"plan.claim_type=ABSOLUTE인데 calculate 호출 — 스킵하고 finish 유도"
+            )
+            last_observation = Observation(
+                iter_num=iter_num,
+                action=next_step.action,
+                input=next_step.input,
+                output={},
+                summary=(
+                    "[absolute 가드] 이 claim은 plan_type=absolute (단일 값 검증)"
+                    "이므로 calculate 호출이 불필요합니다. 직전 fetch_evidence "
+                    "값이 claim.value와 일치하면 finish(match)로 종료하세요."
+                ),
+                success=False,
+                error="absolute_calc_blocked",
+            )
+            try:
+                append_iteration(
+                    workspace, claim_id,
+                    iteration_num=last_observation.iter_num,
+                    action=getattr(last_observation.action, "value",
+                                    str(last_observation.action)),
+                    action_input=last_observation.input,
+                    observation_summary=last_observation.summary,
+                    success=last_observation.success,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[loop] absolute 가드 observation 기록 실패: {e}"
+                )
+            continue  # 다음 iter — reflect가 finish 결정하도록
 
         # ── [중복 action 차단] reflect 모드에서만 ──────────────────
         # 같은 (action, input)이 이미 실행됐으면 tool 실행 스킵.
@@ -1422,6 +1529,53 @@ async def agent_loop(
             logger.info(f"[loop] {claim_id}: FINISH 신호 감지, iter {iter_num}에서 종료")
             break
 
+        # ── [패치 2026-05-21] calculate 성공 후 자동 finish 트리거 ──
+        # growth_rate/difference 같은 derived claim에서 prev/current를 fetch로
+        # 다 모은 다음 calculate까지 성공시켰는데 reflect LLM이 finish는 안
+        # 부르고 다음 iter에 *또* fetch_evidence를 시도하는 헛돌이가 잦다
+        # (2026-05-21 진단: 출생아 수 증가율 claim이 iter 3에서 9.19% 계산
+        # 끝났는데 iter 4·5·6에서 또 fetch → 다른 시점 row 끌어와 결과 변동).
+        # _synthesize_verdict_from_calculate의 가드(derived suffix + fetch
+        # 1건 이상)를 통과해 match/mismatch가 명확하면 그 자리에서 verdict
+        # 확정. UNVERIFIABLE이면 통과시키지 않아 LLM이 더 fetch할 기회 유지.
+        if (
+            not finished
+            and last_result.success
+            and next_step.action == ActionType.CALCULATE
+            and last_calc_observation is not None
+            and last_fetch_observation is not None
+            and len(all_fetch_observations) >= 2
+        ):
+            early_verdict = _synthesize_verdict_from_calculate(
+                plan=plan,
+                claim=claim,
+                claim_id=claim_id,
+                last_calc_observation=last_calc_observation,
+                iter_num=iter_num,
+                last_fetch_observation=last_fetch_observation,
+            )
+            if (
+                early_verdict is not None
+                and early_verdict.verdict != VerdictType.UNVERIFIABLE
+            ):
+                try:
+                    workspace.write_verdict(
+                        claim_id, early_verdict.model_dump(mode="json"),
+                    )
+                except Exception as e:
+                    logger.debug(f"[loop] early calculate verdict 저장 실패: {e}")
+                _save_verified_facts(workspace, early_verdict, claim_id, claim=claim)
+                v_str = getattr(
+                    early_verdict.verdict, "value", str(early_verdict.verdict),
+                )
+                logger.info(
+                    f"[loop] {claim_id}: iter {iter_num} calculate 성공 후 "
+                    f"finish 자동 트리거 (verdict={v_str} "
+                    f"conf={early_verdict.confidence:.2f}) — "
+                    f"reflect의 finish 미호출 헛돌이 차단"
+                )
+                return early_verdict
+
         # ── fail_fast 모드 ──
         if loop_config.fail_fast and not last_result.success:
             logger.info(f"[loop] {claim_id}: fail_fast 모드, iter {iter_num}에서 실패 종료")
@@ -1484,7 +1638,7 @@ async def agent_loop(
             except Exception as e:
                 logger.debug(f"[loop] auto verdict 저장 실패: {e}")
             # [v6.21] 검증된 수치를 job 공유 저장소에 기록 — 다음 claim이 재사용.
-            _save_verified_facts(workspace, auto_verdict, claim_id)
+            _save_verified_facts(workspace, auto_verdict, claim_id, claim=claim)
             v_str = getattr(auto_verdict.verdict, "value", str(auto_verdict.verdict))
             logger.info(
                 f"[loop] {claim_id}: auto-synthesized verdict={v_str} "
@@ -1581,6 +1735,61 @@ async def agent_loop(
             except Exception as e:
                 logger.debug(f"[loop] 정정 verdict 저장 실패: {e}")
             verdict = corrected
+
+    # ── [N 패치 2026-05-21] LLM의 MISMATCH / UNVERIFIABLE도 합성 sanity check ──
+    # LLM이 sub-claim 단위 검증해야 하는데 (1) claim_text 전체의 비교 문맥까지
+    # 따져 mismatch 박거나 (2) fetch evidence 충분히 있는데도 unverifiable 박는
+    # 케이스가 잦다.
+    # (1) 경기 11573 vs fetch 11573 완벽 매치인데 mismatch 박힘
+    # (2) 혼인 base 18921 vs fetch 18919 (0.01% 차이)인데 unverifiable 박힘
+    # 합성 verdict가 MATCH이면 LLM 결정이 잘못 — 합성으로 정정.
+    if (
+        verdict.verdict in (VerdictType.MISMATCH, VerdictType.UNVERIFIABLE)
+        and last_fetch_observation is not None
+    ):
+        synth = _synthesize_verdict_from_observation(
+            plan=plan,
+            claim=claim,
+            claim_id=claim_id,
+            last_observation=last_fetch_observation,
+            iter_num=iter_num,
+            tolerance=loop_config.value_match_tolerance,
+            all_fetch_observations=all_fetch_observations,
+        )
+        if synth is not None and synth.verdict == VerdictType.MATCH:
+            _orig_v = verdict.verdict.value
+            logger.warning(
+                f"[loop] {claim_id}: LLM finish verdict={_orig_v} vs 합성 "
+                f"verdict=MATCH → 합성으로 정정 (sub-claim의 schema.value와 "
+                f"KOSIS 조회값이 객관 일치). "
+                f"(LLM explanation: {(verdict.explanation or '')[:120]!r})"
+            )
+            corrected = AgentVerdict(
+                claim_id=verdict.claim_id,
+                verdict=synth.verdict,
+                confidence=synth.confidence,
+                explanation=(
+                    f"[자동 정정] LLM은 '{_orig_v}'(으)로 보고했으나, 조회된 "
+                    f"KOSIS 값이 claim.value와 객관 일치합니다.\n\n"
+                    f"합성 판정 근거: {synth.explanation}\n\n"
+                    f"원래 LLM 설명(참고): {(verdict.explanation or '')[:200]}"
+                ),
+                data_points=synth.data_points or verdict.data_points,
+                iterations_used=iter_num,
+                stop_reason=verdict.stop_reason,
+            )
+            try:
+                workspace.write_verdict(claim_id, corrected.model_dump(mode="json"))
+            except Exception as e:
+                logger.debug(f"[loop] 정정 verdict 저장 실패: {e}")
+            verdict = corrected
+
+    # [S 패치] FinishTool 정상 경로의 verdict도 sibling_evidence에 기록 →
+    # 같은 sent_id의 derived sub-claim들이 활용할 수 있도록.
+    # auto-synthesis 경로는 위쪽 _save_verified_facts에서 이미 기록되므로
+    # 여기선 *finished + match/mismatch* 케이스만 추가 처리.
+    if finished:
+        _save_verified_facts(workspace, verdict, claim_id, claim=claim)
 
     v_str = getattr(verdict.verdict, "ovalue", str(verdict.verdict))
     logger.info(

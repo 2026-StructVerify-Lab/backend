@@ -289,12 +289,44 @@ class RuntimeAgent:
                 logger.info(f"[Agent A] Step 8 verify_claim → {result.verdict.value}")
                 return result, ev_nodes, ev_edges
 
-        # 병렬 실행 — 결과는 claim 순서대로 보장됨 (gather 순서 유지)
-        _parallel = await asyncio.gather(
-            *[process_one_claim(c) for c in claims]
+        # ── [Dependency Planning 2026-05-21] level 기반 실행 ──
+        # 한 문장에서 분기된 base/derived sub-claim, 또는 같은 indicator를
+        # 공유하는 claim들을 *순차 레벨*로 묶어 evidence 재활용.
+        #   Level 1 (병렬): base claims
+        #   Level 2 (병렬): derived_rate / derived_difference claims
+        # Level 간 verified_facts / successful_stat_ids 캐시가 살아 있어 derived가
+        # base의 fetch 결과를 자동 재활용. 같은 level 안에선 기존대로 Semaphore(3)
+        # 병렬 유지.
+        from structverify.agent.dependency_planner import build_execution_levels
+        _exec_levels = build_execution_levels(claims)
+        logger.info(
+            f"[Agent A] dependency planning: {len(_exec_levels)} levels, "
+            f"sizes={[len(lvl) for lvl in _exec_levels]}"
         )
+
+        # claim_id → 결과 매핑 (원래 claim 순서대로 정렬 위해)
+        _results_by_id: dict[Any, tuple] = {}
+        for _lvl_idx, _level_claims in enumerate(_exec_levels):
+            if not _level_claims:
+                continue
+            logger.info(
+                f"[Agent A] Level {_lvl_idx + 1}/{len(_exec_levels)}: "
+                f"{len(_level_claims)}개 claim 병렬 시작"
+            )
+            _parallel = await asyncio.gather(
+                *[process_one_claim(c) for c in _level_claims]
+            )
+            for _c, _out in zip(_level_claims, _parallel):
+                _results_by_id[_c.claim_id] = _out
+            logger.info(
+                f"[Agent A] Level {_lvl_idx + 1} 완료 — verified_facts/"
+                f"successful_stat_ids 캐시가 다음 level로 전파됨"
+            )
+
+        # 원래 claim 순서대로 정렬 (results 인덱스 보존)
         results: list[VerificationResult] = []
-        for _result, _ev_nodes, _ev_edges in _parallel:
+        for _c in claims:
+            _result, _ev_nodes, _ev_edges = _results_by_id[_c.claim_id]
             results.append(_result)
             all_nodes.extend(_ev_nodes)
             all_edges.extend(_ev_edges)

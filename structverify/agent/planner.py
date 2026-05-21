@@ -575,6 +575,24 @@ class Planner:
 
             plan = _parse_plan(last_response, claim_id, fallback_query=fallback_query)
             if plan is not None:
+                # [2026-05-21] value_role 후처리 — schema_inductor가 분기한 *역할*과
+                # LLM이 만든 claim_type이 불일치하면 *value_role을 신뢰*하고 정정.
+                # LLM이 같은 claim_text의 sub-claim들을 동일 plan_type으로 잘못
+                # 분류하던 버그(2026-05-21 진단: 출생아 수 base + 증가율 둘 다
+                # growth_rate)를 결정론적으로 차단.
+                _role = (schema_info or {}).get("value_role") if isinstance(schema_info, dict) else None
+                _role_to_type = {
+                    "base": ClaimType.ABSOLUTE,
+                    "derived_rate": ClaimType.GROWTH_RATE,
+                    "derived_difference": ClaimType.DIFFERENCE,
+                }
+                _expected_type = _role_to_type.get(_role)
+                if _expected_type and plan.claim_type != _expected_type:
+                    logger.info(
+                        f"[planner] {claim_id}: value_role={_role!r} 기반 정정 — "
+                        f"LLM type={plan.claim_type.value} → {_expected_type.value}"
+                    )
+                    plan = plan.model_copy(update={"claim_type": _expected_type})
                 logger.info(
                     f"[planner] {claim_id}: Plan 생성 완료. "
                     f"type={plan.claim_type.value}, data_points={len(plan.required_data)}, "

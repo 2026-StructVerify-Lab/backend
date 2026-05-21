@@ -205,6 +205,18 @@ class ClaimSchema(BaseModel):
     prev_time_period: str | None = None
     prev_phrase: str | None = None
 
+    # [2026-05-21] schema_inductor가 한 claim → N sub-claim 분기 시,
+    # 각 sub-claim의 *검증 역할*을 명시. planner LLM이 같은 claim_text를 보고
+    # 둘 다 동일 plan_type으로 잘못 분류하는 걸 방지하는 1차 신호.
+    #   - "base"             : 단일 값 단순 확인 (예: 출생아 수 = 20717명)
+    #                          → plan_type=absolute, 시퀀스: catalog → fetch → finish
+    #   - "derived_rate"     : 비율/증가율/감소율 계산 (단위 %, ~증가율 류)
+    #                          → plan_type=growth_rate
+    #   - "derived_difference": 절대 차이/변화량 (단위 절대단위, 차이값)
+    #                          → plan_type=difference
+    #   - None               : 명시 안 됨 — planner LLM이 claim_text/schema로 추론
+    value_role: str | None = None
+
 
 
 class Claim(BaseModel):

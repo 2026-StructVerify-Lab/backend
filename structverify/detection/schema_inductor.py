@@ -748,6 +748,55 @@ async def _induce_multiple(
                         f"core/schemas.py에 prev_value/prev_time_period/prev_phrase 필드 추가 필요."
                     )
 
+            # [2026-05-21] value_role 자동 추론 — schema_inductor가 분기한 *이유*를
+            # downstream planner에 명시적으로 전달. LLM이 같은 claim_text를 보고
+            # base/derived를 헷갈리는 걸 방지.
+            #
+            # [K 패치 2026-05-21] indicator suffix 우선 검사. prev_value 유무는
+            #   2차 신호로 격하. 합계출산율 0.79처럼 LLM이 *base 절대값 schema*에
+            #   prev_value=0.73을 추가 정보로 박아도 *indicator에 ~증가/~차이 같은
+            #   derived suffix가 없으면 base*로 분류.
+            #
+            #   - indicator suffix(~증가율/~비율 류) + 비율 단위 → derived_rate
+            #   - indicator suffix(~증가/~감소/~차이 류, 비율 아님)    → derived_difference
+            #   - 그 외 → base (prev_value 있어도 base — 단일 값 검증)
+            try:
+                ClaimSchema.model_fields["value_role"]
+                _ind = (item.get("indicator") or "").strip()
+                _unit = (item.get("unit") or "").strip()
+                _RATE_SUFFIXES = (
+                    "증가율", "감소율", "증감률", "변화율", "상승률", "하락률",
+                    "비율", "비중",
+                )
+                _DIFF_SUFFIXES = (
+                    "증가", "감소", "증감", "변화", "차이",
+                )
+                _is_rate_indicator = any(_ind.endswith(s) for s in _RATE_SUFFIXES)
+                _is_pct_unit = _unit in ("%", "퍼센트", "퍼센트포인트", "%p")
+                _is_diff_indicator = (
+                    any(_ind.endswith(s) for s in _DIFF_SUFFIXES)
+                    and not _is_rate_indicator
+                )
+                if _is_rate_indicator or _is_pct_unit:
+                    schema_kwargs["value_role"] = "derived_rate"
+                elif _is_diff_indicator:
+                    schema_kwargs["value_role"] = "derived_difference"
+                else:
+                    # base — indicator suffix가 derived가 아니면 prev_value 유무
+                    # 무관하게 base. prev_value는 후처리에서 *clear* 해서 reflect
+                    # LLM이 자율 prev fetch 시도하지 않도록 한다.
+                    schema_kwargs["value_role"] = "base"
+                    if schema_kwargs.get("prev_value") is not None or schema_kwargs.get("prev_time_period"):
+                        logger.info(
+                            f"  [K] base 분류 → prev_value/prev_time_period clear "
+                            f"(indicator={_ind!r}, was prev_value={schema_kwargs.get('prev_value')!r})"
+                        )
+                        schema_kwargs["prev_value"] = None
+                        schema_kwargs["prev_time_period"] = None
+                        schema_kwargs["prev_phrase"] = None
+            except KeyError:
+                pass  # value_role 필드 없는 구버전 — 무시
+
             schema = ClaimSchema(**schema_kwargs)
         except Exception as e:
             logger.debug(f"개별 schema 파싱 실패: {e}")
