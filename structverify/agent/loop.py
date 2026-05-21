@@ -1582,7 +1582,7 @@ async def agent_loop(
                 logger.debug(f"[loop] 정정 verdict 저장 실패: {e}")
             verdict = corrected
 
-    v_str = getattr(verdict.verdict, "value", str(verdict.verdict))
+    v_str = getattr(verdict.verdict, "ovalue", str(verdict.verdict))
     logger.info(
         f"[loop] {claim_id}: 완료. verdict={v_str} "
         f"confidence={verdict.confidence:.2f} iterations={iter_num}"
