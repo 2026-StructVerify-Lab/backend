@@ -85,30 +85,50 @@ def _find_job_dir(
 
     # 2. source_text 일치 매칭 — 라이브러리가 자체 doc_id로 디렉토리를
     #    만들었을 때의 안전한 fallback. 텍스트가 정확히 같아야 통과.
+    #
+    # ★ 같은 source_text로 여러 워크스페이스(과거 잡 + 새 잡)가 있을 수 있음.
+    # 부모 디렉토리 mtime만 보면 옛 잡이 선택되는 경우 발생 (workspace_dir
+    # 재사용 버그로 새 잡의 claim이 다른 디렉토리에 추가될 수도 있음).
+    # 따라서 source_text 일치하는 *모든* 워크스페이스를 모은 뒤, 그 안의
+    # claims/ 디렉토리 mtime을 비교해 가장 최근 활동(=현재 진행 중 잡)을 선택.
     if source_text:
         target = source_text.strip()
         try:
-            dirs = sorted(
-                [
-                    p for p in base.iterdir()
-                    if p.is_dir() and p.name.startswith("job_")
-                ],
-                key=lambda p: p.stat().st_mtime,
-                reverse=True,
-            )
+            dirs = [
+                p for p in base.iterdir()
+                if p.is_dir() and p.name.startswith("job_")
+            ]
         except OSError:
             dirs = []
-        # 최근 20개만 확인 (성능). 더 오래된 잡은 어차피 캐시 만료로 봄.
-        for d in dirs[:20]:
+        candidates: list[tuple[float, Path]] = []
+        for d in dirs:
             src_file = d / "source.txt"
             if not src_file.exists():
                 continue
             try:
                 with src_file.open("r", encoding="utf-8") as f:
-                    if f.read().strip() == target:
-                        return d
+                    if f.read().strip() != target:
+                        continue
             except OSError:
                 continue
+            # claims/ 디렉토리 mtime — 새 잡이면 방금 만들어진 claim이 들어있음
+            claims_dir = d / "claims"
+            if claims_dir.exists():
+                try:
+                    mt = claims_dir.stat().st_mtime
+                except OSError:
+                    mt = 0.0
+            else:
+                # claims/ 없으면 부모 mtime으로 차순위 fallback
+                try:
+                    mt = d.stat().st_mtime
+                except OSError:
+                    mt = 0.0
+            candidates.append((mt, d))
+        if candidates:
+            # 가장 최근 활동 워크스페이스
+            candidates.sort(key=lambda t: t[0], reverse=True)
+            return candidates[0][1]
 
     # 3. prefix 매칭 — source_text가 없을 때만 (다른 잡 데이터 끌어올 위험)
     if not source_text:
@@ -321,6 +341,7 @@ def read_partial_job_workspace(
     job_id: str,
     base: Path = DEFAULT_WORKSPACE_BASE,
     source_text: str | None = None,
+    created_after: float | None = None,
 ) -> dict[str, Any] | None:
     """실시간 폴링용 — 잡이 진행 중에도 workspace를 읽어 partial result 생성.
 
@@ -350,6 +371,8 @@ def read_partial_job_workspace(
 
     partial_claims: list[dict[str, Any]] = []
     # 잡 안의 모든 claim 디렉토리 (mtime 정렬 — agent loop이 만든 순서)
+    # workspace_dir 재사용 버그로 과거 잡들의 claim도 같은 디렉토리에 누적될 수
+    # 있음. created_after 주어지면 그 시각 이후 mtime의 claim만 (현재 진행 잡).
     try:
         claim_subdirs = sorted(
             [p for p in claims_dir.iterdir() if p.is_dir()],
@@ -357,6 +380,12 @@ def read_partial_job_workspace(
         )
     except OSError:
         return None
+    if created_after is not None:
+        cutoff = float(created_after)
+        claim_subdirs = [
+            p for p in claim_subdirs
+            if p.stat().st_mtime >= cutoff
+        ]
 
     for cdir in claim_subdirs:
         cid = cdir.name

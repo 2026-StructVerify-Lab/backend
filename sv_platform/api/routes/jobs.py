@@ -51,9 +51,16 @@ async def get_job(
             # source_text 같이 넘김 — 라이브러리가 자체 doc_id로 워크스페이스를
             # 만든 경우 sv_platform job_id로 정확 매칭이 안 됨. job.source_data
             # 와 workspace/<>/source.txt 일치 검사로 정확한 디렉토리 찾음.
+            # created_after = job.created_at — workspace_dir 재사용 버그로
+            # 과거 잡들의 claim이 같은 디렉토리에 누적될 수 있음. 현재 잡의
+            # created_at 이후 mtime의 claim만 골라 응답.
+            created_after_ts = (
+                job.created_at.timestamp() if job.created_at else None
+            )
             partial = read_partial_job_workspace(
                 str(job_id),
                 source_text=job.source_data,
+                created_after=created_after_ts,
             )
             if partial:
                 out.result = partial
