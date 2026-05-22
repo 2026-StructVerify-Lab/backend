@@ -1,822 +1,450 @@
-# StructVerify Lab v2.0
+# StructVerify Backend (v3)
 
-**도메인 독립형 LLM 기반 사실검증 플랫폼**
+`backend/` 디렉토리는 두 개의 레이어로 나뉜다.
 
-Graph + JSON 하이브리드 저장 · 2-Agent 아키텍처 · 도메인 적응형 학습 루프
+| 디렉토리 | 역할 |
+|---|---|
+| `structverify/` | **검증 라이브러리** — Pipeline, Agents, Tools, Storage 등 핵심 로직 |
+| `sv_platform/` | **FastAPI 플랫폼** — REST API, 인증, Job 관리, DB ORM. `structverify/`를 wrap |
 
-> "뉴스는 실험 도메인, 시스템은 자기 적응형 범용 검증 플랫폼"
+본 문서는 라이브러리 (`structverify/`)에 집중. 플랫폼은 [sv_platform/README.md](sv_platform/README.md) 참조.
 
 ---
 
 ## 환경
-- 파이썬 버전 Python 3.13.2
 
-## 프로젝트 개요
+- Python 3.13+
+- PostgreSQL 16 + pgvector
+- Redis 7
+- (옵션) Neo4j 5, Snowflake, Elasticsearch
 
-비정형 텍스트(뉴스, 보고서, 문서)에서 **수치 기반 주장**을 자동으로 추출하고,
-KOSIS Open API 등 **공식 통계 데이터**와 비교하여 사실 여부를 검증하는 LLM 기반 플랫폼입니다.
-
-**핵심 설계 방향: LLM 학습(Fine-tuning) 기반**
-- 정규식(Regex) 기반 필터링이나 Rule-based 분류는 **fallback** 보조 신호로만 사용
-- 도메인 적응은 KOSIS 메타데이터 기반 Self-Instruct 합성 데이터 → LoRA Fine-tuning으로 수행
-- Candidate Detection, Claim Detection, Schema Induction 모두 LLM/학습 모델이 최종 판단
-
-```
-[사전학습] KOSIS 메타 수집 → 합성 데이터 생성 → LoRA Fine-tuning
-     ↓
-주장 탐지 → 동적 스키마 유도 → 그래프 구축 → 공식 데이터 조회 → 비교 검증 → 설명 생성
-     ↓
-[피드백] Human Review → Feedback Logging → 추가 LoRA 학습
+```bash
+cd backend
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
 ```
 
-| 제공 형태 | 설명 | 사용 대상 |
-|----------|------|----------|
-| Python 라이브러리 | `verify_text("...")` 직접 호출 | 개발자/연구자 |
-| REST API | `/verify/text`, `/verify/document` | 외부 시스템 |
-| SaaS 플랫폼 | 웹 UI + 대시보드 | 일반 사용자/기업 |
+API 키 설정 (env 또는 `.env`):
+```
+NCP_API_KEY=sk-...            # HCX (NCP CLOVA Studio)
+KOSIS_API_KEY=...             # KOSIS Open API
+PGVECTOR_DSN=postgresql://structverify:svpass123@localhost:5432/structverify
+```
 
 ---
 
-## 빠른 시작
+## 디렉토리 구조
 
-### 1단계: 레포 클론
-
-```bash
-git clone https://github.com/your-org/structverify-lab.git
-cd structverify-lab
+```
+backend/structverify/
+├── core/
+│   ├── pipeline.py            13단계 통합 (입력 → SIR → 검증 → 설명)
+│   ├── schemas.py             전체 데이터 모델 (Pydantic)
+│   └── config_loader.py       YAML 설정 로더
+│
+├── preprocessing/             Step 1~2
+│   ├── extractor.py           URL(trafilatura+LLM scraper) / PDF / DOCX / TEXT 추출
+│   ├── segmenter.py           kss 문장 분리 + surface signal
+│   └── sir_builder.py         SIR Tree 빌더
+│
+├── detection/                 Step 3~5
+│   ├── domain_classifier.py   LLM 도메인 분류 (HCX-DASH-002)
+│   ├── candidate_scorer.py    sentence candidate scoring (LLM + heuristic fallback)
+│   ├── claim_detector.py      check-worthiness 판별 (HCX-003)
+│   └── schema_inductor.py     Dynamic Schema Induction (HCX-007 Structured Outputs)
+│                              + value=null 폴백 / value_role 자동 추론 / aggregation 필드
+│
+├── graph/                     Step 4.5, 6
+│   ├── document_graph.py      anchor_year + temporal expression 그래프
+│   ├── graph_builder.py       Claim/Evidence Graph 조립
+│   ├── graph_store.py         Neo4j 인터페이스 (옵션, 기본 비활성)
+│   └── provenance.py          출처 경로 렌더
+│
+├── retrieval/                 Step 7 (catalog + fetch는 agent tools에서 직접 사용)
+│   ├── base.py                BaseDataSource 인터페이스
+│   ├── catalog_search.py      pgvector 카탈로그 의미 검색
+│   ├── kosis_source.py        KOSIS DataSource (search_catalog + fetch_evidence)
+│   ├── kosis_connector.py     KOSIS Open API HTTP 호출
+│   ├── evidence_subgraph.py   Evidence 서브그래프
+│   ├── query_builder.py       Schema → KOSIS 파라미터
+│   └── registry.py            DataSource 레지스트리
+│
+├── verification/              Step 8 (deterministic 백업 경로 — Phase D에서는 agent loop이 대체)
+│   └── verifier.py            수치 비교 + 불일치 유형
+│
+├── explanation/               Step 9
+│   └── explainer.py           LLM 자연어 설명 생성
+│
+├── agent/                     ★ Phase D Multi-Agent 시스템
+│   ├── runtime_agent.py       claim별 process_one_claim 병렬 실행 + dependency level
+│   ├── planner.py             ★ Plan 생성 (claim → 검증 전략) — HCX-007
+│   ├── reflect.py             ★ 매 iter 다음 action 결정 — HCX-DASH-002
+│   ├── loop.py                ★ ReAct loop 본체 (tool 실행 + verdict 합성)
+│   ├── dependency_planner.py  ★ sub-claim 실행 레벨 분리 (base=L1, derived=L2)
+│   ├── workspace.py           job별 상태 파일 시스템 (verified_facts, sibling, memory)
+│   ├── memory.py              memory.md 조작 헬퍼
+│   ├── schemas.py             Plan / ActionType / VerdictType / AgentVerdict
+│   ├── builder_agent.py       (추후 개발) 사전학습 + 피드백 학습
+│   ├── prompts/               planner / reflect prompt 템플릿
+│   └── tools/
+│       ├── base.py            ToolBase + ToolContext + register_tool
+│       ├── catalog_search.py  catalog 검색 (KOSIS pgvector + job-success prepend)
+│       ├── fetch_evidence.py  표 fetch + row 매칭 + 후보 폴백
+│       ├── calculate.py       수식 계산 (증가율/차이/집계)
+│       ├── finish.py          verdict 결정 + loop 종료
+│       ├── read_original.py   원문 재독
+│       └── explore_catalog.py 카탈로그 카테고리 탐색
+│
+├── adaptation/                (추후 개발) Builder 학습 파이프라인
+│   ├── kosis_crawler.py
+│   ├── synthetic_generator.py
+│   ├── sample_builder.py
+│   ├── adapter_trainer.py
+│   └── feedback_store.py
+│
+├── storage/
+│   ├── raw_storage.py         S3/MinIO 원본 보존
+│   ├── db_manager.py          PostgreSQL Claims/Results CRUD
+│   └── dwh_manager.py         Snowflake/BigQuery DWH (옵션)
+│
+└── utils/
+    ├── logger.py
+    └── llm_client.py          LLMClient (HCX v1/v3/Structured) + 전역 rate limiter
 ```
 
-### 2단계: 환경변수 설정
+---
 
-```bash
-cp infra/.env.example infra/.env
-# .env 열어서 KOSIS_API_KEY, LLM_API_KEY는 나중에 개인적으로 받으세욤.
-```
-
-- 바꾸실 분들은 알아서 본인 파일 만든 다음에 `.gitignore`에 추가하신 후 이용하세요.
-
-### 3단계: 전체 서비스 올리기
-
-```bash
-make dev
-```
-
-PostgreSQL(pgvector 포함), Redis, Neo4j, MinIO, Elasticsearch 5개 서비스 업데이트.
-추후 AWS에 올리겠습니다. `init_db.sql`이 자동 실행되어 테이블 13개가 즉시 생성됨.
-
-### 4단계: 확인
-
-```bash
-make health     # 5개 서비스 헬스체크
-make status     # 컨테이너 상태 확인
-make psql       # PostgreSQL 직접 접속해서 테이블 확인
-```
-
-### 접속 정보
-
-| 서비스 | 주소 | 계정 |
-|--------|------|------|
-| PostgreSQL | `localhost:5432` | structverify / svpass123 |
-| Redis | `localhost:6379` | — |
-| Neo4j Browser | http://localhost:7474 | neo4j / svgraph123 |
-| MinIO Console | http://localhost:9001 | minioadmin / minioadmin123 |
-| Elasticsearch | http://localhost:9200 | — |
-
-### 5단계: Neo4j 인덱스 초기화
-
-```bash
-make neo4j-init
-```
-
-### DB 테이블 구조
-
-`init_db.sql`에 만들어둔 핵심 테이블은 `documents`, `claims`, `verification_results` 3개가 기본이고, 여기에 `execution_runs`(실행 단위), `artifacts`(중간 산출물), `graph_nodes/edges`(그래프 PG 사본), `kosis_stat_catalog`(메타데이터 캐시), `kosis_data_cache`(응답 캐시), `feedback_events`, `training_jobs`, `model_versions`, `domain_packs` 등 총 13개입니다.
-
-하이브리드 검색을 위한 `kosis_stat_catalog` 테이블에는 pgvector 임베딩 컬럼도 이미 포함되어 있어서, 배치 ETL로 KOSIS 메타데이터를 넣으면 바로 벡터 유사도 검색이 가능합니다.
-
-Snowflake는 로컬에서 못 띄우니까 `init_snowflake.sql`은 나중에 Snowflake 콘솔에서 직접 실행하면 됩니다.
-
-### API 서버 실행
-
-```bash
-make install    # 의존성 설치
-make api        # FastAPI 서버 시작 (localhost:8000)
-```
-
-### 라이브러리 사용
+## 라이브러리 사용
 
 ```python
-from structverify import verify_text
+from structverify.core.pipeline import VerificationPipeline
 
-report = await verify_text("국내 과수 농가의 65세 이상 고령화 비율은 64.2%에 이른다")
-print(report.results[0].verdict)  # "match" | "mismatch" | "unverifiable"
+pipeline = VerificationPipeline()    # config/default.yaml 자동 로드
+
+# 텍스트 입력
+report = await pipeline.run(
+    "올 4월 합계출산율은 0.79명으로 지난해 같은 달보다 0.06명 증가했다.",
+    source_type="text",
+)
+
+# URL 입력 (trafilatura + LLM scraper 자동 추출)
+report = await pipeline.run("https://example.com/article", source_type="url")
+
+# 사전 추출 본문 재사용 (sv_platform이 사용)
+report = await pipeline.run(url, source_type="url", source_text=already_extracted)
+
+for r in report.results:
+    print(r.verdict, r.confidence, r.evidence.official_value, r.explanation)
+    if r.supporting_evidence:
+        # derived claim의 prev 시점 등 보조 데이터
+        for s in r.supporting_evidence:
+            print("  supporting:", s.time_period, s.official_value)
 ```
 
 ---
 
-## 개발 순서도
+## Phase D Agent Loop 상세
 
-아래 순서대로 개발을 진행합니다. 각 Phase는 이전 Phase 완료 후 시작합니다.
+### 1) Document → claim 추출 (Step 1~5)
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│  Phase 0: 인프라 & 데이터 적재  ← 박재윤                               │
-│                                                                      │
-│  docker-compose 구성                                                  │
-│    → init_db.sql (테이블 13개)                                        │
-│    → kosis_crawler.py (KOSIS 메타 배치 수집)                           │
-│    → db_manager.py / dwh_manager.py / graph_store.py 스텁 완성        │
-│    → raw_storage.py (MinIO 업로드)                                     │
-└──────────────────────────────────────┬───────────────────────────────┘
-                                       │ 완료 후
-                                       ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│  Phase 1A: 전처리 파이프라인  ← 이수민                                  │
-│                                                                      │
-│  extractor.py (URL/PDF/DOCX 실제 추출)                                │
-│    → segmenter.py (kss 문장 분리 + surface signal 부여)                │
-│    → sir_builder.py (SIR Tree 변환 + 절대 offset 보정)                 │
-│                                                                      │
-│  ※ Regex는 has_numeric_surface 같은 fallback 신호만 생성               │
-│     실제 candidate 판단은 Phase 1B의 LLM이 담당                        │
-└──────────────────────────────────────┬───────────────────────────────┘
-                                       │ Phase 0과 병행 가능
-                                       ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│  Phase 1B: LLM 클라이언트 & Candidate Scorer  ← 김예슬                 │
-│                                                                      │
-│  llm_client.py (HCX + OpenAI 실제 API 호출 구현)                      │
-│    → candidate_scorer.py (Teacher LLM 기반 0~1 점수 계산)              │
-│    → claim_detector.py (check-worthiness 2차 판별)                    │
-│    → schema_inductor.py (JSON 구조화 스키마 추출)                      │
-│    → domain_classifier.py (LLM 도메인 분류)                           │
-└──────────────────────────────────────┬───────────────────────────────┘
-                                       │ Phase 1A + 1B 완료 후
-                                       ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│  Phase 2A: 검증 엔진  ← 신준수                                          │
-│                                                                      │
-│  kosis_connector.py (KOSIS API 실제 HTTP 호출 + 응답 파싱)              │
-│    → query_builder.py (ClaimSchema → KOSIS 파라미터 변환)              │
-│    → verifier.py (수치 비교 + 불일치 유형 세분화)                        │
-│    → graph_builder.py (Claim/Evidence 노드/엣지 생성)                  │
-│    → evidence_subgraph.py (Evidence 서브그래프 조립)                   │
-│    → provenance.py (출처 경로 렌더링)                                   │
-└──────────────────────────────────────┬───────────────────────────────┘
-                                       │ Phase 2A 완료 후
-                                       ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│  Phase 2B: Agent 오케스트레이션  ← 김예슬                               │
-│                                                                      │
-│  runtime_agent.py (ReAct 패턴 Step 3~9 통합)                          │
-│    → explainer.py (LLM 자연어 설명 생성)                               │
-│    → builder_agent.py (사전학습 + 피드백 학습 루프)                      │
-│    → pipeline.py (전체 13단계 통합 + DB/Storage 연동)                  │
-└──────────────────────────────────────┬───────────────────────────────┘
-                                       │ Phase 2B 완료 후
-                                       ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│  Phase 3: LoRA 사전학습 & 피드백 루프  ← 김예슬 + 박재윤                 │
-│                                                                      │
-│  synthetic_generator.py (Self-Instruct 합성 데이터 생성)               │
-│    → sample_builder.py (pretrain / finetune 포맷 변환)                │
-│    → adapter_trainer.py (HuggingFace PEFT LoRA 학습/평가/배포)         │
-│    → feedback_store.py + DWH 적재 연동                                │
-└──────────────────────────────────────────────────────────────────────┘
-```
+`core/pipeline.py`의 `run()`이 호출:
+1. `extract_text(source, source_type)` — URL/PDF/DOCX/TEXT → markdown raw_text
+2. `build_sir(raw_text, src)` — SIR Tree (blocks + sentences)
+3. `runtime_agent.process(sir_doc)` 진입
 
----
+`runtime_agent.process()`:
+- Step 3: `classify_domain` (LLM)
+- Step 4: `detect_claims` (candidate scoring → check-worthiness)
+- Step 4.5: `build_document_temporal_graph` (anchor_year + temporal expression)
+- Step 5: `induce_schemas` (LLM JSON schema → ClaimSchema)
+  - 한 claim → N sub-claim 분기 (지역별, base/derived 등)
+  - **value=null 폴백** — `source_phrase`에서 숫자 max() 복원
+  - **value_role 자동 추론** — base / derived_rate / derived_difference / aggregation
+- Step 6: `build_claim_graph` (Claim 그래프 + COMPARE 엣지)
 
-## 전체 파이프라인 상세 (13단계 + 사전학습)
+### 2) Sub-claim 실행 레벨 분리 (Dependency Planner)
 
-### Step 0: 도메인 사전학습 (Agent B, 서비스 전 1회)
-**담당: 김예슬**
+`agent/dependency_planner.py::build_execution_levels(claims)`:
 
-```
-KOSIS 메타 수집 (kosis_crawler.py)
-  → Self-Instruct 합성 데이터 생성 (synthetic_generator.py)
-    ↳ claim/schema 샘플: "KOSIS 통계 X는 Y이다" 형태의 positive/negative 쌍
-    ↳ candidate detection 샘플: 검증 후보 / 비후보 문장 쌍
-  → 학습 포맷 변환 (sample_builder.py)
-  → LoRA Fine-tuning (adapter_trainer.py)
-  → 평가 → 합격 시 배포 (eval_min_score: 0.85)
-```
-
-> 정규식/Rule은 이 단계의 합성 데이터 생성에서만 초기 신호로 사용하고,
-> 실제 모델은 LLM이 만든 학습 쌍을 학습하여 스스로 판단합니다.
-
----
-
-### Step 1: 텍스트 입력 & 추출 — `preprocessing/extractor.py`
-**담당: 이수민**
-
-| 입력 형태 | 처리 방식 |
-|----------|---------|
-| `text` | 그대로 사용 |
-| `url` | trafilatura로 본문 추출 |
-| `pdf` | PyMuPDF(fitz)로 페이지별 텍스트 추출 |
-| `docx` | python-docx로 단락 추출 |
-
-출력: `raw_text: str`
-
----
-
-### Step 2: 전처리 + SIR Tree 변환 — `preprocessing/sir_builder.py`, `segmenter.py`
-**담당: 이수민**
-
-```
-raw_text
-  → 문단 분할 (re.split \n{2,})
-  → 각 문단 → SIRBlock (block_id, type, content, source_offset)
-    → 문장 분리 (kss 우선, 정규식 폴백) → Sentence 리스트
-      → 각 Sentence에 surface signal 부여:
-         - has_numeric_surface: 숫자/단위/비율 포함 여부 (약한 신호, fallback용)
-         - candidate_score=0.0, candidate_label=False (초기값, candidate scorer가 채움)
-         - graph_anchor_id: 그래프 연결용 노드 ID
-      → 절대 char_offset 보정 (block_start + 상대 offset)
-    → entity_refs, event_refs 추출 (placeholder NER)
-```
-
-출력: `SIRDocument` (doc_id, source_type, blocks[])
-
-> **중요**: segmenter는 `has_numeric_surface` 같은 약한 surface signal만 부여합니다.
-> 실제 검증 후보 여부는 Step 4의 candidate_scorer(LLM)가 결정합니다.
-> 정규식은 데이터가 없을 때의 fallback 신호에 불과합니다.
-
----
-
-### Step 3: 도메인 판별 — `detection/domain_classifier.py`
-**담당: 김예슬**
-
-```
-SIRDocument
-  → LLM (HCX-DASH-001 경량 모델) 호출
-  → 도메인 분류: "agriculture" | "economy" | "healthcare" | "education" | ...
-  → Domain Pack 로드 (domain-packs/{domain}/prompts.yaml)
-```
-
-출력: `domain: str`, `sir_doc.detected_domain` 세팅
-
-> Rule-based 키워드 매핑 대신 LLM이 문맥을 보고 직접 분류합니다.
-
----
-
-### Step 4: Sentence Candidate Detection + Claim Detection — `detection/candidate_scorer.py`, `claim_detector.py`
-**담당: 김예슬**
-
-두 단계로 분리된 구조:
-
-```
-[4-1] Sentence Candidate Scoring (candidate_scorer.py)
-  각 Sentence에 대해:
-    → Teacher LLM (HCX-DASH-001) 호출 → 0~1 점수 반환
-      - "공식 통계와 연결 가능한 수치 주장인가?"
-      - signals: has_quantity, has_time_expr, has_population, has_comparison_expr
-    → LLM 실패 시 heuristic fallback (숫자/시점/대상/비교 패턴 가중합)
-    → candidate_score, candidate_label, candidate_source 저장
-
-[4-2] Claim Detection / Check-Worthiness (claim_detector.py)
-  candidate_score >= threshold (0.65) 문장만 대상으로:
-    → LLM (HCX-003 중량 모델) 호출
-      - "공식 통계로 검증 가능한 사실 주장인가?"
-      - claim_type 분류: increase/decrease/scale/comparison/forecast
-    → check_worthy_score >= min_confidence (0.7) 통과 → Claim 객체 생성
-```
-
-> **LLM 학습 계획**: candidate_scorer는 현재 teacher LLM 기반이지만,
-> 충분한 학습 데이터(Step 0 합성 + 운영 피드백) 누적 후
-> 작은 분류 모델(LoRA fine-tuned)로 교체할 예정입니다.
-
----
-
-### Step 5: Dynamic Schema Induction — `detection/schema_inductor.py`
-**담당: 김예슬**
-
-```
-Claim (claim_text)
-  → LLM (HCX-003) 호출
-  → JSON 구조화 추출:
-    {
-      "indicator": "고령화 비율",
-      "time_period": "2023",
-      "unit": "%",
-      "population": "과수 농가",
-      "value": 64.2,
-      "comparison_type": "scale"
-    }
-  → ClaimSchema 객체 생성
-  → graph_schema_candidates: 그래프 매핑 후보 노드 타입 제안
-```
-
-> [참고] AutoSchemaKG (arXiv 2505.23628) — LLM 기반 동적 스키마 유도
-
----
-
-### Step 6: Graph Construction — `graph/graph_builder.py`
-**담당: 신준수**
-
-```
-Claim + ClaimSchema
-  → 노드 생성:
-    - ClaimNode (claim_id, claim_text)
-    - MetricNode (indicator명)
-    - TimeNode (time_period)
-    - EntityNode (population/대상)
-  → 엣지 생성:
-    - claim → MEASURED_AT → time
-    - claim → BELONGS_TO → metric
-    - claim → BELONGS_TO → entity
-  → GraphNode[], GraphEdge[] 반환 (Neo4j 저장은 별도)
-```
-
----
-
-### Step 7: Retrieval + Evidence Subgraph — `retrieval/` + `agent/loop.py`
-**담당: 신준수 · 김예슬**
-
-`config.agent.enabled=true`이면 `agent_loop`가 reflect 모드로 도구를 자율 호출 (자세한 흐름은 위 "Agent Loop의 Reflect 모드" 섹션 참고). 그렇지 않으면 기존 deterministic retrieve→verify 경로:
-
-```
-ClaimSchema
-  → query_builder.py: Schema → KOSIS API 파라미터 변환
-    {orgId, tblId, objL1, itmId, prdSe, startPrdDe, endPrdDe}
-  → kosis_connector.py: KOSIS Open API 실제 호출
-    - /getList: 통계표 목록 조회 (키워드 매칭)
-    - /getStatData: 실제 통계 수치 조회
-  → evidence_subgraph.py: Evidence 서브그래프 조립
-    - EvidenceNode + 출처 엣지 추가
-    - ProvenanceRecord 생성
-```
-
-출력: `Evidence` (official_value, unit, time_period, raw_response, provenance)
-
----
-
-### Step 8: Deterministic Verification — `verification/verifier.py`
-**담당: 신준수**
-
-```
-Claim.schema.value  vs  Evidence.official_value
-  → 수치 비교: |claimed - official| / official * 100
-  → tolerance 이내 (기본 1.0%): MATCH
-  → tolerance 초과: MISMATCH → 불일치 유형 분류
-      - VALUE: 단순 수치 오류
-      - TIME_PERIOD: 시점 불일치
-      - POPULATION: 대상 집단 불일치
-      - EXAGGERATION: 과장/축소
-  → Evidence 없음: UNVERIFIABLE
-```
-
-> **LLM 미개입**: 수치 비교는 hallucination 방지를 위해 deterministic 엔진만 사용합니다.
-> 판정 이유 생성(Step 9)만 LLM이 담당합니다.
-
----
-
-### Step 9: Explanation + Provenance — `explanation/explainer.py`
-**담당: 김예슬**
-
-```
-Claim + VerificationResult + Evidence
-  → LLM (HCX-003) 호출
-  → 자연어 설명 생성:
-    "KOSIS 통계에 따르면 2023년 과수 농가 고령화 비율은 62.1%로,
-     기사의 주장(64.2%)과 약 2.1%p 차이가 있어 불일치로 판정됩니다."
-  → provenance.py: 출처 경로 텍스트 렌더링
-    "출처: KOSIS 농림어업총조사 (표ID: xxx, 조회일: 2026-04-22)"
-```
-
----
-
-### Step 10: Human Review (TODO)
-**담당: 공통**
-
-- 웹 UI에서 검증 결과 수동 확인/수정 인터페이스
-- reviewer_verdict 필드에 최종 판정 저장
-
----
-
-### Step 11~12: 피드백 루프 — `adaptation/`
-**담당: 김예슬 + 박재윤**
-
-```
-[Step 11] Feedback Logging (builder_agent.py → feedback_store.py)
-  Human Review 결과 → FeedbackEvent 저장
-  → 누적 건수 >= threshold(10) 시 Step 12 트리거
-
-[Step 12] Domain Adaptation (builder_agent.py → adapter_trainer.py)
-  pending 피드백 수집 → 학습 포맷 변환 (sample_builder.py, mode="finetune")
-  → LoRA 추가 학습 → 평가 → 배포
-```
-
----
-
-## 2-Agent 아키텍처
-
-### Agent A: Runtime Verification Agent (`agent/runtime_agent.py`)
-
-실시간 검증 요청을 처리하는 메인 Agent입니다. **ReAct (Reason+Act) 패턴**으로 동작합니다.
-
-#### ReAct 패턴이란?
-
-```
-Thought → Action (Tool Call) → Observation → Thought → ...
-```
-
-LLM이 단순히 답변을 생성하는 것이 아니라, 매 스텝마다 "무엇을 해야 하는지 생각(Thought)"하고,
-"구체적인 도구를 호출(Action)"하여 "결과를 관찰(Observation)"한 뒤 다음 행동을 결정합니다.
-
-#### Agent A의 Action 목록 (Step 3~9)
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  Agent A: RuntimeAgent.process(sir_doc)                          │
-│                                                                  │
-│  Thought: "이 문서의 도메인이 무엇인가?"                             │
-│  Action: classify_domain(sir_doc)        → Tool: LLM 분류기       │
-│  Observation: domain = "agriculture"                             │
-│                                                                  │
-│  Thought: "검증할 주장 후보를 찾아야 한다"                            │
-│  Action: score_candidate(sentence)       → Tool: Teacher LLM     │
-│  Observation: candidate_score=0.82, label=True                   │
-│                                                                  │
-│  Thought: "후보 문장이 실제 check-worthy한가?"                       │
-│  Action: _check_worthiness(sentence)     → Tool: LLM (중량)      │
-│  Observation: is_check_worthy=True, score=0.91                   │
-│                                                                  │
-│  Thought: "주장의 구조화된 스키마를 추출해야 한다"                       │
-│  Action: induce_schemas(claims)          → Tool: LLM (중량)      │
-│  Observation: {indicator: "고령화비율", value: 64.2, ...}          │
-│                                                                  │
-│  Thought: "그래프 노드/엣지를 구성해야 한다"                            │
-│  Action: build_claim_graph(claims)       → Tool: 내부 로직         │
-│  Observation: nodes=[...], edges=[...]                           │
-│                                                                  │
-│  Thought: "KOSIS에서 공식 수치를 조회해야 한다"                         │
-│  Action: build_evidence_subgraph(...)    → Tool: KOSIS API       │
-│  Observation: official_value=62.1, unit="%", period="2023"       │
-│                                                                  │
-│  Thought: "수치를 비교하여 판정해야 한다"                               │
-│  Action: verify_claim(claim, evidence)   → Tool: Deterministic   │
-│  Observation: verdict=MISMATCH, diff=2.1%                        │
-│                                                                  │
-│  Thought: "사람이 이해할 수 있는 설명을 생성해야 한다"                    │
-│  Action: generate_explanation(claim, result) → Tool: LLM (중량)  │
-│  Observation: "KOSIS 기준 62.1%로 불일치 판정..."                   │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-#### Action → 실제 코드 매핑
-
-| Action 이름 | 호출 함수/클라이언트 | 사용 모델/도구 | 설명 |
-|------------|-----------------|------------|-----|
-| `classify_domain` | `LLMClient.generate_json()` | HCX-DASH-001 (경량) | 문서 도메인 분류 |
-| `score_candidate` | `LLMClient.generate_json()` | HCX-DASH-001 (경량) | 문장별 검증 후보 점수화 |
-| `_check_worthiness` | `LLMClient.generate_json()` | HCX-003 (중량) | 실제 검증 가능 주장 판별 |
-| `induce_schemas` | `LLMClient.generate_json()` | HCX-003 (중량) | JSON 구조화 스키마 추출 |
-| `build_claim_graph` | 내부 로직 | — | 클레임 그래프 구성 |
-| `build_evidence_subgraph` | `KOSISConnector` | KOSIS Open API | 공식 통계 조회 |
-| `verify_claim` | Deterministic Engine | — | 수치 비교 판정 (LLM 미사용) |
-| `generate_explanation` | `LLMClient.generate()` | HCX-003 (중량) | 자연어 설명 생성 |
-
-> **중요**: `verify_claim`(Step 8)은 의도적으로 LLM을 사용하지 않습니다.
-> 수치 비교는 LLM이 hallucination을 일으킬 수 있으므로 deterministic 로직으로만 처리합니다.
-
----
-
-### Agent Loop의 Reflect 모드 — 자율 도구 호출
-
-Step 7~8(retrieve+verify)은 **`agent/loop.py`의 reflect 모드**가 실행합니다. 매 iteration마다 LLM이 다음 도구를 자율 선택 (ReAct): catalog 탐색 → fetch → 계산 → finish.
-
-#### 도구 목록 (`agent/tools/`)
-
-| ActionType | 도구 | 설명 |
+| Level | 포함 | 이유 |
 |---|---|---|
-| `explore_catalog` | `ExploreCatalogTool` | **임베딩 기반 카탈로그 어휘 탐색**. KOSIS 카테고리 분포 + 대표 표 미리보기. 첫 iter에 사용 권장 — LLM이 정확한 카테고리 어휘를 자율 학습. |
-| `catalog_search` | `CatalogSearchTool` | DataSource 카탈로그(표) 검색. **직전 explore 결과의 top 카테고리를 자동 union**해 LLM 어휘 부정확 시 보강. |
-| `fetch_evidence` | `FetchEvidenceTool` | 후보 표에서 실제 수치 조회. claim 간 fetch 성공한 stat_id를 prior_success로 자동 우선 시도. |
-| `calculate` | `CalculateTool` | 증가율/차이 등 수식 계산 (안전한 expression evaluator). |
-| `read_original` | `ReadOriginalTool` | 원문 기사 추가 컨텍스트 읽기. |
-| `finish` | `FinishTool` | verdict + explanation 확정 후 loop 종료. |
+| L1 | `value_role in {base, aggregation, None}` | 단독 fetch로 검증 가능. catalog 캐시 공유. |
+| L2 | `value_role in {derived_rate, derived_difference}` | base 결과(sibling cache) 의존. L1 끝난 후 실행. |
 
-#### 자기보강 메커니즘 (룰베이스 X, 데이터 기반)
+→ L1 병렬 처리 후 L2 병렬 처리. L1의 verified_facts/sibling_evidence가 L2로 전파됨.
 
-- **claim 간 데이터 공유** (`workspace`): job 안의 모든 claim이 verified_facts·successful_stat_ids 공유. 한 claim이 fetch한 KOSIS 표가 다른 claim의 검색 후보 1순위로 자동 prepend.
-- **StatRecord 클래스 캐시** (`kosis_source._record_cache`): claim마다 새 `KOSISDataSource`를 만들어도 KOSIS 메타데이터(org_id 등) 공유 → cross-claim fetch 시 placeholder 침묵 실패 차단.
-- **Aggregated rows 풀** (`loop._aggregate_rows_from_fetches`): 같은 claim의 모든 성공 fetch rows를 합쳐 풀로 만들고, matched_row criteria(ITM_NM·C1~C4_NM)로 같은 지표 row를 정확히 매칭 → 시점/지표 어긋남 차단.
-- **Verdict 자동 합성** (`loop._synthesize_verdict_from_observation/_calculate`): LLM이 finish 안 부르고 헛돌이로 max_iter 도달해도, fetch evidence + claim.value를 직접 비교하거나 `_try_growth_rate_from_rows`로 직접 계산해 verdict 합성.
-- **부호 방향 가드** (증가율/감소율): indicator suffix에 따라 `calc_rate` 부호와 claim 방향 일치 검사. `abs()` 비교 가짜 match 차단.
-- **표 관련성 가드** (`_is_table_relevant`, `_indicator_in_rows`): 표 이름과 indicator 의미 매칭 + length ratio guard. 짧은 지역명('전국') 우연 매칭으로 무관 도메인(범죄 표 등) 결과 들어오는 것 차단.
+### 3) Per-claim Agent Loop (Step 7~8)
+
+각 claim마다 `_verify_with_agent()` → `agent_loop()`:
+
+```
+claim
+ │
+ ▼
+[1] Planner LLM (HCX-007)
+    │ - 입력: claim.schema, 본문, anchor_year, anchor_year, 도메인
+    │ - 출력: Plan {
+    │     claim_type,           # ABSOLUTE/GROWTH_RATE/DIFFERENCE/COMPARISON/RANKING/AGGREGATION
+    │     required_data,        # 필요한 데이터 점 명세
+    │     initial_steps,        # 권장 액션 시퀀스
+    │     fallback,             # 1차 실패 시 대안
+    │     calculation_formula,  # 수식 (derived만)
+    │   }
+    │ - value_role 후처리: schema.value_role 기반 claim_type 강제 정정
+    ▼
+[2] Reflect Loop (max_iter=10, mode=reflect)
+    매 iter:
+      a) workspace.read_memory(claim_id) + sibling_evidence inject (iter 1만)
+      b) reflect_fn(plan, memory, last_observation, iter_num) → ReflectDecision
+         - LLM (HCX-DASH-002) 호출
+         - action ∈ {catalog_search, fetch_evidence, calculate, finish,
+                     read_original, explore_catalog}
+      c) 중복 action 차단 — 같은 (action, input) 2회 연속 → 헛돌이로 판단
+      d) Tool 실행 → Observation 기록
+      e) Auto-finish 트리거:
+         - calculate 성공 후 fetch ≥2 (sibling base 있으면 ≥1) → 즉시 finish
+         - LLM이 finish 미호출하고 다음 fetch 시도하는 헛돌이 차단
+      f) FINISH 신호 → loop 종료
+    ▼
+[3] AgentVerdict 생성
+    - LLM verdict vs 객관 비교 → 불일치면 합성 verdict로 자동 정정 (N 패치)
+    - verdict='comparison' 같은 claim_type 오입 → unverifiable 강등 (P17)
+    ▼
+[4] runtime_agent에서 primary/supporting Evidence 분리 (P7)
+    - primary: claim.schema.time_period와 매칭되는 fetch (없으면 dps[0])
+    - supporting: derived claim의 prev 시점 등 (base는 빈 list)
+```
+
+### Plan Sequence 가이드 (claim_type별)
+
+| claim_type | 권장 시퀀스 |
+|---|---|
+| `absolute` | catalog_search → fetch_evidence → finish |
+| `growth_rate` | catalog_search → fetch×2 (current+prev) → calculate → finish |
+| `difference` | catalog_search → fetch×2 → calculate → finish |
+| `comparison` | catalog_search → fetch×2 (두 시점/대상) → finish |
+| `aggregation` | catalog_search → fetch×N (N개 시점) → calculate(mean/sum/...) → finish |
 
 ---
 
-### Agent B: Domain Adaptation Agent (`agent/builder_agent.py`)
+## Workspace 시스템
 
-두 가지 학습 경로를 관리합니다:
+매 검증 job마다 `agent_workspace/job_<id>/` 디렉토리 생성. `id`는 `agent.workspace.scope`에 따라:
+- `doc_hash` (default): `md5(raw_text)` — 같은 본문 재검증 시 캐시 공유
+- `job_id`: API job_id — 매 요청 cold start (멀티-테넌트 격리에 안전)
 
+### 파일 구조
 ```
-[경로 1] 사전학습 (pretrain_domain)
-  서비스 시작 전 1회 실행
-  KOSIS 메타 → LLM Self-Instruct → 합성 데이터 → LoRA 학습
+agent_workspace/job_<id>/
+├── meta.json
+├── source.txt                       원본 raw_text (markdown 포함)
+├── memory.md                        job-level 메모리 (LLM 입력)
+├── verified_facts.json              (indicator, time, population) 키 KOSIS 캐시
+├── successful_stat_ids.json         catalog prepend용 stat_id 목록
+├── sibling_evidence.json            sent_id 기반 sibling 공유
+├── summary.json
+└── claims/<claim_id>/
+    ├── claim.json
+    ├── plan.json                    Planner 출력
+    ├── observations/iter_NNN_*.json 매 iter raw 결과
+    ├── verdict.json                 최종 AgentVerdict
+    ├── log.jsonl
+    └── memory.md
+```
 
-[경로 2] 피드백 학습 (_trigger_adaptation)
-  운영 중 피드백 누적 시 자동 트리거
-  Human Review 결과 → 추가 LoRA 학습
+### 주요 동작
+- **verified_facts**: fetch가 성공해서 verdict가 match/mismatch면 저장. 다음 claim이 같은 (indicator, time, population)으로 fetch 시도하면 KOSIS API 호출 없이 cache hit. unit 불일치는 거부.
+- **successful_stat_ids**: `fetch_evidence`가 한 번이라도 성공한 stat_id를 prior_success 목록에 추가. `catalog_search`가 다음 검색에서 해당 stat_id를 결과 맨 앞에 prepend (LLM이 같은 표를 우선 고르도록 유도). 라벨: `[같은 job에서 'X 지표' 검증에 사용된 표]` (P5 — 거짓 라벨 제거 + indicator 역추적).
+- **sibling_evidence**: `sent_id` 기반. 같은 문장의 base sub-claim이 KOSIS에서 받은 값을 derived sub-claim이 prev 없이 즉시 calculate에 inject 가능.
+
+---
+
+## Tool 시스템 상세
+
+### catalog_search
+```python
+input: {query: str, category?: list[str]}
+output: {candidates: [{id, name, score, ...}, ...]}
+```
+- pgvector 의미 검색 (KOSIS 메타 임베딩)
+- `prior_success` stat_id를 score=1.5로 prepend (P5)
+
+### fetch_evidence
+```python
+input: {
+  candidate_id: str,
+  params: {indicator, time_period, population, unit_hint, match_criteria?},
+  _candidate_fallbacks?: list[str],   # LLM 미제공 시 catalog observation에서 자동 주입
+}
+output: {evidence: {value, unit, time_period, stat_table_id, rows, matched_row}}
+```
+- claim.schema에서 params 자동 보강 (population을 LLM 값보다 우선)
+- `match_criteria` carry-over 가드 (P15) — schema.population과 충돌하면 폐기
+- 후보 순회 — value=None 응답이어도 다음 후보로 폴백 (P6)
+- 성공 시 sibling_evidence + verified_facts 저장
+
+### calculate
+```python
+input: {formula: str, current?, prev?, aggregation_inputs?: list[float]}
+output: {result: float, formula: str}
+```
+- 증가율: `(current - prev) / prev * 100`
+- 차이: `current - prev`
+- 집계: `mean` / `sum` / `max` / `min` / `median`
+
+### finish
+```python
+input: {verdict, confidence, explanation, data_points?}
+output: {verdict, ...}
+```
+- verdict가 enum 외 값(예: `comparison`이라는 claim_type)이면 `unverifiable`로 강등 (P17)
+- evidence 없는데 match/mismatch → unverifiable로 강등 (hallucination 가드)
+- workspace에 verdict.json + memory.md final 섹션 저장
+
+---
+
+## 설정 (`config/default.yaml`)
+
+핵심 섹션만 발췌. 자세한 내용은 파일 참조.
+
+### Agent
+```yaml
+agent:
+  enabled: true
+  workspace:
+    backend: "local"
+    local_path: "./agent_workspace"
+    scope: "doc_hash"              # "doc_hash" | "job_id"
+    external_job_id: null           # sv_platform이 자동 주입
+    persist_after_job: true
+    cleanup_after_days: 7
+  loop:
+    mode: "reflect"                 # "reflect" | "deterministic"
+    max_iterations: 10
+    enable_reflection: true
+    single_pass_fallback: true
+    early_stop_on_confidence: 0.9
+  llm:
+    plan_model: "structured"        # HCX-007
+    reflect_model: "light"          # HCX-DASH-002
+    explain_model: "heavy"          # HCX-003
+  budget:
+    max_tokens_per_job: 100000
+    max_concurrent_claims: 3
+```
+
+### LLM (전역 rate limit 포함)
+```yaml
+llm:
+  provider: "hcx"
+  models:
+    heavy:      "HCX-003"
+    light:      "HCX-DASH-002"
+    structured: "HCX-007"
+  temperature: 0.1
+  max_tokens: 4096
+  api_key_env: "NCP_API_KEY"
+  min_call_interval_ms: 600         # 전역 HCX rate limit (~1.6 req/s)
+```
+
+### Candidate Detection
+```yaml
+candidate_detection:
+  enabled: true
+  threshold: 0.65
+  use_surface_signals: true
+  teacher_llm_fallback: true
+  concurrency: 2                    # LLM 동시 호출 상한
+```
+
+### KOSIS
+```yaml
+kosis:
+  base_url: "https://kosis.kr/openapi"
+  api_key_env: "KOSIS_API_KEY"
+  pgvector_dsn_env: "PGVECTOR_DSN"
+  catalog:
+    rebuild: false
+    embed_batch_size: 100
+    min_rows: 1000
 ```
 
 ---
 
-## 정규화/Rule-based 최소화 전략
+## 데이터 모델 (`core/schemas.py`)
 
-### 현재 코드에서 Regex/Rule이 남아있는 위치와 역할
+핵심 타입만 정리. 전체는 `schemas.py` 직접 참조 (~340줄).
 
-| 파일 | Regex/Rule 용도 | 역할 |
-|------|---------------|------|
-| `segmenter.py` | `NUMERIC_SURFACE_PATTERN` | **fallback 신호만** — candidate scorer가 LLM 판단 못 할 때만 보조 |
-| `candidate_scorer.py` | `_score_candidate_heuristic()` | LLM 실패 시 **fallback** — 운영 안정성 확보용 |
-| `sir_builder.py` | `_extract_entity_refs()`, `_extract_event_refs()` | 추후 NER 모델로 교체 예정 |
-
-### LLM 학습 기반 흐름
-
+### Claim
+```python
+class ClaimSchema:
+    indicator: str | None
+    time_period: str | None         # "YYYY" | "YYYY-MM"
+    unit: str | None
+    population: str | None
+    value: float | None             # P4 폴백 후
+    parent_path: str | None
+    prev_value: float | None        # derived 검증용
+    prev_time_period: str | None
+    prev_phrase: str | None
+    value_role: str | None          # "base" | "derived_rate" | "derived_difference" | "aggregation"
+    # [추후] aggregation_window, aggregation_time_range
 ```
-1) 초기 bootstrap: Teacher LLM (HCX-003)이 직접 모든 판단 수행
-2) 데이터 누적: Teacher 판단 결과를 학습 샘플로 저장
-3) Fine-tuning: 누적 샘플로 경량 모델(HCX-DASH) LoRA 학습
-4) 교체: 경량 모델이 Teacher를 대체 → 비용 절감 + 속도 향상
-```
 
----
-
-## 인프라 파일 구조
-
-```
-infra/
-├── docker/
-│   └── docker-compose.yml            # 전체 서비스 (PG, Redis, Neo4j, MinIO, ES)
-├── scripts/
-│   ├── init_db.sql                    # PostgreSQL 테이블 13개 생성 (자동 실행)
-│   ├── init_neo4j.cypher              # Neo4j 인덱스/제약조건
-│   ├── init_snowflake.sql             # Snowflake DWH 테이블 (수동 실행)
-│   └── seed_domain_packs.py           # 기본 Domain Pack 등록
-├── Makefile                           # 공통 명령어 (make dev, make test, ...)
-├── .env.example                       # 환경변수 템플릿
-└── .gitignore
+### VerificationResult
+```python
+class VerificationResult:
+    claim_id: UUID
+    verdict: VerdictType            # match/mismatch/partial/unverifiable
+    confidence: float
+    evidence: Evidence | None       # primary
+    supporting_evidence: list[Evidence]  # derived claim의 prev 등 (P7)
+    explanation: str | None
+    computed_value: float | None    # calculate 결과
+    formula: str | None
 ```
 
 ---
 
-## 전체 프로젝트 구조
-
-```
-structverify-lab/
-│
-├── backend/                           # FastAPI + 검증 엔진
-│   ├── structverify/                  # 핵심 라이브러리 패키지
-│   │   ├── core/                      # 오케스트레이션
-│   │   │   ├── schemas.py             # 전체 데이터 모델 (Pydantic)
-│   │   │   ├── pipeline.py            # 13단계 파이프라인
-│   │   │   └── config_loader.py       # YAML 설정 로더
-│   │   ├── preprocessing/             # [전처리 담당: 이수민] Step 1~2
-│   │   │   ├── extractor.py           # URL/PDF/DOCX → 텍스트 추출
-│   │   │   ├── segmenter.py           # 한국어 문장 분리 + surface signal (fallback용)
-│   │   │   └── sir_builder.py         # SIR Tree 빌더 (graph anchor 포함)
-│   │   ├── detection/                 # [LLM 담당: 김예슬] Step 3~5
-│   │   │   ├── domain_classifier.py   # LLM 도메인 분류
-│   │   │   ├── claim_detector.py      # candidate filtering + LLM check-worthiness
-│   │   │   ├── candidate_scorer.py    # Teacher LLM 기반 sentence candidate scoring
-│   │   │   └── schema_inductor.py     # LLM Dynamic Schema Induction
-│   │   ├── graph/                     # [검증 담당: 신준수] Step 6
-│   │   │   ├── graph_builder.py       # Claim/Evidence Graph 조립
-│   │   │   ├── graph_store.py         # Neo4j 인터페이스
-│   │   │   └── provenance.py          # 출처 추적
-│   │   ├── retrieval/                 # [검증 담당: 신준수] Step 7
-│   │   │   ├── base_connector.py      # 커넥터 인터페이스
-│   │   │   ├── kosis_connector.py     # KOSIS Open API (getList + getStatData)
-│   │   │   ├── query_builder.py       # Schema → KOSIS 쿼리 변환
-│   │   │   └── evidence_subgraph.py   # Evidence 서브그래프
-│   │   ├── verification/              # [검증 담당: 신준수] Step 8
-│   │   │   └── verifier.py            # Deterministic 수치 비교 (LLM 미사용)
-│   │   ├── explanation/               # [LLM 담당: 김예슬] Step 9
-│   │   │   └── explainer.py           # LLM 설명 생성 + Provenance 렌더링
-│   │   ├── agent/                     # [LLM 담당: 김예슬] 2-Agent
-│   │   │   ├── runtime_agent.py       # Agent A: ReAct 기반 실시간 검증
-│   │   │   └── builder_agent.py       # Agent B: LoRA 사전학습 + 피드백 학습
-│   │   ├── adaptation/                # [LLM 담당: 김예슬] Step 0, 11~12
-│   │   │   ├── kosis_crawler.py       # KOSIS 메타데이터 수집 (Step 0-1)
-│   │   │   ├── synthetic_generator.py # Self-Instruct 합성 데이터 생성 (Step 0-2)
-│   │   │   ├── sample_builder.py      # 학습 포맷 변환 (pretrain/finetune)
-│   │   │   ├── feedback_store.py      # 피드백 수집 (Step 11)
-│   │   │   └── adapter_trainer.py     # LoRA 학습 트리거 (Step 12)
-│   │   ├── storage/                   # [데이터 적재 담당: 박재윤]
-│   │   │   ├── raw_storage.py         # S3/MinIO 원본 보존 (boto3)
-│   │   │   ├── db_manager.py          # PostgreSQL CRUD (SQLAlchemy async)
-│   │   │   └── dwh_manager.py         # Snowflake DWH INSERT
-│   │   └── utils/
-│   │       ├── logger.py              # 로깅
-│   │       └── llm_client.py          # LLM 통합 클라이언트 (HCX/OpenAI)
-│   ├── api/
-│   │   └── main.py                    # FastAPI 엔드포인트
-│   ├── tests/
-│   │   └── test_pipeline.py           # 유닛 테스트
-│   ├── config/
-│   │   └── default.yaml               # 설정 파일
-│   └── pyproject.toml
-│
-├── frontend/                          # Next.js SaaS UI (P2)
-├── infra/                             # 인프라 코드
-├── ml/                                # ML 학습 파이프라인
-├── domain-packs/                      # 도메인별 팩 정의
-├── docs/                              # 프로젝트 문서
-└── .github/                           # CI/CD
-```
-
----
-
-## 13단계 파이프라인 요약 테이블
-
-| # | 단계 | 담당 | 파일 | LLM 사용 |
-|---|------|------|------|---------|
-| **0** | **도메인 사전학습** | **김예슬** | `kosis_crawler → synthetic_generator → adapter_trainer` | Self-Instruct |
-| 1 | 텍스트 입력 & 추출 | 이수민 | `extractor.py` | ✗ |
-| 2 | 전처리 + SIR Tree | 이수민 | `sir_builder.py`, `segmenter.py` | ✗ (surface signal만) |
-| 3 | 도메인 판별 | 김예슬 | `domain_classifier.py` | ✓ HCX-DASH (경량) |
-| 4 | Candidate Scoring + Claim Detection | 김예슬 | `candidate_scorer.py`, `claim_detector.py` | ✓ HCX-DASH + HCX-003 |
-| 5 | Dynamic Schema Induction | 김예슬 | `schema_inductor.py` | ✓ HCX-003 (중량) |
-| 6 | Graph Construction | 신준수 | `graph_builder.py` | ✗ |
-| 7 | Retrieval + Evidence Subgraph | 신준수 | `evidence_subgraph.py`, `kosis_connector.py` | ✗ (API 호출) |
-| 8 | Deterministic Verification | 신준수 | `verifier.py` | **✗ (의도적)** |
-| 9 | Explanation + Provenance | 김예슬 | `explainer.py` | ✓ HCX-003 (중량) |
-| 10 | Human Review | 공통 | TODO | — |
-| 11 | Feedback Logging | 김예슬 | `feedback_store.py` | ✗ |
-| 12 | Domain Adaptation Trigger | 김예슬 | `adapter_trainer.py` | LoRA 학습 |
-| 13 | Report / API Output | 김예슬 | `pipeline.py` | ✗ |
-| 적재 | DB/DWH/Graph 저장 | 박재윤 | `db_manager.py`, `dwh_manager.py`, `graph_store.py` | ✗ |
-
----
-
-## 역할 분담 & TODO 현황
-
-### 이수민 — 전처리 담당
-
-```
-preprocessing/extractor.py        — URL(trafilatura), PDF(PyMuPDF), DOCX(python-docx) 텍스트 추출
-preprocessing/segmenter.py        — 한국어 문장 분리(kss) + surface signal 추출 (fallback용)
-preprocessing/sir_builder.py      — SIR Tree 빌더 (entity_refs, graph_anchor_ids)
-```
-
-주요 TODO:
-- `extractor.py`: URL/PDF/DOCX 실제 추출 로직 구현
-- `segmenter.py`: kss 설치 및 문장 분리 검증
-- `sir_builder.py`: entity_refs → NER 모델 교체 (현재 regex placeholder)
-
-### 박재윤 — 데이터 적재 담당
-
-```
-storage/raw_storage.py            — S3/MinIO 원본 보존 (boto3)
-storage/db_manager.py             — PostgreSQL CRUD (SQLAlchemy async)
-storage/dwh_manager.py            — Snowflake INSERT
-graph/graph_store.py              — Neo4j driver + Cypher MERGE
-adaptation/kosis_crawler.py       — KOSIS 메타데이터 배치 수집 → kosis_stat_catalog 적재
-infra/                            — docker-compose, init_db.sql, Makefile 관리
-```
-
-주요 TODO:
-- `db_manager.py`: SQLAlchemy async engine 초기화 + INSERT 구현
-- `dwh_manager.py`: Snowflake connector.connect() + executemany() 구현
-- `raw_storage.py`: boto3 MinIO 업로드 구현
-- `graph_store.py`: Neo4j driver + Cypher MERGE 구현
-
-### 신준수 — 검증 담당
-
-```
-retrieval/kosis_connector.py      — KOSIS API 실제 호출 (getList, getStatData) + 응답 파싱
-retrieval/query_builder.py        — Schema → KOSIS 검색 쿼리 변환
-retrieval/base_connector.py       — 커넥터 인터페이스 설계
-retrieval/evidence_subgraph.py    — Evidence 서브그래프 조립
-verification/verifier.py          — deterministic 수치 비교 + 불일치 유형 세분화
-graph/graph_builder.py            — Claim/Evidence 그래프 노드/엣지 생성
-graph/provenance.py               — 출처 경로 기록 + 텍스트 렌더링
-```
-
-주요 TODO:
-- `verifier.py`: TIME_PERIOD / POPULATION / EXAGGERATION 불일치 유형 세분화 로직
-- `kosis_connector.py`: KOSIS API 실제 HTTP 호출 + 응답 파싱
-- `query_builder.py`: ClaimSchema → KOSIS 파라미터 매핑 로직
-
-### 김예슬 — LLM/Agent 담당
-
-```
-utils/llm_client.py               — HCX/OpenAI API 실제 호출 구현
-detection/claim_detector.py       — check-worthiness 프롬프트 설계/튜닝
-detection/schema_inductor.py      — Schema Induction 프롬프트 설계/튜닝
-detection/domain_classifier.py    — 도메인 분류 프롬프트
-detection/candidate_scorer.py     — teacher LLM 기반 sentence candidate scoring
-explanation/explainer.py          — 설명 생성 프롬프트
-agent/runtime_agent.py            — Agent A ReAct 오케스트레이션 (Step 3~9)
-agent/builder_agent.py            — Agent B 사전학습 + 피드백 학습
-adaptation/synthetic_generator.py — Self-Instruct 합성 데이터 생성
-adaptation/sample_builder.py      — 학습 포맷 변환
-adaptation/adapter_trainer.py     — LoRA 학습/평가/배포
-core/pipeline.py                  — 13단계 파이프라인 전체 흐름
-```
-
-주요 TODO:
-- `llm_client.py`: HCX API (NCP CLOVA Studio) 실제 호출 구현
-- `llm_client.py`: OpenAI AsyncClient 실제 호출 구현
-- `llm_client.py`: Langfuse 트레이싱 연동
-- `candidate_scorer.py`: 학습된 소형 분류 모델 교체 로직 (Phase 3)
-- `adapter_trainer.py`: HuggingFace PEFT LoRA 학습 실제 구현
-
----
-
-## 도메인 지식 습득 전략
-
-| 방법 | 시점 | 설명 | 파일 |
-|------|------|------|------|
-| RAG (벡터 검색) | Phase 1 | KOSIS 메타데이터 임베딩 → pgvector 유사도 검색 | `kosis_crawler.py` → `kosis_stat_catalog` |
-| 프롬프트 Few-shot | Phase 1 | domain-packs/에 도메인 규칙 + 예시 직접 기입 | `domain-packs/news/prompts.yaml` |
-| Self-Instruct 사전학습 | Phase 2 | KOSIS 메타 → LLM이 학습 쌍 자동 생성 → LoRA | `synthetic_generator.py` → `adapter_trainer.py` |
-| 피드백 기반 학습 | Phase 3 | 검증자 수정 데이터로 추가 LoRA 학습 | `feedback_store.py` → `sample_builder.py` |
-| Weak Supervision Candidate Training | Phase 2 | API 매칭 성공 문장 + retrieval/schema 실패 문장 + teacher LLM 신호를 이용해 sentence candidate detector 학습 | `synthetic_generator.py` → `sample_builder.py` → `candidate_scorer.py` |
-
----
-
-## 제공 NCP API 사용 위치
-
-| API | 파일 | 용도 |
-|-----|------|------|
-| HCX-003/005/007 | `utils/llm_client.py` | 주장 탐지, 스키마 유도, 설명 생성 |
-| HCX-DASH-001/002 | `utils/llm_client.py` | 도메인 분류, sentence candidate scoring (경량) |
-| 임베딩 v1/v2 | `utils/embedding_client.py` (TODO) | pgvector 유사도 검색용 임베딩 |
-| 리랭커 | `utils/reranker_client.py` (TODO) | 검색 결과 재순위화 |
-| RAG Reasoning | `agent/runtime_agent.py` | 복합 근거 종합 판단 |
-
----
-
-## 기술 스택
-
-| 범주 | 기술 |
-|------|------|
-| Backend | FastAPI (Python) |
-| DB (OLTP) | PostgreSQL + pgvector |
-| Graph DB | Neo4j / Memgraph |
-| Cache / Queue | Redis + Celery |
-| Object Storage | S3 / MinIO |
-| DWH | Snowflake / BigQuery / ClickHouse |
-| LLM | HCX (NCP) / OpenAI |
-| Embedding | HCX Embedding v1/v2 |
-| Reranker | HCX Reranker |
-| Model Registry | MLflow |
-| PEFT | Hugging Face PEFT (LoRA) |
-| Observability | OpenTelemetry + Langfuse |
-| Frontend | React / Next.js (P2) |
-
----
-
-## 참고 논문
-
-| # | 논문 | 적용 영역 |
-|---|------|----------|
-| [1] | Docling (IBM, 2024) | 전처리 — SIR Tree |
-| [2] | Trafilatura (ACL 2021) | 전처리 — URL 추출 |
-| [3] | ClaimBuster (VLDB 2017) | 검증 — Claim Detection |
-| [4] | FEVER (NAACL 2018) | 검증 — 3단계 판정 |
-| [5] | ProgramFC (NAACL 2023) | 검증 — 복잡 주장 분해 |
-| [6] | ReAct (ICLR 2023) | Agent 오케스트레이션 |
-| [7] | FActScore (EMNLP 2023) | 검증 — Granularity |
-| [8] | RAG (NeurIPS 2020) | 검색 계층 패러다임 |
-| [9] | GraphRAG (arXiv 2501.00309) | Graph Evidence 검색 |
-| [10] | AutoSchemaKG (arXiv 2505.23628) | Schema Induction |
-| [11] | KnowLA (NAACL 2024) | 도메인 적응형 학습 |
-| [12] | Feedback Adaptation (arXiv 2604.06647) | 비동기 Feedback 루프 |
-| [13] | Fact Verification on KG (EMNLP Findings 2025) | Graph 사실검증 |
-| [14] | Self-Instruct (ACL 2023) | 합성 학습 데이터 생성 |
-| [15] | Textbooks Are All You Need (Microsoft, 2023) | 합성 데이터 품질 |
-| [16] | Don't Stop Pretraining (ACL 2020) | Domain-Adaptive Pre-training |
-| [17] | AdaptLLM (ICLR 2024) | 도메인 Continual Pre-training |
-
----
-
-## Makefile 명령어
+## 테스트
 
 ```bash
-make dev          # 전체 서비스 시작
-make dev-all      # 서비스 + 모니터링 (Langfuse, Grafana)
-make down         # 서비스 중지
-make reset        # 서비스 중지 + 데이터 초기화
-make status       # 컨테이너 상태
-make health       # 헬스체크
-make logs         # 실시간 로그
-make neo4j-init   # Neo4j 스키마 초기화
-make install      # Python 의존성 설치
-make api          # FastAPI 서버 시작
-make test         # 테스트 실행
-make lint         # 코드 린트
-make psql         # PostgreSQL 접속
-make redis-cli    # Redis 접속
+cd backend
+pytest                              # 전체
+pytest structverify/agent/          # agent 모듈만
+pytest -k "schema_inductor"         # 특정 키워드
 ```
 
 ---
 
-## 라이선스
+## 개발 노트
 
-내부 프로젝트 — 클라비(Clabi) 협력 과제
+### LLM 호출 빈도가 신경 쓰일 때
+- `config.llm.min_call_interval_ms` (default 600 → ≈1.6 req/s)
+- `config.candidate_detection.concurrency` (default 2)
+- HCX 쿼터 늘렸으면 둘 다 하향 가능 (200ms + 4)
+- 429 폭주 시 자동 jitter (0~0.7s) + exponential backoff (1/2/4초)
+
+### Workspace 캐시가 stale일 때
+- `scope: "doc_hash"`라 같은 본문이면 직전 검증 결과 재사용
+- 완전 cold 검증 필요시:
+  - `config.agent.workspace.scope: "job_id"`로 전환
+  - 또는 `rm -rf agent_workspace/`
+
+### URL 추출이 실패할 때
+- 1차 trafilatura가 본문 200자 미만 반환하면 자동 LLM scraper 폴백
+- LLM scraper는 Docker sandbox에서 동적 Python 코드 실행 — `preprocessing.sandbox_backend` 설정 확인
+
+### 신규 DataSource 추가 (KOSIS 외)
+1. `retrieval/`에 `BaseDataSource` 상속 클래스 작성
+2. `@register_datasource("name")` 데코레이터
+3. `config/default.yaml`의 `data_sources.enabled`에 `"name"` 추가
+
+---
+
+## 알려진 한계 / 추후 개발
+
+- **Builder Agent (`agent/builder_agent.py`)** — 현재 placeholder. KOSIS Self-Instruct → LoRA fine-tuning 파이프라인은 Phase D 운영 데이터 축적 후 활성화 예정.
+- **Aggregation Claim 완전 지원** — `value_role="aggregation"` 분류는 있지만 `aggregation_window` / `aggregation_time_range` 필드 + CalculateTool aggregation_inputs 처리는 미구현 (작업 일시 중단 상태).
+- **PDF/DOCX 업로드** — sv_platform 라우트는 있지만 multipart 처리는 Phase 3 예정.
+- **Neo4j 활성화** — 현재 `graph.store.enabled=false` 기본. 멀티홉 검증 강화 시 활성.

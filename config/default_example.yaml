@@ -19,6 +19,12 @@ agent:
     local_path: "./agent_workspace"           # workspace 디렉토리
     persist_after_job: true                   # dev=true (디버깅), prod=false (정리)
     cleanup_after_days: 7                     # persist=false 시 며칠 후 자동 삭제
+    # [2026-05-21] workspace 격리 단위:
+    #   - "doc_hash" : 본문 텍스트 md5 hash 기준 (같은 본문 = 캐시 공유, 같은 기사 재검증 빠름).
+    #                  단점: KOSIS 데이터 갱신돼도 stale 가능 + 멀티-테넌트 격리 X.
+    #   - "job_id"   : API job_id 기준 (매 요청 cold start, 정확성↑ 속도↓).
+    scope: "doc_hash"
+    external_job_id: null                     # scope="job_id"일 때 sv_platform이 주입
 
   memory:
     backend: "file"                           # file | redis (지금은 file만)
@@ -109,8 +115,10 @@ llm:
     structured: "HCX-007"            # JSON 구조화 추출 (schema_inductor 전용) — v3 Structured Outputs
     reasoning:  "HCX-003"            # 복합 근거 종합
   temperature: 0.1
-  max_tokens: 2048
+  max_tokens: 4096   # [2026-05-21] 2048 → 4096: reflect의 finish action에서 explanation이 길어져 JSON이 잘리는 케이스 방지. HCX-DASH-002 한도 내.
   api_key_env: "NCP_API_KEY" # .env에 세팅
+  # 프로세스 전역 HCX 호출 사이 최소 간격(ms). 250 = ~4 req/sec ceiling.
+  min_call_interval_ms: 250
 
 embedding:
   provider: "hcx"
@@ -175,6 +183,8 @@ candidate_detection:
   threshold: 0.65
   use_surface_signals: true
   teacher_llm_fallback: true
+  # LLM 동시 호출 상한 — HCX 429 rate limit 회피. 안전 기본값 4.
+  concurrency: 4
 
 observability:
   langfuse_enabled: false

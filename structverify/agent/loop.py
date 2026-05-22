@@ -301,6 +301,8 @@ def _save_verified_facts(
                 "indicator": getattr(dp, "indicator", "") or "",
                 "time_period": (getattr(dp, "source_time", None)
                                 or getattr(dp, "time", "") or ""),
+                # [2026-05-21] population 추가 — sub-claim별 격리 위해 캐시 키에 포함
+                "population": (getattr(dp, "population", None) or ""),
                 "value": val,
                 "unit": getattr(dp, "resolved_unit", None) or "",
                 "source": getattr(dp, "source", None) or "KOSIS",
@@ -1040,6 +1042,7 @@ def _synthesize_verdict_from_calculate(
     last_calc_observation: Observation | None,
     iter_num: int,
     last_fetch_observation: Observation | None = None,
+    workspace: Any = None,
 ) -> AgentVerdict | None:
     """[패치] Plan 소진 + 마지막 성공한 관측이 CALCULATE인 경우 verdict 합성.
 
@@ -1054,17 +1057,65 @@ def _synthesize_verdict_from_calculate(
     않는다. fetch 0건 상태에서 LLM이 prev/current를 임의로 박아 계산한
     값(예: prev=18123 같이 출처 불명 값)이 우연히 article과 비슷하다고
     MATCH로 만들어 환각을 통과시키는 걸 차단.
+
+    [P22 2026-05-22] sibling base evidence가 있으면 fetch 0건이어도 합성 시도.
+    derived claim이 같은 문장 base sub-claim의 KOSIS 값을 cache로 활용하는
+    경로(혼인 건수 base 18919 → 증가율 claim이 fetch 없이 calc) 회복. 단,
+    calc.input.current가 sibling base value와 *크게 다르면(>2%)* 환각으로 거부.
     """
     if last_calc_observation is None or not last_calc_observation.success:
         return None
     if last_calc_observation.action != ActionType.CALCULATE:
         return None
     if last_fetch_observation is None:
-        logger.info(
-            f"[loop] {claim_id}: calculate 합성 가드 — fetch evidence 0건 "
-            f"→ calculate 결과 신뢰 X (LLM 환각 차단)"
-        )
-        return None
+        # [P22] sibling 검증으로 fetch 0건 케이스 구제 시도
+        _sib_current: float | None = None
+        try:
+            _sent_id = str(getattr(claim, "sent_id", "") or "").strip()
+            if workspace is not None and _sent_id and hasattr(workspace, "read_sibling_evidence"):
+                _sibs = workspace.read_sibling_evidence(_sent_id) or []
+                # 같은 시점의 base sibling 찾기
+                _schema = getattr(claim, "schema", None)
+                _tp = (getattr(_schema, "time_period", None) or "") if _schema else ""
+                _tp_norm = str(_tp).replace("-", "")
+                for _s in _sibs:
+                    if _s.get("role") != "base":
+                        continue
+                    _s_tp = str(_s.get("time_period") or "").replace("-", "")
+                    if _s_tp == _tp_norm and _s.get("value") is not None:
+                        _sib_current = float(_s.get("value"))
+                        break
+        except Exception:
+            _sib_current = None
+
+        if _sib_current is None:
+            logger.info(
+                f"[loop] {claim_id}: calculate 합성 가드 — fetch evidence 0건 + "
+                f"sibling base도 없음 → calculate 결과 신뢰 X (LLM 환각 차단)"
+            )
+            return None
+
+        # calc input의 current와 sibling base value 비교
+        _calc_input = last_calc_observation.input or {}
+        _calc_current = _calc_input.get("current")
+        try:
+            _cc = float(_calc_current) if _calc_current is not None else None
+        except (TypeError, ValueError):
+            _cc = None
+        if _cc is not None:
+            _gap_ratio = abs(_cc - _sib_current) / max(abs(_sib_current), 1e-9)
+            if _gap_ratio > 0.02:
+                logger.warning(
+                    f"[loop] {claim_id}: calculate 합성 거부 — calc.input.current="
+                    f"{_cc} vs sibling base={_sib_current} (gap {_gap_ratio*100:.1f}%) "
+                    f"→ LLM이 sibling 무시하고 환각 가능성 (혼인 건수 4.9% 케이스 회귀)"
+                )
+                return None
+            logger.info(
+                f"[loop] {claim_id}: calculate 합성 — fetch 0건이지만 sibling base"
+                f"({_sib_current}) ≈ calc.current({_cc}) → calc 결과 신뢰"
+            )
+        # else: calc input에 current 없음 — sibling 있으면 그래도 시도
 
     # [패치 2026-05-20] base claim은 calculate 합성 거부.
     # planner가 base claim(예: '출생아 수 20717명')에 plan.type=GROWTH_RATE로
@@ -1193,6 +1244,40 @@ async def agent_loop(
         f"steps={len(plan.initial_steps)}, mode={loop_config.mode}, "
         f"max_iter={loop_config.max_iterations}"
     )
+
+    # [2026-05-21] 사전 가드 — claim에 검증 가능한 value가 *없으면* 즉시 unverifiable.
+    # LLM(schema_inductor)이 한 문장에서 정상 schema + 빈(value=null) schema를 함께
+    # 만들어 별도 sub-claim으로 분기되던 케이스 회귀 방지. 빈 schema는 fetch를
+    # 아무리 해도 비교 불가 → max_iter까지 reflect 헛돌이만 발생.
+    # aggregation은 별도 흐름(N개 시점 fetch → calc)이라 value 없어도 OK.
+    _claim_schema = getattr(claim, "schema", None)
+    _claim_role = getattr(_claim_schema, "value_role", None) if _claim_schema else None
+    _claim_value = getattr(_claim_schema, "value", None) if _claim_schema else None
+    if (
+        _claim_schema is not None
+        and _claim_value is None
+        and _claim_role != "aggregation"
+    ):
+        logger.warning(
+            f"[loop] {claim_id}: schema.value=None (role={_claim_role!r}) — "
+            f"검증 대상 수치가 없어 즉시 unverifiable. "
+            f"indicator={getattr(_claim_schema, 'indicator', None)!r}, "
+            f"time={getattr(_claim_schema, 'time_period', None)!r}, "
+            f"population={getattr(_claim_schema, 'population', None)!r}"
+        )
+        return AgentVerdict(
+            claim_id=claim_id,
+            verdict=VerdictType.UNVERIFIABLE,
+            confidence=0.2,
+            explanation=(
+                "이 sub-claim의 schema에 비교할 수치(value)가 없어 검증 불가. "
+                "원문에서 수치 추출이 실패했거나, 같은 문장의 다른 sub-claim에서 "
+                "수치가 모두 표현된 경우."
+            ),
+            data_points=[],
+            iterations_used=0,
+            stop_reason=StopReason.COMPLETED,
+        )
 
     # plan summary를 memory에 기록
     try:
@@ -1538,14 +1623,47 @@ async def agent_loop(
         # _synthesize_verdict_from_calculate의 가드(derived suffix + fetch
         # 1건 이상)를 통과해 match/mismatch가 명확하면 그 자리에서 verdict
         # 확정. UNVERIFIABLE이면 통과시키지 않아 LLM이 더 fetch할 기회 유지.
-        if (
+        # [2026-05-21] sibling base cache가 current를 공급하는 경우 fetch는 prev 1건만
+        # 들어와도 calculate에 필요한 두 값이 다 모인 것. >=2 가드를 그대로 두면
+        # 2번째 fetch가 중복으로 차단된 케이스(연속 dup)에서 auto-finish가 미발화 →
+        # LLM이 엉뚱한 표(예: 혼인건수)로 추가 fetch를 시도해 최종 verdict 오염.
+        # sent_id의 sibling base evidence가 있으면 fetch 1건도 충분으로 간주.
+        _has_sibling_base = False
+        try:
+            _schema = getattr(claim, "schema", None)
+            _role = (getattr(_schema, "value_role", None) or "") if _schema else ""
+            _sent_id = str(getattr(claim, "sent_id", "") or "").strip()
+            if (
+                _role in ("derived_rate", "derived_difference")
+                and _sent_id
+                and hasattr(workspace, "read_sibling_evidence")
+            ):
+                _sibs = workspace.read_sibling_evidence(_sent_id) or []
+                _has_sibling_base = any(s.get("role") == "base" for s in _sibs)
+        except Exception:
+            _has_sibling_base = False
+        _fetch_threshold = 1 if _has_sibling_base else 2
+
+        # [P22 2026-05-22] sibling base가 있으면 fetch 0번도 OK.
+        # LLM이 verified_facts/sibling 캐시만으로 calculate(current=sibling, prev=캐시)를
+        # 호출하는 케이스 — fetch_observation이 None이라 기존 gate가 막아 unverifiable로
+        # 떨어지던 회귀(혼인 건수 증가율 4.9% claim 케이스). sibling이 있으면 last_fetch
+        # 없어도 calculate 결과를 신뢰.
+        _gate_pass = (
             not finished
             and last_result.success
             and next_step.action == ActionType.CALCULATE
             and last_calc_observation is not None
-            and last_fetch_observation is not None
-            and len(all_fetch_observations) >= 2
-        ):
+        )
+        if _has_sibling_base:
+            # sibling 있으면 fetch threshold/observation 요구 없음
+            _gate_pass = _gate_pass
+        else:
+            _gate_pass = _gate_pass and (
+                last_fetch_observation is not None
+                and len(all_fetch_observations) >= _fetch_threshold
+            )
+        if _gate_pass:
             early_verdict = _synthesize_verdict_from_calculate(
                 plan=plan,
                 claim=claim,
@@ -1553,6 +1671,7 @@ async def agent_loop(
                 last_calc_observation=last_calc_observation,
                 iter_num=iter_num,
                 last_fetch_observation=last_fetch_observation,
+                workspace=workspace,
             )
             if (
                 early_verdict is not None
@@ -1626,6 +1745,7 @@ async def agent_loop(
                 last_calc_observation=last_calc_observation,
                 iter_num=iter_num,
                 last_fetch_observation=last_fetch_observation,
+                workspace=workspace,
             )
             if calc_verdict is not None and (
                 calc_verdict.verdict != VerdictType.UNVERIFIABLE

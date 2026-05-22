@@ -325,6 +325,12 @@ def _parse_plan(
         "comparison": ClaimType.COMPARISON,
         "ratio_comparison": ClaimType.COMPARISON, # alias (legacy)
         "ranking": ClaimType.RANKING,
+        "aggregation": ClaimType.AGGREGATION,    # [2026-05-21] 다년 평균/총합
+        "aggregate": ClaimType.AGGREGATION,      # alias
+        "average": ClaimType.AGGREGATION,        # alias (LLM이 average로 출력하는 경우)
+        "mean": ClaimType.AGGREGATION,           # alias
+        "sum": ClaimType.AGGREGATION,            # alias
+        "total": ClaimType.AGGREGATION,          # alias
         "unknown": ClaimType.UNKNOWN,
         "other": ClaimType.UNKNOWN,              # alias (legacy)
     }
@@ -585,6 +591,8 @@ class Planner:
                     "base": ClaimType.ABSOLUTE,
                     "derived_rate": ClaimType.GROWTH_RATE,
                     "derived_difference": ClaimType.DIFFERENCE,
+                    # [2026-05-21] 다년 집계 — 도메인 무관, schema_inductor가 분기
+                    "aggregation": ClaimType.AGGREGATION,
                 }
                 _expected_type = _role_to_type.get(_role)
                 if _expected_type and plan.claim_type != _expected_type:

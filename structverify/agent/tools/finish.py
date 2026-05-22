@@ -92,13 +92,31 @@ class FinishTool(ToolBase):
     ) -> ToolResult:
         # 입력 파싱
         verdict_raw = (input_data.get("verdict") or "").strip().lower()
+        # [2026-05-21] reflect LLM이 verdict 자리에 claim_type(comparison/absolute/...)을
+        # 잘못 박는 헛돌이 차단 — reject(success=False)하면 LLM이 같은 실수 반복.
+        # 대신 unverifiable로 강등하고 finish는 *성공*시켜 loop을 종료 → 직후
+        # N 패치가 schema.value vs evidence 객관 비교해 MATCH/MISMATCH로 정정 가능.
+        # 22:54~22:55 로그: 661202e8 claim이 iter 4, 6 두 번 verdict='comparison' 실패
+        # → iter 7 unverifiable로 끝난 케이스 해결.
+        _claim_type_misvalues = {
+            "comparison", "absolute", "growth_rate", "difference",
+            "ranking", "diff", "absolute_value", "compare",
+        }
         if verdict_raw not in _VALID_VERDICTS:
-            return ToolResult(
-                output={},
-                summary=f"실패: verdict={verdict_raw!r} 유효하지 않음",
-                success=False,
-                error=f"verdict는 {sorted(_VALID_VERDICTS)} 중 하나여야 합니다.",
-            )
+            if verdict_raw in _claim_type_misvalues:
+                logger.warning(
+                    f"[finish] {context.claim_id}: verdict={verdict_raw!r}는 "
+                    f"claim_type 값 — verdict 필드에 잘못 박힘. unverifiable로 강등 "
+                    f"(loop 종료 후 합성 verdict가 객관 비교로 정정 가능)"
+                )
+                verdict_raw = "unverifiable"
+            else:
+                return ToolResult(
+                    output={},
+                    summary=f"실패: verdict={verdict_raw!r} 유효하지 않음",
+                    success=False,
+                    error=f"verdict는 {sorted(_VALID_VERDICTS)} 중 하나여야 합니다.",
+                )
         verdict = VerdictType(verdict_raw)
 
         try:

@@ -320,12 +320,29 @@ def _select_best_row(
     # LLM이 명시한 {col: value} 제약을 *모든 row에 한 번에* 적용. 한 row가
     # 모든 criteria를 정규화 후 substring 매칭해야 통과. criteria가 비어있으면
     # noop. domain-specific 가드 없이 LLM 판단으로 row 좁히는 메커니즘.
-    if match_criteria:
-        criteria_norm = {
-            str(k): _normalize_korean(str(v))
-            for k, v in match_criteria.items()
-            if v is not None and str(v).strip()
-        }
+    #
+    # [2026-05-21 P19] LLM column명 hallucination 가드 — KOSIS는 column에 의미적
+    # 이름을 안 주고 C1_NM/C2_NM/... 같은 generic 이름만 줘서, LLM이 '시도명'·
+    # '광역자치단체명' 같은 *추측 컬럼명*을 넘기는 경우 잦음. 실제 row에 그 키가
+    # *전혀 없으면* 그 criterion만 *무시*. (23:55 로그 — '시도명':'강원도'가
+    # row에 없는 column이라 891 row 전부 거부됐던 케이스)
+    if match_criteria and rows:
+        _sample_keys = set(rows[0].keys()) if isinstance(rows[0], dict) else set()
+        criteria_norm: dict[str, str] = {}
+        _ignored_cols: list[str] = []
+        for k, v in match_criteria.items():
+            if v is None or not str(v).strip():
+                continue
+            if k not in _sample_keys:
+                _ignored_cols.append(k)
+                continue
+            criteria_norm[str(k)] = _normalize_korean(str(v))
+        if _ignored_cols:
+            logger.info(
+                f"[_select_best_row] match_criteria 컬럼명 hallucination 가드 — "
+                f"실제 row에 없는 키 {_ignored_cols} 무시 "
+                f"(LLM이 추측한 컬럼명. 실제 row 키: {sorted(_sample_keys)[:10]}...)"
+            )
         if criteria_norm:
             def _criteria_match(row: dict) -> bool:
                 for col, expected in criteria_norm.items():
@@ -759,11 +776,16 @@ class KOSISDataSource(BaseDataSource):
         self,
         candidate_id: str,
         params: dict[str, Any] | None = None,
+        workspace: Any = None,
     ) -> EvidenceData | None:
         """KOSIS에서 실제 수치 조회. KOSISConnector.fetch(stat_id, params) 호출.
 
         Phase D: rows 안에서 indicator + time_period 매칭 row를 직접 골라
                  정확한 value/unit/time을 EvidenceData에 담아 반환.
+
+        [P20 2026-05-22] workspace가 주어지면 KOSIS API raw 응답을 캐싱.
+        같은 (stat_id, prdSe, startPrdDe, endPrdDe, newEstPrdCnt) 조합 재호출 시
+        API 안 부르고 캐시 사용. TTL은 config.kosis.cache_ttl_hours (default 24).
         """
         connector = self._get_connector()
         params = params or {}
@@ -872,16 +894,66 @@ class KOSISDataSource(BaseDataSource):
                     f"prdSe={prd_se!r} startPrdDe={start!r} endPrdDe={end!r}"
                 )
 
+        # ── [P20 2026-05-22] workspace KOSIS 응답 캐시 ──────────────────
+        # workspace가 주어졌고 cache 메서드가 있으면 cache key 만들어 조회.
+        # cache hit → connector.fetch skip, raw 응답으로 EvidenceData 복원.
+        # cache miss → 평소대로 connector.fetch + 응답 저장.
+        _ws_cache_key: str | None = None
+        _ttl_hours: float = 24.0
         try:
-            data = await connector.fetch(candidate_id, fetch_params)
-        except Exception as e:
-            logger.warning(
-                f"[KOSISDataSource] fetch({candidate_id}) 실패: {type(e).__name__}: {e}"
+            _cache_cfg = (self.config or {}).get("cache") or {}
+            # config 위치 우선순위: kosis.cache_ttl_hours > kosis.cache.ttl_hours
+            _kosis_cfg = self.config or {}
+            _ttl_hours = float(
+                _kosis_cfg.get("cache_ttl_hours")
+                or _cache_cfg.get("ttl_hours")
+                or 24.0
             )
-            return None
+        except Exception:
+            _ttl_hours = 24.0
+
+        data = None
+        if workspace is not None and hasattr(workspace, "read_kosis_response_cache"):
+            try:
+                _ws_cache_key = type(workspace).make_kosis_cache_key(
+                    candidate_id, fetch_params
+                )
+                _cached = workspace.read_kosis_response_cache(
+                    _ws_cache_key, ttl_hours=_ttl_hours,
+                )
+                if _cached is not None and isinstance(_cached, dict):
+                    # cache hit → raw dict로 EvidenceData 재구성
+                    data = EvidenceData(_cached)
+                    logger.info(
+                        f"[KOSISDataSource] kosis_cache 적중: {_ws_cache_key} "
+                        f"(API call skip, value={data.get('value')}, "
+                        f"rows={len(data.get('rows') or [])})"
+                    )
+            except Exception as _e:
+                logger.debug(f"[KOSISDataSource] kosis_cache 조회 실패: {_e}")
+                data = None
 
         if data is None:
-            return None
+            # cache miss (또는 workspace 없음) → 실제 API 호출
+            try:
+                data = await connector.fetch(candidate_id, fetch_params)
+            except Exception as e:
+                logger.warning(
+                    f"[KOSISDataSource] fetch({candidate_id}) 실패: {type(e).__name__}: {e}"
+                )
+                return None
+
+            if data is None:
+                return None
+
+            # API 호출 성공 → 캐시에 저장 (workspace 있을 때만)
+            if workspace is not None and _ws_cache_key is not None:
+                try:
+                    workspace.write_kosis_response_cache(
+                        _ws_cache_key, dict(data),
+                    )
+                except Exception as _e:
+                    logger.debug(f"[KOSISDataSource] kosis_cache 저장 실패: {_e}")
 
         # raw_response에서 rows 추출 (KOSIS API 응답 형식)
         raw = getattr(data, "raw_response", None) or {}
@@ -892,6 +964,27 @@ class KOSISDataSource(BaseDataSource):
 
         stat_id_str = str(getattr(data, "stat_id", candidate_id))
         stat_name_str = str(getattr(data, "stat_name", "")) or candidate_id
+
+        # [P21B 2026-05-22] preview 모드 — catalog_search rerank가 sample row만
+        # 필요해 호출. 관련성 가드/row 매칭/단위 가드 모두 *skip*하고 rows를 그대로
+        # evidence에 담아 반환. value는 None이어도 OK (rerank LLM은 sample row만 봄).
+        if params.get("_preview"):
+            _preview_ev = EvidenceData({
+                "value": None,
+                "unit": "",
+                "time_period": "",
+                "source": "kosis",
+                "stat_table_id": stat_id_str,
+                "stat_name": stat_name_str,
+                "rows": rows,
+                "raw": data,
+                "_preview": True,
+            })
+            logger.info(
+                f"[KOSISDataSource] preview mode: [{stat_id_str}] "
+                f"{stat_name_str!r} → {len(rows)} rows (관련성/매칭 가드 skip)"
+            )
+            return _preview_ev
 
         # ── [v6.17] 테이블 관련성 체크 ──────────────────────────────────
         # catalog top 후보를 무조건 fetch하면 "합계출산율 - 동북·중앙아시아"

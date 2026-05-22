@@ -14,6 +14,7 @@ level 1의 evidence를 자동 재활용.
 레벨 결정 신호:
   - schema.value_role
     - "base"               → Level 1 (단독 검증)
+    - "aggregation"        → Level 1 (다년 fetch — sibling 의존 없음, catalog 캐시 공유)
     - "derived_rate"       → Level 2 (base 결과 의존)
     - "derived_difference" → Level 2
     - None / 기타          → Level 1 (default)

@@ -213,6 +213,37 @@ class FetchEvidenceTool(ToolBase):
                 f"unit_hint={params.get('unit_hint')!r}"
             )
 
+            # [2026-05-21] match_criteria carry-over 가드 — reflect LLM이 직전 claim의
+            # matched_row에서 criteria를 복사해 넘기는 경우가 있어, 다른 sub-claim
+            # (population='인천')인데 criteria={'시군구': '강원도'} 같은 충돌이 발생.
+            # 22:41:28 인천 claim 예: schema.population='인천'인데 LLM criteria='강원도'
+            # → _select_best_row가 '강원' substring 매칭 시도 → 모든 후보 매칭 실패.
+            # 가드: schema.population이 *구체적*이고 (전체/전국 등 제외), match_criteria의
+            # 어떤 value에도 schema.population과 양방향 substring 매칭이 *전혀* 없으면
+            # → criteria 폐기 (LLM의 carry-over로 간주).
+            _sch_pop_norm = _sch_pop  # 위에서 정의된 schema.population
+            _criteria = params.get("match_criteria")
+            if (
+                _sch_pop_norm
+                and _sch_pop_norm not in ("전체", "전국", "계", "total")
+                and isinstance(_criteria, dict) and _criteria
+            ):
+                _has_overlap = False
+                for _cv in _criteria.values():
+                    _cv_s = str(_cv or "").strip()
+                    if not _cv_s:
+                        continue
+                    if _cv_s in _sch_pop_norm or _sch_pop_norm in _cv_s:
+                        _has_overlap = True
+                        break
+                if not _has_overlap:
+                    logger.warning(
+                        f"[fetch_evidence] match_criteria carry-over 가드: "
+                        f"schema.population={_sch_pop_norm!r}와 충돌하는 "
+                        f"criteria={_criteria!r} 폐기 (LLM이 직전 claim 정보 복사 의심)"
+                    )
+                    params.pop("match_criteria", None)
+
         # ── [v6.22] schema/params 없으면 fetch 거부 ──────────────────
         # indicator가 없으면 connector가 '무엇을' 조회할지 자체를 모르고
         # 기본값(drows[0])을 반환 → 통합·연간 행이 그대로 새어나온다.
@@ -251,11 +282,16 @@ class FetchEvidenceTool(ToolBase):
         _cache_ind = params.get("indicator")
         _cache_tp = params.get("time_period")
         _cache_unit = params.get("unit_hint")
+        _cache_pop = params.get("population")
         _ws = getattr(context, "workspace", None)
         if _ws is not None and _cache_ind and _cache_tp:
             try:
+                # [2026-05-21] population까지 키에 포함 — 같은 (indicator, time)이라도
+                # 다른 지역 sub-claim의 캐시 값이 적중하던 버그(22:54 트레이스 — 서울
+                # sub-claim이 강원도/197 같은 다른 값 받음) 차단.
                 hit = _ws.lookup_verified_fact(
-                    _cache_ind, _cache_tp, unit_hint=_cache_unit
+                    _cache_ind, _cache_tp,
+                    unit_hint=_cache_unit, population=_cache_pop,
                 )
             except Exception:
                 hit = None
@@ -354,8 +390,10 @@ class FetchEvidenceTool(ToolBase):
                 call_params = dict(params)
                 if try_id in prior_id_set:
                     call_params["_from_prior_success"] = True
+                # [P20 2026-05-22] workspace 전달 — KOSIS raw 응답 캐시 활용
                 ev = await source.fetch_evidence(
                     candidate_id=try_id, params=call_params,
+                    workspace=getattr(context, "workspace", None),
                 )
             except Exception as e:
                 logger.warning(
@@ -364,7 +402,13 @@ class FetchEvidenceTool(ToolBase):
                 )
                 last_err = f"{type(e).__name__}: {e}"
                 continue
-            if ev is not None:
+            # [2026-05-21 P6] ev dict이지만 value=None이면 *실패로 간주*하고 다음 후보 시도.
+            # 기존엔 `ev is not None`만 봤어서 INH_1B83A35처럼 dict는 받았지만 row 비어
+            # value=None인 케이스에서도 break해버려 다음 후보(DT_1B8000G)를 안 돌렸음.
+            # → 단일 fetch로 끝나고 loop이 즉시 unverifiable로 떨어지는 버그.
+            _ev_dict = dict(ev) if (ev is not None and hasattr(ev, "items")) else {}
+            _ev_value = _ev_dict.get("value") if _ev_dict else None
+            if ev is not None and _ev_value is not None:
                 evidence = ev
                 used_id = try_id
                 if idx > 0:
@@ -374,8 +418,9 @@ class FetchEvidenceTool(ToolBase):
                     )
                 break
             else:
+                _why = "None" if ev is None else "value=None"
                 logger.info(
-                    f"[fetch_evidence] 후보 {try_id} → None "
+                    f"[fetch_evidence] 후보 {try_id} → {_why} "
                     f"(관련성 거부/데이터 없음), 다음 후보 시도"
                 )
         candidate_id = used_id
@@ -433,6 +478,35 @@ class FetchEvidenceTool(ToolBase):
             f"fetch({source_name}, {candidate_id}): value={value!r} unit={unit!r} "
             f"time={time_period!r}{rows_info}"
         )
+
+        # ── [T 패치 2026-05-21] sibling_evidence에 직접 저장 ──
+        # 기존엔 _save_verified_facts (verdict가 match/mismatch일 때만) 경유 →
+        # verdict가 unverifiable이거나 data_points 비어있으면 sibling 저장 누락.
+        # fetch가 *성공*한 시점에 *KOSIS 값을 받아온 사실 자체*가 sibling이 활용할
+        # 신호이므로 verdict 무관하게 여기서 직접 저장 (verdict='fetched' 표시).
+        try:
+            if value is not None and claim is not None:
+                _schema = getattr(claim, "schema", None)
+                _sent_id = str(getattr(claim, "sent_id", "") or "").strip()
+                _role = (getattr(_schema, "value_role", None) or "") if _schema else ""
+                if _sent_id and _role and hasattr(context.workspace, "record_sibling_evidence"):
+                    context.workspace.record_sibling_evidence(
+                        sent_id=_sent_id,
+                        role=_role,
+                        evidence={
+                            "indicator": params.get("indicator") or "",
+                            "value": value,
+                            "unit": unit or "",
+                            "time_period": time_period or params.get("time_period") or "",
+                            "source": (
+                                f"kosis:{evidence_dict.get('stat_table_id') or candidate_id}"
+                            ),
+                            "claim_id": str(context.claim_id),
+                            "verdict": "fetched",
+                        },
+                    )
+        except Exception as e:
+            logger.debug(f"[fetch_evidence] sibling_evidence 저장 실패 (무시): {e}")
 
         return ToolResult(
             output={

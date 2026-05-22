@@ -17,6 +17,7 @@ Phase B에서는 *추상 인터페이스만* — 실제 KOSIS DataSource 구현�
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 from structverify.utils.logger import get_logger
 
@@ -189,6 +190,14 @@ class CatalogSearchTool(ToolBase):
             # [패치 D'] prepend 시 진짜 stat_name도 같이 보여줘서 LLM이
             # "이 표 안에 다른 지표도 있을 가능성"을 판단할 수 있게 한다.
             # workspace에 저장한 catalog observation에서 stat_id의 name을 찾아옴.
+            # [2026-05-21 P5] 이전 observation의 name엔 우리가 박아둔 "[...]"
+            # annotation이 누적될 수 있음 — 새로 prepend할 때 그걸 떼서 *원본 표 이름*만
+            # 가져오도록 정규화한다. 안 그러면 매 검색마다 "[표 안에 'X' 관련 ...]
+            # [표 안에 'Y' 관련 ...]" 식으로 거짓 힌트가 무한 누적된다.
+            import re as _re_local
+            _ANN_RE = _re_local.compile(r"\s*\[같은 job에서[^\]]*\]\s*")
+            def _clean_name(nm: str) -> str:
+                return _ANN_RE.sub("", nm or "").strip()
             stat_names: dict[str, str] = {}
             try:
                 for other_cid in context.workspace.list_claims():
@@ -202,32 +211,153 @@ class CatalogSearchTool(ToolBase):
                             sid = cd.get("id") if isinstance(cd, dict) else None
                             nm = cd.get("name") if isinstance(cd, dict) else None
                             if sid and nm and sid not in stat_names:
-                                stat_names[sid] = nm
+                                stat_names[sid] = _clean_name(nm)
                     if len(stat_names) > 50:
                         break  # 충분히 많이 모음
             except Exception as e:
                 logger.debug(f"[catalog_search] stat_name lookup 실패: {e}")
+
+            # [2026-05-21 P5] 각 prior stat_id가 *어떤 지표* 검증에 사용됐는지
+            # verified_facts에서 역추적. source 필드는 보통 "KOSIS:DT_..." 또는
+            # "kosis:DT_..." 형식이라 case-insensitive substring 매칭. 이게 있으면
+            # LLM이 "이 표는 출생아 수 검증에 썼던 표 — 합계출산율이랑 같은 인구동향
+            # 표일 가능성"을 판단할 수 있다. 거짓 "row 있을 가능성" 단언은 제거.
+            stat_id_to_indicators: dict[str, list[str]] = {}
+            try:
+                _facts = context.workspace.read_verified_facts() if context.workspace else []
+            except Exception:
+                _facts = []
+            for _f in _facts or []:
+                _src = str(_f.get("source") or "").lower()
+                _ind = str(_f.get("indicator") or "").strip()
+                if not _ind:
+                    continue
+                for sid in prior_ids:
+                    if sid.lower() in _src:
+                        bucket = stat_id_to_indicators.setdefault(sid, [])
+                        if _ind not in bucket:
+                            bucket.append(_ind)
+            # sibling_evidence의 source는 "kosis:{stat_id}" 형식 — 같이 합쳐 정확도 ↑
+            try:
+                if hasattr(context.workspace, "_sibling_evidence_key"):
+                    # 모든 sent_id를 모르므로 backend로 직접 읽기
+                    _key = context.workspace._sibling_evidence_key()
+                    if context.workspace.backend.exists(_key):
+                        _sib_data = json.loads(
+                            context.workspace.backend.read_text(_key)
+                        )
+                        if isinstance(_sib_data, dict):
+                            for _sent_id, _entries in _sib_data.items():
+                                if not isinstance(_entries, list):
+                                    continue
+                                for _e in _entries:
+                                    if not isinstance(_e, dict):
+                                        continue
+                                    _src = str(_e.get("source") or "").lower()
+                                    _ind = str(_e.get("indicator") or "").strip()
+                                    if not _ind:
+                                        continue
+                                    for sid in prior_ids:
+                                        if sid.lower() in _src:
+                                            bucket = stat_id_to_indicators.setdefault(sid, [])
+                                            if _ind not in bucket:
+                                                bucket.append(_ind)
+            except Exception as e:
+                logger.debug(f"[catalog_search] sibling_evidence 읽기 실패 (무시): {e}")
+
+            # [P21 2026-05-22] prior_success score 완화 — 1.5 고정 X.
+            # 기존 1.5 박으면 *의미적으로 더 잘 맞는 catalog 결과 (score=1.0)*가
+            # 무조건 prior 표 뒤로 밀림. "치료 가능 사망률" claim에 의료장비 표
+            # (DT_35003_A7 prior)가 top이 되고 진짜 정답(DT_117049_A083 score=1.0)이
+            # 3순위로 깔리는 회귀 케이스 (22:54 로그).
+            # → prior bonus는 catalog top score 살짝 *아래*로. catalog 매칭이
+            # 명확하면(top score ≥ 0.9) prior는 *후순위*로 보이고, catalog가 약하면
+            # (top score < prior_bonus) prior가 자연스럽게 위로 올라옴.
+            _catalog_top_score = max(
+                (float(c.get("score", 0.0) or 0.0) for c in normalized),
+                default=0.0,
+            )
+            # prior score: catalog top score - 0.05. 단 최소 0.5는 보장 (catalog 결과
+            # 자체가 없거나 약할 때도 prior가 fetch 후보로 살아남도록).
+            _prior_score = max(_catalog_top_score - 0.05, 0.5)
             prepend: list[dict[str, Any]] = []
             for sid in prior_ids:
                 if sid in existing_ids:
                     continue
                 real_name = stat_names.get(sid, sid)
-                # 진짜 이름 + hint를 같이. LLM이 보고 fetch 시도하도록 유도.
+                _prior_inds = stat_id_to_indicators.get(sid) or []
+                if _prior_inds:
+                    _ind_label = ", ".join(f"'{x}'" for x in _prior_inds[:3])
+                    _hint = (
+                        f"[같은 job에서 {_ind_label} 검증에 사용된 표 — "
+                        f"'{query}' row 존재는 fetch 시도로 확인]"
+                    )
+                else:
+                    # indicator 추적 못 한 경우 *중립적* 라벨 (거짓 단언 금지)
+                    _hint = "[같은 job 다른 claim이 사용한 표 — 관련성 fetch로 확인]"
                 prepend.append({
                     "id": sid,
-                    "name": (
-                        f"{real_name} [같은 job에서 다른 claim이 이 표에서 데이터 "
-                        f"가져왔음 — 표 안에 '{query}' 관련 row 있을 가능성]"
-                    ),
-                    "score": 1.5,  # 명시적 prior — top 위로 가도록 1.0 초과
+                    "name": f"{real_name} {_hint}",
+                    "score": _prior_score,
                     "raw": {"from_job_success": True},
                 })
             if prepend:
                 logger.info(
-                    f"[catalog_search] job-success stat_id {[p['id'] for p in prepend]} "
-                    f"를 결과 맨 앞에 prepend (진짜 이름 포함)"
+                    f"[catalog_search] job-success stat_id "
+                    f"{[p['id'] for p in prepend]} prior 추가 "
+                    f"(score={_prior_score:.3f}, catalog top={_catalog_top_score:.3f})"
                 )
-                normalized = prepend + normalized
+                # score 순으로 다시 정렬 — prior가 catalog top 위에 있을지 아래일지는
+                # score 비교에 맡김.
+                normalized = sorted(
+                    prepend + normalized,
+                    key=lambda c: float(c.get("score", 0.0) or 0.0),
+                    reverse=True,
+                )
+
+        # ── [P21B 2026-05-22] Row-aware LLM rerank ───────────────────────
+        # top N 표에 sample row 1개 fetch해 LLM이 claim과 가장 잘 매칭되는 표 선택.
+        # 임베딩 score만으론 "치료 가능 사망률"과 "사망률"·"의료장비"를 잘 못 구분
+        # 하는 케이스 (23:54 로그) 대응. P20 KOSIS cache hit이면 비용 거의 0.
+        _cs_cfg = (context.config or {}).get("catalog_search") or {}
+        _rerank_mode = str(_cs_cfg.get("rerank_mode") or "none").lower()
+        _rerank_top_n = int(_cs_cfg.get("rerank_top_n") or 5)
+        _rerank_gap = float(_cs_cfg.get("rerank_min_score_gap") or 0.15)
+        if (
+            _rerank_mode in ("row_preview", "table_name")
+            and len(normalized) >= 2
+            and context.claim is not None
+        ):
+            try:
+                _rerank_top = normalized[:_rerank_top_n]
+                _top1 = float(_rerank_top[0].get("score", 0.0) or 0.0)
+                _top2 = float(_rerank_top[1].get("score", 0.0) or 0.0)
+                if _top1 - _top2 >= _rerank_gap:
+                    logger.info(
+                        f"[catalog_search] rerank skip — top1({_top1:.3f}) - "
+                        f"top2({_top2:.3f}) gap={_top1-_top2:.3f} ≥ {_rerank_gap} "
+                        f"(LLM call 절약, top1이 이미 명확)"
+                    )
+                else:
+                    _reranked = await _row_preview_rerank(
+                        candidates=_rerank_top,
+                        claim=context.claim,
+                        source=source,
+                        workspace=context.workspace,
+                        config=context.config,
+                        do_row_preview=(_rerank_mode == "row_preview"),
+                    )
+                    if _reranked:
+                        # rerank된 top + 남은 후보 (원래 score 순서)
+                        _reranked_ids = {c.get("id") for c in _reranked}
+                        _rest = [c for c in normalized if c.get("id") not in _reranked_ids]
+                        normalized = _reranked + _rest
+                        logger.info(
+                            f"[catalog_search] LLM rerank 적용 — "
+                            f"top1={normalized[0].get('id')!r}"
+                        )
+            except Exception as _e:
+                logger.warning(f"[catalog_search] rerank 실패 (catalog 원본 유지): {_e}")
 
         # workspace observation 저장 (raw)
         try:
@@ -266,3 +396,171 @@ class CatalogSearchTool(ToolBase):
             summary=summary,
             success=True,
         )
+
+
+# ────────────────────────────────────────────────────────────────────
+# [P21B 2026-05-22] Row-aware LLM rerank 헬퍼
+# ────────────────────────────────────────────────────────────────────
+import asyncio as _asyncio
+
+
+async def _row_preview_rerank(
+    candidates: list[dict[str, Any]],
+    claim: Any,
+    source: Any,
+    workspace: Any,
+    config: dict | None,
+    do_row_preview: bool = True,
+) -> list[dict[str, Any]] | None:
+    """top N 후보에 대해 (옵션) sample row fetch + LLM rerank.
+
+    Returns:
+        rerank된 후보 list (best가 [0]). 실패/no-op이면 None.
+    """
+    if not candidates:
+        return None
+
+    # 1) (옵션) preview fetch — newEstPrdCnt=1로 KOSIS 1 row만 받아옴.
+    #    P20 cache hit이면 즉시 반환. cold이면 KOSIS API 호출.
+    previews: dict[str, dict] = {}
+    if do_row_preview:
+        async def _preview(cid: str) -> tuple[str, dict | None]:
+            try:
+                ev = await source.fetch_evidence(
+                    candidate_id=cid,
+                    params={
+                        "newEstPrdCnt": "1",  # 가장 최근 1 시점만
+                        "_preview": True,
+                    },
+                    workspace=workspace,
+                )
+                if ev is None:
+                    return cid, None
+                rows = ev.get("rows") or []
+                first = rows[0] if rows else {}
+                # 핵심 컬럼만 추출 (LLM 토큰 절약)
+                _PICK = ("ITM_NM", "C1_NM", "C2_NM", "C3_NM", "C4_NM",
+                          "PRD_DE", "UNIT_NM")
+                row_summary = {k: first.get(k) for k in _PICK if first.get(k)}
+                return cid, {
+                    "stat_name": ev.get("stat_name") or "",
+                    "sample_row": row_summary,
+                    "rows_count": len(rows),
+                }
+            except Exception as _e:
+                logger.debug(f"[catalog_search.rerank] preview fetch 실패 {cid}: {_e}")
+                return cid, None
+
+        results = await _asyncio.gather(
+            *[_preview(c.get("id", "")) for c in candidates if c.get("id")],
+            return_exceptions=False,
+        )
+        for cid, info in results:
+            if info is not None:
+                previews[cid] = info
+
+    # 2) LLM 호출 — claim + 후보들 + preview를 던지고 best 1개 선택
+    from structverify.utils.llm_client import LLMClient
+    _llm = LLMClient(config=(config or {}).get("llm") or {})
+
+    # claim 정보 추출
+    _schema = getattr(claim, "schema", None)
+    _info = {
+        "indicator": (getattr(_schema, "indicator", None) or "") if _schema else "",
+        "time_period": (getattr(_schema, "time_period", None) or "") if _schema else "",
+        "population": (getattr(_schema, "population", None) or "") if _schema else "",
+        "unit": (getattr(_schema, "unit", None) or "") if _schema else "",
+        "value": (getattr(_schema, "value", None)) if _schema else None,
+    }
+
+    # 후보 리스트 → 프롬프트 텍스트
+    _cand_lines: list[str] = []
+    for i, c in enumerate(candidates, start=1):
+        cid = c.get("id", "")
+        cname = (c.get("name", "") or "").strip()
+        cscore = c.get("score")
+        _line = f"{i}. [{cid}] {cname}"
+        if isinstance(cscore, (int, float)):
+            _line += f" (catalog_score={cscore:.3f})"
+        _preview = previews.get(cid)
+        if _preview and _preview.get("sample_row"):
+            _row = _preview["sample_row"]
+            _row_str = ", ".join(f"{k}={v!r}" for k, v in _row.items())
+            _line += f"\n   sample row → {_row_str}"
+            _line += f" | rows_count={_preview.get('rows_count')}"
+        _cand_lines.append(_line)
+
+    _prompt = f"""다음 사실검증 claim에 *가장 적합한 KOSIS 통계표 1개*를 선택하세요.
+
+[Claim]
+- indicator (검증 대상 지표): {_info['indicator']!r}
+- population (대상 집단): {_info['population']!r}
+- time_period: {_info['time_period']!r}
+- unit: {_info['unit']!r}
+- value: {_info['value']}
+
+[후보 표 (catalog 검색 score 순)]
+{chr(10).join(_cand_lines)}
+
+[선택 기준]
+- ITM_NM 또는 C1_NM~C4_NM 어느 컬럼에 claim의 indicator가 *직접 포함*되거나 *의미적으로 매칭*되는 표 우선.
+- C1_NM/C2_NM 등이 claim.population (지역/대상)을 포함하는 표 우선.
+- 표 이름이 claim과 유사해 보이더라도 sample row의 ITM_NM이 무관하면 *배제*.
+  (예: "치료 가능 사망률" claim에 sample row ITM_NM='의료장비'인 표는 배제)
+- preview가 없는 표는 *catalog score만으로 추정* (불확실하다고 답해도 OK).
+
+[응답 형식 — JSON only, 다른 텍스트 금지]
+{{
+  "best_stat_id": "DT_XXX",
+  "reason": "한 줄 이유"
+}}
+
+선택을 못 하겠으면 best_stat_id를 첫 번째 후보 ID로.
+"""
+
+    try:
+        raw = await _llm.generate(
+            prompt=_prompt,
+            system_prompt="KOSIS 통계표 선정 전문가. JSON으로만 답하세요.",
+            model_tier="light",
+        )
+    except Exception as _e:
+        logger.warning(f"[catalog_search.rerank] LLM 호출 실패: {_e}")
+        return None
+
+    # JSON 파싱 (관대하게)
+    import json as _json
+    import re as _re
+    _best: str | None = None
+    try:
+        # raw에서 JSON 블록 추출
+        _match = _re.search(r"\{[^{}]*\}", raw, _re.DOTALL)
+        if _match:
+            data = _json.loads(_match.group(0))
+            _best = (data.get("best_stat_id") or "").strip() or None
+            _reason = data.get("reason") or ""
+            if _best:
+                logger.info(
+                    f"[catalog_search.rerank] LLM 선택: best={_best!r} "
+                    f"reason={_reason[:80]!r}"
+                )
+    except Exception as _e:
+        logger.debug(f"[catalog_search.rerank] LLM 응답 파싱 실패: {_e}")
+
+    if not _best:
+        return None
+
+    # best를 0번으로 끌어올리기
+    _ids = [c.get("id", "") for c in candidates]
+    if _best not in _ids:
+        logger.info(
+            f"[catalog_search.rerank] best={_best!r}가 후보 list에 없음 — rerank skip"
+        )
+        return None
+    _best_idx = _ids.index(_best)
+    if _best_idx == 0:
+        return None  # 이미 top — no-op
+    _reordered = [candidates[_best_idx]] + [
+        c for i, c in enumerate(candidates) if i != _best_idx
+    ]
+    return _reordered

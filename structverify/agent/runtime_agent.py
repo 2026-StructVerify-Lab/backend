@@ -211,8 +211,19 @@ class RuntimeAgent:
             (self.config.get("agent") or {}).get("enabled", False)
         )
 
-        # agent 경로에서 쓸 문서 원문 (planner가 source_text로 사용)
-        source_text = self._get_source_text(sir_doc)
+        # agent 경로에서 쓸 문서 원문 (planner가 source_text로 사용 + workspace의
+        # source.txt 저장).
+        # [2026-05-21] sir_doc.raw_text(P10에서 추가, 원본 markdown/줄바꿈 포함)
+        # 우선. 없으면 _get_source_text(sir_doc)가 sentence들을 공백 join한 결과.
+        # 이유: workspace.initialize가 source.txt에 이 값을 저장하는데, sv_platform이
+        # /v1/jobs 폴링 시 Job.source_data(=raw_text)와 source.txt를 _normalize_ws
+        # 비교로 매칭. sentence join은 markdown 단락/리스트 구조 손실로 URL 추출본과
+        # 형태가 달라 매칭 실패 → 프론트 실시간 partial claim 안 뜸. text 입력은
+        # 단순해서 우연히 비슷했을 뿐.
+        source_text = (
+            getattr(sir_doc, "raw_text", None)
+            or self._get_source_text(sir_doc)
+        )
         anchor_year = (
             temporal_graph.get_anchor_year() if temporal_graph else None
         )
@@ -442,13 +453,34 @@ class RuntimeAgent:
 
         try:
             # 1) workspace 준비
+            # [2026-05-21] scope에 따라 workspace 격리 단위 결정:
+            #   - "doc_hash" (default): claim.doc_id (= md5(raw_text))
+            #     같은 본문이면 캐시 공유. KOSIS fetch 재사용으로 빠름.
+            #   - "job_id" : ws_cfg.external_job_id (sv_platform이 set) 또는 fresh UUID.
+            #     매 요청 cold start로 정확성↑.
             ws_cfg = dict(agent_cfg.get("workspace") or {})
+            _ws_scope = str(ws_cfg.get("scope") or "doc_hash").strip().lower()
+            if _ws_scope == "job_id":
+                _external = ws_cfg.get("external_job_id")
+                if _external:
+                    _ws_job_id = str(_external)
+                else:
+                    from uuid import uuid4 as _uuid4
+                    _ws_job_id = str(_uuid4())
+                    logger.info(
+                        f"[Agent A] workspace scope='job_id'인데 external_job_id 미제공 "
+                        f"→ fresh UUID 생성: {_ws_job_id}"
+                    )
+            else:
+                # "doc_hash" — 기존 동작 (text-hash 기반 캐시 재사용)
+                _ws_job_id = str(getattr(claim, "doc_id", "") or "job")
             workspace = build_workspace(
-                job_id=str(getattr(claim, "doc_id", "") or "job"),
+                job_id=_ws_job_id,
                 config=ws_cfg,
             )
-            if not workspace.is_initialized():
-                workspace.initialize(source_text=source_text or "")
+            # [P23 2026-05-22] is_initialized 체크 제거 — initialize가 idempotent.
+            # source.txt를 매번 raw_text로 덮어씀 (stale 방지). meta는 변경 없음.
+            workspace.initialize(source_text=source_text or "")
             workspace.create_claim_dir(
                 claim.claim_id, claim_data=claim.model_dump(mode="json")
             )
@@ -543,20 +575,151 @@ class RuntimeAgent:
             # 6) AgentVerdict → VerificationResult 변환
             #    [v6.17] agent_loop이 검증에 쓴 KOSIS 데이터(data_points)를
             #    Evidence로 복원 → UI '공식 통계 출처' 박스에 표시됨.
+            # [2026-05-21 P7] primary/supporting 분리:
+            #   - primary: claim.schema.time_period와 매칭되는 시점의 fetch
+            #   - supporting: derived claim에서 함께 쓰인 *다른 시점* fetch
+            #     (예: 차이/증가율 검증의 prev 시점)
+            #   base claim은 supporting 비움 (헛돌이 prev fetch 노이즈 제거).
             agent_evidence = None
+            supporting_evidence: list[Evidence] = []
             _ev_category = None  # 도메인 가드용 — Evidence 스키마엔 없는 필드
+
+            def _parse_stat_id(src: str | None) -> str | None:
+                if not src:
+                    return None
+                s = str(src).strip()
+                if ":" in s:
+                    return s.split(":", 1)[1].strip() or None
+                return s or None
+
+            def _norm_time(t: str | None) -> str:
+                return str(t or "").replace("-", "").replace(".", "").strip()
+
+            # ── 1) 후보 evidence 수집 (data_points + workspace fetch obs + sibling_evidence) ──
+            _claim_target_time = (
+                getattr(claim.schema, "time_period", None) if claim.schema else None
+            )
+            _claim_role = (
+                getattr(claim.schema, "value_role", None) if claim.schema else None
+            ) or ""
+            _is_derived = _claim_role in ("derived_rate", "derived_difference")
+            _claim_sent_id = str(getattr(claim, "sent_id", "") or "").strip()
+
+            candidates: list[dict] = []
             dps = getattr(verdict, "data_points", None) or []
-            if dps:
-                dp = dps[0]  # 단일 fetch — 첫 data point가 검증 근거
-                src = (dp.source or "")
-                stat_id = src.split(":", 1)[1] if ":" in src else (src or None)
-                _ev_category = getattr(dp, "category_path", None)
+            for _dp in dps:
+                _val = getattr(_dp, "resolved_value", None)
+                if _val is None:
+                    continue
+                _sid = _parse_stat_id(getattr(_dp, "source", None))
+                _t = (getattr(_dp, "source_time", None) or getattr(_dp, "time", "") or "")
+                candidates.append({
+                    "stat_id": _sid,
+                    "value": _val,
+                    "unit": getattr(_dp, "resolved_unit", None),
+                    "time": str(_t),
+                    "category": getattr(_dp, "category_path", None),
+                    "origin": "data_point",
+                })
+
+            # workspace의 모든 fetch observation에서 evidence 수집 (헛돌이 fetch도 포함됨)
+            try:
+                for _obs_name in workspace.list_observations(claim.claim_id):
+                    if "fetch" not in _obs_name.lower():
+                        continue
+                    _obs = workspace.read_observation(claim.claim_id, _obs_name)
+                    if not isinstance(_obs, dict):
+                        continue
+                    _ev = (_obs.get("output") or {}).get("evidence") or _obs.get("evidence") or {}
+                    if not isinstance(_ev, dict):
+                        continue
+                    _val = _ev.get("value")
+                    if _val is None:
+                        continue
+                    candidates.append({
+                        "stat_id": _ev.get("stat_table_id") or None,
+                        "value": _val,
+                        "unit": _ev.get("unit") or None,
+                        "time": str(_ev.get("time_period") or ""),
+                        "category": _ev.get("category_path") or None,
+                        "origin": "fetch_obs",
+                    })
+            except Exception as _e:
+                logger.debug(f"[Agent A] fetch observation 수집 실패 (무시): {_e}")
+
+            # derived claim은 sibling_evidence의 base 결과(=current 값)도 후보로 합침
+            if _is_derived and _claim_sent_id and hasattr(workspace, "read_sibling_evidence"):
+                try:
+                    for _s in (workspace.read_sibling_evidence(_claim_sent_id) or []):
+                        if not isinstance(_s, dict):
+                            continue
+                        if _s.get("role") != "base":
+                            continue
+                        _val = _s.get("value")
+                        if _val is None:
+                            continue
+                        candidates.append({
+                            "stat_id": _parse_stat_id(_s.get("source")),
+                            "value": _val,
+                            "unit": _s.get("unit") or None,
+                            "time": str(_s.get("time_period") or ""),
+                            "category": None,
+                            "origin": "sibling_base",
+                        })
+                except Exception as _e:
+                    logger.debug(f"[Agent A] sibling_evidence 수집 실패 (무시): {_e}")
+
+            # (stat_id, time) 기준 중복 제거 — 같은 fetch 여러 번 박힌 경우
+            _seen = set()
+            _deduped: list[dict] = []
+            for _c in candidates:
+                _key = (str(_c.get("stat_id") or ""), _norm_time(_c.get("time")))
+                if _key in _seen:
+                    continue
+                _seen.add(_key)
+                _deduped.append(_c)
+
+            # ── 2) primary 선택: claim.schema.time_period 매칭 우선 ──
+            _primary: dict | None = None
+            if _claim_target_time and _deduped:
+                _tnorm = _norm_time(_claim_target_time)
+                for _c in _deduped:
+                    if _norm_time(_c.get("time")) == _tnorm:
+                        _primary = _c
+                        break
+            if _primary is None and _deduped:
+                _primary = _deduped[0]  # 시점 매칭 실패 시 첫 후보로 폴백
+
+            if _primary is not None:
+                _ev_category = _primary.get("category")
                 agent_evidence = Evidence(
                     source_name="KOSIS",
-                    stat_table_id=stat_id,
-                    official_value=dp.resolved_value,
-                    unit=dp.resolved_unit,
-                    time_period=dp.source_time,
+                    stat_table_id=_primary.get("stat_id"),
+                    official_value=_primary.get("value"),
+                    unit=_primary.get("unit"),
+                    time_period=_primary.get("time") or None,
+                )
+
+            # ── 3) supporting: derived claim에만 — primary 외 후보 ──
+            if _is_derived and _primary is not None:
+                for _c in _deduped:
+                    if _c is _primary:
+                        continue
+                    supporting_evidence.append(Evidence(
+                        source_name="KOSIS",
+                        stat_table_id=_c.get("stat_id"),
+                        official_value=_c.get("value"),
+                        unit=_c.get("unit"),
+                        time_period=_c.get("time") or None,
+                    ))
+
+            if agent_evidence is not None:
+                logger.info(
+                    f"[Agent A] {claim.claim_id}: evidence 분리 — "
+                    f"primary(time={agent_evidence.time_period}, "
+                    f"value={agent_evidence.official_value}), "
+                    f"supporting={len(supporting_evidence)}건 "
+                    f"(role={_claim_role!r}, claim_target_time={_claim_target_time!r})"
                 )
 
             # [머지 이수민 main] 도메인 가드 — agent 경로에도 적용.
@@ -609,6 +772,7 @@ class RuntimeAgent:
                 confidence=verdict.confidence,
                 explanation=verdict.explanation,
                 evidence=agent_evidence,
+                supporting_evidence=supporting_evidence,
             )
             return result, ev_nodes, ev_edges
 

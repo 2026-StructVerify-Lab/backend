@@ -57,6 +57,12 @@ class ClaimType(str, Enum):
     RANKING = "ranking"
     """순위/상대 비교. 예: '1위', '하락폭이 가장 컸다' (여러 데이터 점)."""
 
+    AGGREGATION = "aggregation"
+    """[2026-05-21] 다년/다기간 집계 — 평균/총합/최대/최소 등.
+    예: '최근 3년 평균 …', '2022~2024년 총합 …' (N개 데이터 점 + 집계 계산).
+    도메인 무관, schema_inductor가 LLM으로 신호 감지. 시퀀스:
+    catalog_search → fetch_evidence × N → calculate(agg) → finish."""
+
     UNKNOWN = "unknown"
     """분류 불가."""
 

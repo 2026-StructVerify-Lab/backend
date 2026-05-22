@@ -55,6 +55,8 @@ class ClaimType(str, Enum):
     SCALE = "scale"
     COMPARISON = "comparison"
     FORECAST = "forecast"
+    # [2026-05-21] aggregation claim 지원 — "최근 N년 평균/총합" 류
+    AGGREGATION = "aggregation"
 
 
 class VerdictType(str, Enum):
@@ -185,6 +187,10 @@ class SIRDocument(BaseModel):
     extracted_at: datetime = Field(default_factory=datetime.utcnow)
     blocks: list[SIRBlock] = Field(default_factory=list)
     detected_domain: str | None = None
+    # [2026-05-21] URL/PDF 입력 시 추출된 본문 텍스트. 프론트 "원문" 패널에서
+    # source_data 대체로 사용. text 입력은 source_data == raw_text이라 중복이지만
+    # 일관성 유지를 위해 항상 채움.
+    raw_text: str | None = None
 
 
 # ── Claim ────────────────────────────────────────────────────
@@ -214,8 +220,20 @@ class ClaimSchema(BaseModel):
     #                          → plan_type=growth_rate
     #   - "derived_difference": 절대 차이/변화량 (단위 절대단위, 차이값)
     #                          → plan_type=difference
+    #   - "aggregation"      : 다년/다기간 집계 (평균/합계/최대/최소 류)
+    #                          → plan_type=aggregation, 시퀀스: catalog → fetch×N → calc(agg) → finish
     #   - None               : 명시 안 됨 — planner LLM이 claim_text/schema로 추론
     value_role: str | None = None
+
+    # [2026-05-21] aggregation claim 지원 — "최근 3년 평균 …", "총합 …" 류
+    # 도메인 무관, 모두 Optional. None이면 downstream에서 일반 base/derived 흐름으로 폴백.
+    # LLM(schema_inductor)이 claim_text에서 신호를 감지해 채우며, 한국어 키워드 하드코딩 X.
+    aggregation: str | None = None
+    """집계 연산자 — "mean" | "sum" | "max" | "min" | "median" 등. None이면 단일값 처리."""
+    aggregation_window: int | None = None
+    """집계 윈도우 크기 — "최근 N년/N분기/N개월" → N. None이면 explicit range 사용 또는 미사용."""
+    aggregation_time_range: list[str] | None = None
+    """집계 대상 시점 명시 — ["2022", "2023", "2024"]. None이면 window/anchor로 derive."""
 
 
 
@@ -285,6 +303,12 @@ class VerificationResult(BaseModel):
     verdict: VerdictType
     confidence: float = 0.0
     evidence: Evidence | None = None
+    # [2026-05-21] derived claim (growth_rate/difference) 검증에 함께 쓰인 *보조 데이터*.
+    # primary evidence는 claim.schema.time_period와 매칭되는 시점값(current).
+    # supporting_evidence는 그 외 — 예: difference 검증의 prev 시점 KOSIS 값.
+    # base claim은 보통 비어있음 (단일 시점만 필요).
+    # 프론트는 "공식 통계 출처" 아래에 "함께 참조한 데이터" 섹션으로 렌더.
+    supporting_evidence: list[Evidence] = Field(default_factory=list)
     mismatch_type: MismatchType | None = None
     explanation: str | None = None
     provenance_summary: str | None = None

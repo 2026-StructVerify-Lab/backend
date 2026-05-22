@@ -281,6 +281,26 @@ SCHEMA_INDUCTION_PROMPT = """당신은 뉴스 수치 주장에서 공식 통계 
   ]
   ★ "차이 0.04" schema의 prev_value=0.72 (계산: 0.76 - 0.04). prev_phrase는 *문장에 직접 없으면* 빈 문자열.
 
+[예시 — ★ 다년 집계 (평균/총합/최대/최소 류)]
+검증 대상 문장: "최근 3년간 평균 해외이주 신고 인원은 2904명"
+결과:
+  schemas: [
+    {{indicator: "해외이주 신고 인원", value: 2904, unit: "명", time_period: "2024",
+      source_phrase: "2904명",
+      aggregation: "mean", aggregation_window: 3,
+      aggregation_time_range: ["2022", "2023", "2024"],
+      parent_path: "인구 > 이주 > 해외이주"}}
+  ]
+  ★★ 핵심: "평균/총합/최대/최소" 같은 집계 표현이 있으면 *aggregation 필드*를 채우세요.
+     - aggregation: "mean" | "sum" | "max" | "min" | "median" (영어 소문자, 연산자만)
+     - aggregation_window: "최근 N년/N분기/N개월" 의 정수 N (예: "최근 3년" → 3)
+     - aggregation_time_range: 명시적으로 추론한 시점 리스트 (예: 2024 기준 "최근 3년" → ["2022","2023","2024"])
+     - time_period: 가장 최근 시점 (단일 fetch 실패 시 fallback용)
+     - prev_value/prev_time_period/prev_phrase는 *비워둠* (집계는 단일 prev 비교 아님)
+  ★★ "최근 N년", "지난 N분기 평균", "총", "합계", "최대", "최저", "역대 가장 많은"
+     등 다년/다기간 집계 신호가 있는 경우에만 aggregation 필드를 채우세요.
+     집계가 아닌 단일 시점 값(예: "2024년 출생아 수")은 aggregation=null로 두세요.
+
 [예시 — ★ 증가율인데 비교값이 본문에 없음 (시점만 계산)]
 검증 대상 문장: "2023년 출생아 수는 23만 명으로 1년 전보다 7.7% 줄었다"
 결과:
@@ -425,22 +445,29 @@ async def induce_schemas(
         #   경우만 정리. 단, population까지 같아야 진짜 중복으로 간주.
         #   ★ "동작구 10.6%, 성동구 8.9%"처럼 지역만 다른 정상 다중 수치는
         #     population이 다르므로 합쳐지지 않음 (이전엔 다 뭉개지던 버그).
+        # [2026-05-21] seen_keys로 통합 — 같은 (indicator, time, population) 키에
+        #   *value 있는* schema가 이미 존재하면 *value=null* 후속 schema는 폐기.
+        #   효과: LLM이 base claim에 "합계출산율 0.79명" 정상 schema +
+        #   "합계출산율 null" 빈 schema를 *함께* 출력하던 케이스에서, 빈 schema가
+        #   별도 sub-claim으로 살아남아 agent loop이 4 iter 돌다가
+        #   "주장값=None명 vs KOSIS 0.8명" 으로 끝나던 회귀를 차단.
         deduped: list[ClaimSchema] = []
-        seen_null_keys: set[tuple] = set()
+        seen_keys: set[tuple] = set()
         for sch in schemas:
-            if sch.value is None:
-                key = (
-                    sch.indicator or "",
-                    sch.time_period or "",
-                    sch.population or "",   # ★ population 추가 — 지역별 구분
+            key = (
+                sch.indicator or "",
+                sch.time_period or "",
+                sch.population or "",   # ★ population 추가 — 지역별 구분
+            )
+            if sch.value is None and key in seen_keys:
+                logger.info(
+                    f"  [중복 제거] value=null schema 폐기 — 같은 키의 "
+                    f"value 있는 schema가 이미 존재 "
+                    f"(indicator={sch.indicator}, time={sch.time_period}, "
+                    f"population={sch.population})"
                 )
-                if key in seen_null_keys:
-                    logger.info(
-                        f"  [중복 제거] value=null 중복 schema 폐기 "
-                        f"(indicator={sch.indicator}, population={sch.population})"
-                    )
-                    continue
-                seen_null_keys.add(key)
+                continue
+            seen_keys.add(key)
             deduped.append(sch)
         schemas = deduped
 
@@ -670,6 +697,32 @@ async def _induce_multiple(
             corrected_value, was_corrected = _verify_and_correct_value(
                 raw_value, source_phrase
             )
+
+            # [2026-05-21] value=null fallback — LLM이 value를 빠뜨려도 source_phrase에서
+            # 숫자 복원. 도메인 무관, 한국어 키워드 하드코딩 X.
+            # ("0.79명" → 0.79, "20717명" → 20717, "1만 2741개" → 12741, "23만 8천명" → 238000)
+            #
+            # [22:40 진단] "1만 2741개"는 _extract_numbers_from_text가 {1, 2741, 12741}처럼
+            # 한글 단위 정합값(12741)뿐 아니라 부분 숫자(1, 2741)도 같이 반환해 *set 크기 >1*이
+            # 되어 폴백 미적용 → schema value=None → 서울/경기 claim이 모두 unverifiable로 떨어짐.
+            # 정답: 한글 단위 결합값(가장 큰 수)이 거의 항상 의도된 value임. set이 여러 개면 max 사용.
+            if corrected_value is None and source_phrase:
+                _fallback_nums = _extract_numbers_from_text(source_phrase)
+                if _fallback_nums:
+                    # 단일 숫자거나 한글 단위 결합값(=max)가 그 의미 — 둘 다 max로 통합.
+                    _picked = max(_fallback_nums)
+                    if len(_fallback_nums) == 1:
+                        _msg = f"단일 숫자 {_picked} 복원"
+                    else:
+                        _msg = (
+                            f"숫자 {len(_fallback_nums)}개 중 최대값 {_picked} 복원 "
+                            f"(한글 단위 결합 추정, 후보={sorted(_fallback_nums)})"
+                        )
+                    logger.warning(
+                        f"  🔧 value=null 폴백: source_phrase={source_phrase!r}에서 "
+                        f"{_msg} (LLM이 value 누락)"
+                    )
+                    corrected_value = float(_picked)
             if was_corrected:
                 logger.warning(
                     f"  🔧 value 환산 교정: LLM={raw_value} → 교정={corrected_value} "
@@ -733,6 +786,39 @@ async def _induce_multiple(
                 is_approximate=bool(item.get("is_approximate", False)),
                 modifier=item.get("modifier") or None,
             )
+
+            # [2026-05-21] aggregation 필드 추출 — null-safe, 도메인 무관.
+            # LLM이 "평균/총합/최근 N년" 류 신호를 감지해 채우며 한국어 키워드 하드코딩 X.
+            # 모두 None이면 일반 base/derived 흐름으로 폴백. ClaimSchema 구버전 호환은 try/except.
+            _agg_op_raw = item.get("aggregation")
+            _agg_op = str(_agg_op_raw).strip().lower() if _agg_op_raw else None
+            if _agg_op in ("", "null", "none"):
+                _agg_op = None
+            _agg_window_raw = item.get("aggregation_window")
+            try:
+                _agg_window = int(_agg_window_raw) if _agg_window_raw is not None else None
+                if _agg_window is not None and _agg_window <= 0:
+                    _agg_window = None
+            except (TypeError, ValueError):
+                _agg_window = None
+            _agg_range_raw = item.get("aggregation_time_range")
+            if isinstance(_agg_range_raw, list):
+                _agg_range = [str(x).strip() for x in _agg_range_raw if x is not None and str(x).strip()]
+                _agg_range = _agg_range or None
+            else:
+                _agg_range = None
+            try:
+                ClaimSchema.model_fields["aggregation"]
+                schema_kwargs["aggregation"] = _agg_op
+                schema_kwargs["aggregation_window"] = _agg_window
+                schema_kwargs["aggregation_time_range"] = _agg_range
+            except KeyError:
+                # 구버전 ClaimSchema — 무시
+                if _agg_op:
+                    logger.warning(
+                        f"  ℹ️ aggregation={_agg_op!r} 추출됐으나 ClaimSchema에 필드 없음. "
+                        f"core/schemas.py에 aggregation/aggregation_window/aggregation_time_range 추가 필요."
+                    )
             # prev_* 필드는 schemas.py에 *추가됐을 때만* 전달
             # (구버전 schemas.py와 backward compat)
             try:
@@ -777,7 +863,21 @@ async def _induce_multiple(
                     any(_ind.endswith(s) for s in _DIFF_SUFFIXES)
                     and not _is_rate_indicator
                 )
-                if _is_rate_indicator or _is_pct_unit:
+                # [2026-05-21] aggregation 우선 분기 — LLM이 aggregation 연산자를 채웠으면
+                # base/derived 분류보다 우선. 도메인 무관 (LLM이 의미 판단).
+                _has_agg = bool(_agg_op) or bool(_agg_window) or bool(_agg_range)
+                if _has_agg:
+                    schema_kwargs["value_role"] = "aggregation"
+                    # aggregation은 단일 시점이 아닌 N개 시점 fetch이므로 prev_*는 의미 없음 → clear
+                    if schema_kwargs.get("prev_value") is not None or schema_kwargs.get("prev_time_period"):
+                        logger.info(
+                            f"  [U] aggregation 분류 → prev_value/prev_time_period clear "
+                            f"(indicator={_ind!r}, agg={_agg_op!r}, window={_agg_window!r})"
+                        )
+                        schema_kwargs["prev_value"] = None
+                        schema_kwargs["prev_time_period"] = None
+                        schema_kwargs["prev_phrase"] = None
+                elif _is_rate_indicator or _is_pct_unit:
                     schema_kwargs["value_role"] = "derived_rate"
                 elif _is_diff_indicator:
                     schema_kwargs["value_role"] = "derived_difference"

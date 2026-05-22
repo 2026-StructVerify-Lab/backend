@@ -41,8 +41,10 @@ Runtime Agent와 Builder Agent가 공유하는 LLM 호출 인터페이스.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import time
 import uuid
 from typing import Any
 
@@ -55,6 +57,65 @@ logger = get_logger(__name__)
 # ── 엔드포인트 ────────────────────────────────────────────────────────────
 HCX_V1_BASE = "https://clovastudio.stream.ntruss.com/v1/chat-completions"
 HCX_V3_BASE = "https://clovastudio.stream.ntruss.com/v3/chat-completions"
+
+
+# ── [2026-05-21] 프로세스 전역 HCX rate limiter ───────────────────────────
+# HCX는 같은 API 키에 *초당 요청 수* 한도가 있어, claim_detector(concurrency=4) +
+# planner + reflect 등 *여러 코드 경로*가 짧은 시간 안에 동시에 호출하면 429 폭주.
+# concurrency 제한만으론 phase 간 burst를 못 막으므로, 모든 HCX 호출(v1/v3/structured)
+# 직전에 acquire()를 통과시켜 *호출 사이 최소 간격*을 강제한다.
+# min_interval 단위: 초. 0이면 비활성.
+class _HCXRateLimiter:
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._last_call_ts: float = 0.0
+        self._min_interval: float = 0.0
+        self._headers_logged: bool = False
+
+    def configure(self, interval_sec: float) -> None:
+        """max(기존, 새 값)로 갱신 — 더 빡센 설정이 이김."""
+        if interval_sec > self._min_interval:
+            self._min_interval = interval_sec
+            logger.info(
+                f"[hcx_rate_limiter] min_interval={interval_sec:.3f}s "
+                f"(= ≤{1.0/interval_sec:.1f} req/sec)"
+            )
+
+    async def acquire(self) -> None:
+        if self._min_interval <= 0:
+            return
+        async with self._lock:
+            now = time.monotonic()
+            elapsed = now - self._last_call_ts
+            wait = self._min_interval - elapsed
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_call_ts = time.monotonic()
+
+    def _log_headers_if_first(self, headers: Any) -> None:
+        """첫 429 응답 헤더의 rate-limit 관련 키를 한 번만 로그. HCX 실제 한도 파악용."""
+        if self._headers_logged:
+            return
+        self._headers_logged = True
+        try:
+            keys_of_interest = [
+                k for k in headers.keys()
+                if any(t in k.lower() for t in ("ratelimit", "rate-limit", "retry-after", "quota"))
+            ]
+            if keys_of_interest:
+                info = {k: headers.get(k) for k in keys_of_interest}
+                logger.warning(f"[hcx_rate_limiter] HCX 429 응답 헤더 (한도 진단용): {info}")
+            else:
+                # 알려진 key 없으면 *모든 헤더 키* 한 번 로그 (이름 단서라도)
+                logger.warning(
+                    f"[hcx_rate_limiter] HCX 429 응답 헤더 키 (rate-limit 관련 없음): "
+                    f"{list(headers.keys())[:20]}"
+                )
+        except Exception as _e:
+            logger.debug(f"[hcx_rate_limiter] 헤더 로그 실패: {_e}")
+
+
+_hcx_rate_limiter = _HCXRateLimiter()
 
 
 class LLMClient:
@@ -100,6 +161,12 @@ class LLMClient:
             self.openai_api_key = openai_key_env
         else:
             self.openai_api_key = os.environ.get(openai_key_env, "")
+
+        # [2026-05-21] 프로세스 전역 HCX rate limit — config에서 min_call_interval_ms.
+        # 여러 LLMClient 인스턴스가 *같은 limiter*를 공유 → 모든 HCX 호출 직렬 간격 보장.
+        _interval_ms = float(self.config.get("min_call_interval_ms", 0) or 0)
+        if _interval_ms > 0:
+            _hcx_rate_limiter.configure(_interval_ms / 1000.0)
 
     # ── 공개 인터페이스 ──────────────────────────────────────────────────────
 
@@ -222,10 +289,11 @@ class LLMClient:
         }
 
         # [박재윤 - 2026-05-14]: 429 exponential backoff (1초 → 2초 → 4초)
-        import asyncio
+        # [2026-05-21] 매 시도 직전 전역 rate limiter 통과 — phase 간 burst 차단.
         max_retries = 3
         for attempt in range(max_retries):
             try:
+                await _hcx_rate_limiter.acquire()
                 async with httpx.AsyncClient(timeout=60.0) as client:
                     resp = await client.post(url, json=payload, headers=headers)
                     resp.raise_for_status()
@@ -239,8 +307,14 @@ class LLMClient:
                 return content
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 429 and attempt < max_retries - 1:
-                    wait = 2 ** attempt
-                    logger.warning(f"HCX v1 429 rate limit — {wait}초 후 재시도 ({attempt+1}/{max_retries})")
+                    # [2026-05-21] jitter 추가 — 동시 N개 호출이 모두 429 받으면 같은 시점에
+                    # retry해 또 burst 발생. 0~0.7s 랜덤 지연으로 동기화 깸.
+                    import random as _random
+                    wait = (2 ** attempt) + _random.uniform(0.0, 0.7)
+                    # [2026-05-21] HCX 응답 헤더에 rate limit 정보 있는지 한 번만 로그.
+                    # X-RateLimit-* / Retry-After 등이 있으면 한도 추정 가능.
+                    _hcx_rate_limiter._log_headers_if_first(e.response.headers)
+                    logger.warning(f"HCX v1 429 rate limit — {wait:.2f}초 후 재시도 ({attempt+1}/{max_retries})")
                     await asyncio.sleep(wait)
                 else:
                     logger.error(f"HCX v1 HTTP 오류: {e.response.status_code} — {e.response.text[:200]}")
@@ -289,10 +363,11 @@ class LLMClient:
         }
 
         # [박재윤 - 2026-05-14]: 429 exponential backoff (1초 → 2초 → 4초)
-        import asyncio
+        # [2026-05-21] 매 시도 직전 전역 rate limiter 통과 — phase 간 burst 차단.
         max_retries = 3
         for attempt in range(max_retries):
             try:
+                await _hcx_rate_limiter.acquire()
                 async with httpx.AsyncClient(timeout=60.0) as client:
                     resp = await client.post(url, json=payload, headers=headers)
                     resp.raise_for_status()
@@ -306,8 +381,11 @@ class LLMClient:
                 return content
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 429 and attempt < max_retries - 1:
-                    wait = 2 ** attempt
-                    logger.warning(f"HCX v3 429 rate limit — {wait}초 후 재시도 ({attempt+1}/{max_retries})")
+                    # [2026-05-21] jitter 추가 (동시 N개 retry burst 동기화 깸)
+                    import random as _random
+                    wait = (2 ** attempt) + _random.uniform(0.0, 0.7)
+                    _hcx_rate_limiter._log_headers_if_first(e.response.headers)
+                    logger.warning(f"HCX v3 429 rate limit — {wait:.2f}초 후 재시도 ({attempt+1}/{max_retries})")
                     await asyncio.sleep(wait)
                 else:
                     logger.error(f"HCX v3 HTTP 오류: {e.response.status_code} — {e.response.text[:200]}")
@@ -364,8 +442,10 @@ class LLMClient:
         }
 
         max_retries = 3
+        # [2026-05-21] 전역 rate limiter 통과 — phase 간 burst 차단
         for attempt in range(max_retries):
             try:
+                await _hcx_rate_limiter.acquire()
                 async with httpx.AsyncClient(timeout=60.0) as client:
                     resp = await client.post(url, json=payload, headers=headers)
                     resp.raise_for_status()
@@ -382,9 +462,12 @@ class LLMClient:
 
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 429 and attempt < max_retries - 1:
-                    wait = 2 ** attempt
+                    # [2026-05-21] jitter 추가 (동시 N개 retry burst 동기화 깸)
+                    import random as _random
+                    wait = (2 ** attempt) + _random.uniform(0.0, 0.7)
+                    _hcx_rate_limiter._log_headers_if_first(e.response.headers)
                     logger.warning(
-                        f"HCX Structured 429 rate limit — {wait}초 후 재시도 "
+                        f"HCX Structured 429 rate limit — {wait:.2f}초 후 재시도 "
                         f"({attempt+1}/{max_retries})"
                     )
                     await asyncio.sleep(wait)

@@ -223,16 +223,33 @@ class Workspace:
 
     # ── 초기화 ───────────────────────────────────────────────
     def initialize(self, source_text: str, meta: dict | None = None) -> None:
-        """Job 시작 시 호출. source + meta 저장."""
+        """Job 시작 시 호출. source + meta 저장.
+
+        [P23 2026-05-22] idempotent하게 변경.
+        - meta.json은 *없을 때만* 작성 (created_at 보존)
+        - source.txt는 *매번 덮어씀*
+
+        이유: scope=doc_hash 모드에서 같은 본문이면 같은 워크스페이스 dir 재사용.
+        P18 이전 코드(sentence-join 결과를 source.txt에 저장)에서 만든 dir이
+        남아있으면, P18에서 raw_text를 박는 새 로직이 *initialize 호출 자체가 안 돼*
+        반영 안 됨. 결과: source.txt가 stale → sv_platform이 Job.source_data와
+        매칭 못 함 → URL 입력 partial 실시간 노출 실패.
+        """
         meta = dict(meta) if meta else {}
         meta.setdefault("job_id", self.job_id)
         meta.setdefault("created_at", datetime.now(timezone.utc).isoformat())
-        self.backend.write_text(
-            self._meta_key(),
-            json.dumps(meta, ensure_ascii=False, indent=2, default=str),
-        )
+        # meta는 idempotent — 이미 있으면 새 created_at으로 덮어쓰지 않음
+        if not self.backend.exists(self._meta_key()):
+            self.backend.write_text(
+                self._meta_key(),
+                json.dumps(meta, ensure_ascii=False, indent=2, default=str),
+            )
+        # source.txt는 매번 최신 raw_text로 덮어씀 (stale 방지)
         self.backend.write_text(self._source_key(), source_text)
-        logger.info(f"[workspace] initialized: job_id={self.job_id}")
+        logger.info(
+            f"[workspace] initialized: job_id={self.job_id} "
+            f"(source.txt sync {len(source_text)}자)"
+        )
 
     def create_claim_dir(self, claim_id: str | UUID, claim_data: dict) -> None:
         """claim 작업 디렉토리 생성 + 빈 memory 초기화."""
@@ -312,6 +329,94 @@ class Workspace:
     def _successful_stat_ids_key(self) -> str:
         return f"{self._prefix}/successful_stat_ids.json"
 
+    # ── [P20 2026-05-22] KOSIS API raw 응답 캐시 ────────────────────────
+    # 같은 (stat_id, prdSe, startPrdDe, endPrdDe, newEstPrdCnt) 조합 호출을
+    # workspace-scope로 캐싱. 같은 job 내 다른 sub-claim들이 같은 표를 호출하면
+    # 즉시 hit. scope=doc_hash 모드면 같은 본문 재검증 시 전체 KOSIS API call 0건.
+    # TTL은 config.kosis.cache_ttl_hours (default 24, 0이면 영구).
+    def _kosis_cache_dir(self) -> str:
+        return f"{self._prefix}/kosis_cache"
+
+    @staticmethod
+    def make_kosis_cache_key(
+        candidate_id: str,
+        fetch_params: dict,
+    ) -> str:
+        """KOSIS fetch 파라미터 → cache key (filesystem-safe)."""
+        parts = [
+            str(candidate_id or ""),
+            str(fetch_params.get("prdSe") or ""),
+            str(fetch_params.get("startPrdDe") or ""),
+            str(fetch_params.get("endPrdDe") or ""),
+            str(fetch_params.get("newEstPrdCnt") or ""),
+        ]
+        # / · 공백 → 언더스코어. KOSIS 표 ID/시점은 일반적으로 안전한 ASCII.
+        return "_".join(p.replace("/", "_").replace(" ", "") for p in parts)
+
+    def read_kosis_response_cache(
+        self,
+        key: str,
+        ttl_hours: float | None = 24,
+    ) -> dict | None:
+        """KOSIS API 원시 응답 캐시 조회.
+
+        Args:
+            key: make_kosis_cache_key() 결과.
+            ttl_hours: TTL. None 또는 0이면 영구 캐시 (만료 안 됨).
+        Returns:
+            cache hit: 저장된 response dict (EvidenceData로 그대로 reconstruct 가능).
+            miss/expired: None.
+        """
+        path = f"{self._kosis_cache_dir()}/{key}.json"
+        if not self.backend.exists(path):
+            return None
+        try:
+            entry = json.loads(self.backend.read_text(path))
+        except Exception as e:
+            logger.debug(f"[workspace] kosis_cache 읽기 실패 {key}: {e}")
+            return None
+        # TTL 만료 검사
+        if ttl_hours and ttl_hours > 0:
+            cached_at_str = entry.get("cached_at")
+            if cached_at_str:
+                try:
+                    cached_at = datetime.fromisoformat(
+                        cached_at_str.replace("Z", "+00:00")
+                    )
+                    age_hours = (
+                        datetime.now(timezone.utc) - cached_at
+                    ).total_seconds() / 3600.0
+                    if age_hours > ttl_hours:
+                        logger.info(
+                            f"[workspace] kosis_cache 만료 (age={age_hours:.1f}h "
+                            f"> ttl={ttl_hours}h): {key}"
+                        )
+                        return None
+                except Exception:
+                    pass
+        return entry.get("response")
+
+    def write_kosis_response_cache(self, key: str, response: dict) -> None:
+        """KOSIS API 원시 응답 저장 (TTL 검증은 read 시점)."""
+        if not key or not isinstance(response, dict):
+            return
+        path = f"{self._kosis_cache_dir()}/{key}.json"
+        entry = {
+            "cached_at": datetime.now(timezone.utc).isoformat(),
+            "response": response,
+        }
+        try:
+            self.backend.write_text(
+                path,
+                json.dumps(entry, ensure_ascii=False, indent=2, default=str),
+            )
+            logger.info(
+                f"[workspace] kosis_cache 저장: {key} "
+                f"(value={response.get('value')}, rows={len(response.get('rows', []) or [])})"
+            )
+        except Exception as e:
+            logger.debug(f"[workspace] kosis_cache 저장 실패 {key}: {e}")
+
     def read_successful_stat_ids(self) -> list[str]:
         """[패치 A] job에서 fetch_evidence가 성공한 stat_table_id 목록.
 
@@ -363,18 +468,25 @@ class Workspace:
     def append_verified_fact(self, fact: dict) -> None:
         """검증 완료된 수치를 job 공유 저장소에 추가.
 
-        fact: {indicator, time_period, value, unit, source, claim_id, verdict}
-        동일 (indicator, time_period) 항목이 이미 있으면 덮어쓰지 않고
-        그대로 둔다 (최초 검증 결과 우선 — 일관성).
+        fact: {indicator, time_period, population, value, unit, source, claim_id, verdict}
+        [2026-05-21] population을 dedupe 키에 포함 — 같은 (indicator, time)이라도
+        지역별 sub-claim은 *별개 entry*로 저장돼야 함. 안 그러면 강원도(1336),
+        서울(12741), 인천(2778) 다 같은 키로 들어가서 첫 번째 값만 살아남고
+        나머지가 모두 그 값으로 캐시 적중 (22:54 트레이스 — 서울 sub-claim이
+        강원도 값/197 등 다른 지역 값을 받아 잘못된 검증).
+        동일 (indicator, time, population) 항목이 이미 있으면 덮어쓰지 않음
+        (최초 검증 결과 우선 — 일관성).
         """
         if not fact or fact.get("value") is None:
             return
         facts = self.read_verified_facts()
         ind = str(fact.get("indicator", "") or "").strip()
         tp = str(fact.get("time_period", "") or "").strip()
+        pop = str(fact.get("population", "") or "").strip()
         for f in facts:
             if (str(f.get("indicator", "") or "").strip() == ind
-                    and str(f.get("time_period", "") or "").strip() == tp):
+                    and str(f.get("time_period", "") or "").strip() == tp
+                    and str(f.get("population", "") or "").strip() == pop):
                 return  # 이미 있음 — 중복 저장 안 함
         fact = dict(fact)
         fact.setdefault("recorded_at", datetime.now(timezone.utc).isoformat())
@@ -385,7 +497,7 @@ class Workspace:
         )
         logger.info(
             f"[workspace] verified_fact 저장: "
-            f"indicator={ind!r} time={tp!r} value={fact.get('value')}"
+            f"indicator={ind!r} time={tp!r} population={pop!r} value={fact.get('value')}"
         )
 
     # ── [S 패치 2026-05-21] sent_id 기반 sibling evidence 공유 ────────
@@ -462,16 +574,23 @@ class Workspace:
         return []
 
     def lookup_verified_fact(
-        self, indicator: str, time_period: str, unit_hint: str | None = None
+        self,
+        indicator: str,
+        time_period: str,
+        unit_hint: str | None = None,
+        population: str | None = None,
     ) -> dict | None:
-        """(indicator, time_period)로 검증된 사실 조회. 없으면 None.
+        """(indicator, time_period, population)로 검증된 사실 조회. 없으면 None.
 
         [수정 v6.22] 매칭 규칙을 엄격하게 — 잘못된 캐시 재사용 방지.
         [BEFORE 버그] indicator 포함관계('A' in 'A 증가율')만으로 매칭 →
           '출생아 수 증가율'(%) claim이 '출생아 수'(명) 230028을 재사용.
+        [2026-05-21] population 매칭 추가 — 같은 (indicator, time)이라도
+          다른 지역 sub-claim의 캐시 값이 적중하는 버그 차단.
+          population 인자가 주어지면 정확히 일치하는 entry만 반환.
         [AFTER 수정]
-          1) indicator + time_period 정확 일치 (+ unit 호환)
-          2) base indicator(파생 접미사 제거) 일치 + unit 호환
+          1) indicator + time_period + population 정확 일치 (+ unit 호환)
+          2) base indicator(파생 접미사 제거) 일치 + population 일치 + unit 호환
         '증가율'·'차이' 같은 파생 지표는 원지표와 unit이 다르므로
         unit_hint 가드가 자동으로 걸러낸다.
 
@@ -480,6 +599,7 @@ class Workspace:
         """
         ind = str(indicator or "").strip()
         tp = str(time_period or "").strip()
+        pop_req = str(population or "").strip() if population else ""
         if not ind or not tp:
             return None
         facts = self.read_verified_facts()
@@ -494,10 +614,22 @@ class Workspace:
                 return True  # 한쪽이라도 비었으면 판별 불가 → 통과
             return fu == hu
 
-        # 1차: indicator + time_period 정확 일치 (+ unit 호환)
+        def _pop_ok(fact_pop: str) -> bool:
+            """population 일치 검사. 요청 pop이 없거나 fact pop이 없으면 통과 (구버전 entry 호환).
+            요청 pop이 있고 fact pop이 있으면 양방향 substring 매칭 (강원/강원도, 서울/서울특별시)."""
+            if not pop_req:
+                return True  # 호출자가 population 안 넘기면 기존 동작
+            if not fact_pop:
+                return False  # 요청은 구체적인데 fact는 region 미지정 → 다른 sub-claim 데이터 의심
+            fp = fact_pop.strip()
+            return pop_req in fp or fp in pop_req
+
+        # 1차: indicator + time_period + population 정확 일치 (+ unit 호환)
         for f in facts:
             if (str(f.get("indicator", "") or "").strip() == ind
                     and str(f.get("time_period", "") or "").strip() == tp):
+                if not _pop_ok(str(f.get("population", "") or "")):
+                    continue
                 if _unit_ok(str(f.get("unit", "") or "")):
                     return f
                 logger.info(
@@ -507,12 +639,14 @@ class Workspace:
                 )
                 return None
 
-        # 2차: base indicator(파생 접미사 제거) 일치 + unit 호환
+        # 2차: base indicator(파생 접미사 제거) 일치 + population 일치 + unit 호환
         # '증가율'/'차이' 지표는 base가 같아도 unit이 다르므로 _unit_ok가
         # 걸러준다. 즉 안전한 경우(같은 단위·동일 base 지표)만 재사용.
         ind_base = _strip_derived_suffix(ind)
         for f in facts:
             if str(f.get("time_period", "") or "").strip() != tp:
+                continue
+            if not _pop_ok(str(f.get("population", "") or "")):
                 continue
             f_ind = str(f.get("indicator", "") or "").strip()
             f_base = _strip_derived_suffix(f_ind)
