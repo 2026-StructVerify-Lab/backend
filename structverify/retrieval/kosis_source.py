@@ -16,6 +16,7 @@ Phase D 개선사항:
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any
 
@@ -274,13 +275,14 @@ def _indicator_in_rows(rows: list[dict], indicator: str | None) -> bool:
     return False
 
 
-def _select_best_row(
+async def _select_best_row(
     rows: list[dict],
     indicator: str | None,
     time_period: str | None,
     population: str | None = None,
     unit_hint: str | None = None,
     match_criteria: dict[str, Any] | None = None,
+    llm_fallback_ctx: dict[str, Any] | None = None,
 ) -> dict | None:
     """KOSIS row 목록에서 indicator + time_period 매칭 row 1개 선택.
 
@@ -408,11 +410,42 @@ def _select_best_row(
                 return True
         return False
 
+    # 연 claim('2025')에 분기/월 row('202512')의 prefix match를 허용할지
+    # 판단하는 보수적 휴리스틱. stock(저량) 변수만 허용 — flow(유량)/rate(비율)는
+    # 단일 분기/월 값을 연값으로 받으면 silent 데이터 손실 (예: 1월 출생아수를
+    # 연합계로 잘못 매칭).
+    #
+    # stock 신호:
+    #   - UNIT_NM이 보유/존재 단위 ('대', '개소', '병상', '기관', '곳', '동', '호')
+    #   - ITM_NM에 '현황'/'보유'/'재적' 같은 *snapshot 의미어* 포함
+    # 둘 다 보고 *둘 중 하나라도* 양성이면 stock 추정 (재현율 우선).
+    # 한쪽이라도 *명확한 비-stock 단위*('%', '원/명', '℃')면 무조건 거부.
+    _STOCK_UNITS = {"대", "개소", "병상", "기관", "곳", "동", "호"}
+    _NON_STOCK_UNITS = {"%", "원/명", "℃", "도", "배", "점", "위", "원/㎡"}
+    _STOCK_ITM_KEYWORDS = ("현황", "보유", "재적", "재고")
+
+    def _is_stock_row(row: dict) -> bool:
+        unit = str(row.get("UNIT_NM", "") or "").strip()
+        if unit in _NON_STOCK_UNITS or "%" in unit:
+            return False
+        if unit in _STOCK_UNITS:
+            return True
+        itm = str(row.get("ITM_NM", "") or "")
+        return any(k in itm for k in _STOCK_ITM_KEYWORDS)
+
     def _time_match(row: dict) -> bool:
         if not prd_target:
             return True
         prd = str(row.get("PRD_DE", "") or "").strip()
-        return prd == prd_target
+        if prd == prd_target:
+            return True
+        # [2026-05-25] 연 claim('2025') ↔ 분기/월 row('202512') prefix match.
+        # stock 변수일 때만 허용 (연말/최신 분기 스냅샷 ≈ 연값).
+        # flow/rate는 단일 시점값을 연값으로 오인할 위험 → 거부.
+        if len(prd_target) == 4 and len(prd) > 4 and prd.startswith(prd_target):
+            if _is_stock_row(row):
+                return True
+        return False
 
     # [v6.19] claim 시점 단위 (월/연/분기)
     _claim_gran = _period_granularity(prd_target)
@@ -549,17 +582,74 @@ def _select_best_row(
     if ind_norm and not _is_derived_indicator:
         ind_matched = [r for r in rows if _ind_match(r)]
         if not ind_matched:
-            logger.warning(
-                f"[_select_best_row] indicator={ind_norm!r} 매칭 row 없음 "
-                f"({len(rows)} rows 검사) → 표 부적합, 다음 candidate 시도"
-            )
-            return None
-        if len(ind_matched) < len(rows):
-            logger.info(
-                f"[_select_best_row] indicator={ind_norm!r} pre-filter: "
-                f"{len(rows)} → {len(ind_matched)} rows"
-            )
-            rows = ind_matched
+            # [P33a 2026-05-22] 매칭 실패 디버그 로그 강화 — 56 row의 unique
+            # ITM_NM/C1~C4_NM 분포를 찍어 *진짜 indicator가 표에 없는지* 또는
+            # *룰 매칭 함수가 못 잡는지* 다음 trace에서 판별 가능하도록.
+            try:
+                _fields_to_log = ("ITM_NM", "C1_NM", "C2_NM", "C3_NM", "C4_NM")
+                for _f in _fields_to_log:
+                    _vals: list[str] = []
+                    _seen: set[str] = set()
+                    for _r in rows:
+                        _v = _r.get(_f)
+                        if _v:
+                            _s = str(_v).strip()
+                            if _s and _s not in _seen:
+                                _seen.add(_s)
+                                _vals.append(_s)
+                    if _vals:
+                        logger.warning(
+                            f"[_select_best_row]   {_f} unique({len(_vals)}): "
+                            f"{_vals[:30]}{'...' if len(_vals) > 30 else ''}"
+                        )
+            except Exception:
+                pass
+
+            # [P33c 2026-05-22] LLM row matching fallback. 룰 매칭 0건일 때
+            # rows의 unique 분류 값 list를 LLM에 던져 *의미적으로* 매칭되는
+            # 컬럼 값을 식별, 해당 row만 통과시킴. llm_fallback_ctx가 없으면
+            # 기존 동작(None 반환). LLM도 매칭 없다면 진짜 표에 없는 것 → None.
+            _ind_matched_via_llm: list[dict] = []
+            if llm_fallback_ctx:
+                try:
+                    from structverify.retrieval.row_matcher import (
+                        llm_select_rows as _llm_select_rows,
+                    )
+                    _ind_matched_via_llm = await _llm_select_rows(
+                        rows=rows,
+                        indicator=ind_norm_raw,
+                        claim_text=str(llm_fallback_ctx.get("claim_text") or "")[:400],
+                        parent_path=str(llm_fallback_ctx.get("parent_path") or ""),
+                        population=str(llm_fallback_ctx.get("population") or population or ""),
+                        config=llm_fallback_ctx.get("config"),
+                    )
+                except Exception as _e:
+                    logger.debug(f"[_select_best_row] LLM row matching 실패: {_e}")
+
+            if _ind_matched_via_llm:
+                logger.info(
+                    f"[_select_best_row] indicator={ind_norm!r} 룰 매칭 0 → "
+                    f"LLM rescued: {len(rows)} → {len(_ind_matched_via_llm)} rows"
+                )
+                rows = _ind_matched_via_llm
+                # [2026-05-25] LLM이 의미적으로 indicator 매칭을 끝낸 rows.
+                # 후속 1·2·3차 가드의 _ind_match는 *같은 룰*로 또 떨어트리므로
+                # (애초에 룰이 못 잡아서 LLM rescue를 부른 거임) 여기서 우회.
+                # 우회 후엔 time/pop/unit 가드만 효력.
+                _ind_match = lambda _r: True  # noqa: E731
+            else:
+                logger.warning(
+                    f"[_select_best_row] indicator={ind_norm!r} 매칭 row 없음 "
+                    f"({len(rows)} rows 검사, LLM도 매칭 0) → 표 부적합, 다음 candidate 시도"
+                )
+                return None
+        else:
+            if len(ind_matched) < len(rows):
+                logger.info(
+                    f"[_select_best_row] indicator={ind_norm!r} pre-filter: "
+                    f"{len(rows)} → {len(ind_matched)} rows"
+                )
+                rows = ind_matched
 
     # 1차: indicator + 정확 시점 (+ population + 단위)
     for r in rows:
@@ -722,7 +812,7 @@ class KOSISDataSource(BaseDataSource):
         if not row:
             return None
         from structverify.retrieval.base_connector import StatRecord
-        return StatRecord(
+        record = StatRecord(
             stat_id=row["stat_id"],
             stat_name=row["stat_name"],
             org_id=row["org_id"],
@@ -736,6 +826,48 @@ class KOSISDataSource(BaseDataSource):
             },
         )
 
+        # ── [2026-05-25] on-demand getMeta enrich ─────────────────────
+        # DB lookup으로 만든 StatRecord는 getMeta_PRD/CMMT가 비어있음.
+        # 이 상태로 _fetch_with_retry에 넘기면 PRD_SE pruning이 무력화되어
+        # Y/M/Q 전 주기를 매번 시도(낭비 4~5 API 호출/표).
+        # 여기서 1회만 enrich → 캐시되어 다음 fetch부터 pruning이 작동.
+        # 비용: 표당 PRD+CMMT 2 API. 절약: 표당 4~5 호출 × 매 fetch.
+        try:
+            if record.org_id and record.stat_id:
+                connector = self._get_connector()
+                api_key = getattr(connector, "api_key", "") or ""
+                base = (
+                    (getattr(connector, "config", {}) or {}).get("base_url")
+                    or getattr(connector, "BASE_URL", "https://kosis.kr/openapi")
+                ).rstrip("/")
+                if api_key:
+                    import httpx as _httpx
+                    from structverify.retrieval.kosis_connector import (
+                        kosis_get_meta as _kosis_get_meta,
+                    )
+                    async with _httpx.AsyncClient() as _client:
+                        _prd, _cmmt = await asyncio.gather(
+                            _kosis_get_meta(
+                                _client, base, api_key,
+                                record.org_id, record.stat_id, "PRD", 15.0,
+                            ),
+                            _kosis_get_meta(
+                                _client, base, api_key,
+                                record.org_id, record.stat_id, "CMMT", 15.0,
+                            ),
+                        )
+                    record.metadata["getMeta_PRD"] = _prd
+                    record.metadata["getMeta_CMMT"] = _cmmt
+                    logger.info(
+                        f"[_lookup_stat_record_by_id] on-demand meta enrich 완료: "
+                        f"{record.stat_id} (PRD/CMMT 2 calls) — "
+                        f"이후 PRD_SE pruning 작동."
+                    )
+        except Exception as e:
+            logger.debug(f"[_lookup_stat_record_by_id] meta enrich 실패 (무시): {e}")
+
+        return record
+
     # ── BaseDataSource 인터페이스 ──
 
     async def search_catalog(
@@ -743,10 +875,33 @@ class KOSISDataSource(BaseDataSource):
         query: str,
         category: list[str] | None = None,
         top_k: int = 10,
+        context: dict[str, Any] | None = None,
     ) -> list[CatalogCandidate]:
-        """KOSIS 카탈로그 검색. KOSISConnector.search(ConnectorQuery) 호출."""
+        """KOSIS 카탈로그 검색. KOSISConnector.search(ConnectorQuery) 호출.
+
+        [P31 2026-05-22] context dict로 schema의 parent_path, raw_claim, population을
+        받아 ConnectorQuery.extra_params에 묶음 → CatalogSearch._extract_category_and_keyword
+        가 LLM 호출 시 활용. parent_path가 있으면 LLM 호출 *skip*하고 KOSIS 카테고리
+        어휘 그대로 사용. raw_claim 있으면 LLM이 전체 문장 보고 카테고리 추출.
+        """
         connector = self._get_connector()
-        cq = self._make_query(query, extra_params={"category": category} if category else {})
+        # extra_params 구성 — category + (P31) context의 schema 정보 머지
+        _extra: dict[str, Any] = {}
+        if category:
+            _extra["category"] = category
+        _ctx = context or {}
+        for _k in ("parent_path", "raw_claim", "population", "indicator"):
+            _v = _ctx.get(_k)
+            if _v:
+                _extra[_k] = _v
+        # _make_query는 indicator/population/time_period를 별도 인자로 받음 (ConnectorQuery
+        # 필드에 매핑). 나머지(parent_path/raw_claim/category)는 extra_params에.
+        cq = self._make_query(
+            query,
+            indicator=_ctx.get("indicator") or query,
+            population=_ctx.get("population"),
+            extra_params=_extra,
+        )
 
         try:
             records = await connector.search(cq)
@@ -771,6 +926,74 @@ class KOSISDataSource(BaseDataSource):
             f"[KOSISDataSource] search_catalog(query={query!r}): {len(candidates)}개 후보"
         )
         return candidates
+
+    async def get_table_meta(
+        self,
+        candidate_id: str,
+        meta_type: str = "ITM",
+    ) -> Any | None:
+        """[P30 2026-05-22] KOSIS getMeta API 호출 — *데이터 X*, 항목/분류 메타만.
+
+        meta_type:
+            - "ITM": 통계항목 list (ITM_ID/ITM_NM). 예: "체외 충격파 쇄석술기" 같은
+                     세부 항목 식별 가능.
+            - "OBJL01"~"OBJL08": 분류 항목 list (C1_NM 등). 지역/연령 등.
+            - "PRD": 수록주기, "CMMT": 표 설명 (참고).
+
+        catalog_search → fetch_evidence 사이에서 *표 내부 구조*를 LLM이 판단해야
+        할 때 사용. fetch보다 가벼움 (KOSIS 응답이 메타만이라 ~1초).
+        """
+        import httpx
+        from structverify.retrieval.kosis_connector import (
+            kosis_get_meta as _kosis_get_meta,
+        )
+
+        if not candidate_id:
+            return None
+
+        # connector에서 base_url + api_key + org_id 추출
+        connector = self._get_connector()
+        base = (connector.config.get("base_url") or connector.BASE_URL).rstrip("/")
+        api_key = getattr(connector, "api_key", "") or ""
+        if not api_key:
+            logger.debug(f"[KOSISDataSource.get_table_meta] api_key 없음 → None")
+            return None
+        timeout = float(connector.config.get("timeout", 30))
+
+        # org_id를 _record_cache에서 조회 (없으면 stat_record_by_id로 fetch)
+        rec = self._record_cache.get(candidate_id)
+        if rec is None:
+            rec = await self._lookup_stat_record_by_id(candidate_id)
+            if rec is not None:
+                self._record_cache[candidate_id] = rec
+        org_id = ""
+        if rec is not None:
+            org_id = str(getattr(rec, "org_id", "") or (rec.metadata or {}).get("ORG_ID", "") or "")
+        if not org_id:
+            logger.debug(
+                f"[KOSISDataSource.get_table_meta] {candidate_id}: org_id 없음 → None"
+            )
+            return None
+
+        try:
+            async with httpx.AsyncClient() as client:
+                data = await _kosis_get_meta(
+                    client, base, api_key, org_id, candidate_id, meta_type, timeout,
+                )
+        except Exception as e:
+            logger.debug(
+                f"[KOSISDataSource.get_table_meta] {candidate_id}/{meta_type} 실패: {e}"
+            )
+            return None
+
+        # error payload면 None
+        if isinstance(data, dict) and (data.get("kosis_error") or data.get("err")):
+            logger.debug(
+                f"[KOSISDataSource.get_table_meta] {candidate_id}/{meta_type} → "
+                f"error={data.get('kosis_error') or data.get('errMsg')}"
+            )
+            return None
+        return data
 
     async def fetch_evidence(
         self,
@@ -824,6 +1047,52 @@ class KOSISDataSource(BaseDataSource):
                         f"[KOSISDataSource] stat_record 캐시·DB 모두 미스: {candidate_id} "
                         f"— connector가 placeholder로 fetch 시도하지만 org_id 없어 실패 가능"
                     )
+
+        # ── [2026-05-25] cache hit이든 fresh든 — metadata 비어있으면 enrich ──
+        # catalog_search나 다른 경로에서 record가 cache에 들어갈 때 metadata에
+        # getMeta_PRD/CMMT가 비어있는 경우가 있음. 이 상태로 _fetch_with_retry에
+        # 넘기면 PRD_SE pruning이 무력화되어 Y/M/Q 전 주기 시도 (낭비).
+        # 여기서 record를 *최종 확인*하고 비어있으면 1회 enrich → 캐시에도 반영.
+        _rec = params.get("stat_record")
+        if _rec is not None:
+            _meta = getattr(_rec, "metadata", None) or {}
+            _has_prd = bool(_meta.get("getMeta_PRD"))
+            _org_id = getattr(_rec, "org_id", "") or _meta.get("ORG_ID", "")
+            if not _has_prd and _org_id:
+                try:
+                    import httpx as _httpx
+                    from structverify.retrieval.kosis_connector import (
+                        kosis_get_meta as _kosis_get_meta,
+                    )
+                    _conn = self._get_connector()
+                    _api_key = getattr(_conn, "api_key", "") or ""
+                    _base = (
+                        (getattr(_conn, "config", {}) or {}).get("base_url")
+                        or getattr(_conn, "BASE_URL", "https://kosis.kr/openapi")
+                    ).rstrip("/")
+                    if _api_key:
+                        async with _httpx.AsyncClient() as _client:
+                            _prd, _cmmt = await asyncio.gather(
+                                _kosis_get_meta(
+                                    _client, _base, _api_key,
+                                    _org_id, candidate_id, "PRD", 15.0,
+                                ),
+                                _kosis_get_meta(
+                                    _client, _base, _api_key,
+                                    _org_id, candidate_id, "CMMT", 15.0,
+                                ),
+                            )
+                        if _rec.metadata is None:
+                            _rec.metadata = {}
+                        _rec.metadata["getMeta_PRD"] = _prd
+                        _rec.metadata["getMeta_CMMT"] = _cmmt
+                        self._record_cache[candidate_id] = _rec  # 캐시에도 반영
+                        logger.info(
+                            f"[KOSISDataSource] on-demand meta enrich (cache hit 경로): "
+                            f"{candidate_id} (PRD/CMMT 2 calls) — 이후 PRD_SE pruning 작동."
+                        )
+                except Exception as _e:
+                    logger.debug(f"[KOSISDataSource] cache hit meta enrich 실패 (무시): {_e}")
 
         cq = params.get("query")
         if cq is None:
@@ -893,6 +1162,39 @@ class KOSISDataSource(BaseDataSource):
                     f"[KOSISDataSource] time_period {tp!r} → "
                     f"prdSe={prd_se!r} startPrdDe={start!r} endPrdDe={end!r}"
                 )
+
+        # ── [P34 2026-05-22] Dimension resolver — N차원 슬라이스 코드 결정 ──
+        # KOSIS connector는 기본적으로 cmmt_rows[0]의 ITM_ID/OBJ_ID를 박는데
+        # 이게 보통 *합계 코드*라 세부 항목 row가 누락됨. fetch *전*에 표의
+        # getMeta(ITM/OBJL01~)를 받아 LLM이 claim의 indicator/population과
+        # 매칭되는 코드를 결정 → fetch_params에 dim_overrides로 박음.
+        # preview 모드일 때는 skip (preview는 표 구조 식별용).
+        if (
+            not params.get("_preview")
+            and not fetch_params.get("dim_overrides")
+        ):
+            _dr_cfg = (self._connector_config or {}).get("dimension_resolver") or {}
+            if bool(_dr_cfg.get("enabled", True)):
+                try:
+                    from structverify.retrieval.dimension_resolver import (
+                        resolve_dimensions as _resolve_dims,
+                    )
+                    _dims = await _resolve_dims(
+                        stat_id=candidate_id,
+                        stat_name=stat_name_str,
+                        source=self,
+                        indicator=str(params.get("indicator") or ""),
+                        population=str(params.get("population") or ""),
+                        claim_text=str(params.get("raw_claim") or params.get("claim_text") or ""),
+                        parent_path=str(params.get("parent_path") or ""),
+                        config={
+                            "kosis": {"dimension_resolver": _dr_cfg},
+                        },
+                    )
+                    if _dims:
+                        fetch_params["dim_overrides"] = _dims
+                except Exception as _e:
+                    logger.debug(f"[KOSISDataSource] dimension_resolver 실패: {_e}")
 
         # ── [P20 2026-05-22] workspace KOSIS 응답 캐시 ──────────────────
         # workspace가 주어졌고 cache 메서드가 있으면 cache key 만들어 조회.
@@ -1040,7 +1342,23 @@ class KOSISDataSource(BaseDataSource):
         # → 먼저 이미 fetch한 rows 안에 indicator가 있는지 확인하고,
         #   있으면 '데이터에 지표가 실재하는 관련 표'이므로 통과시킨다.
         #   rows에 없을 때만 기존 이름 기반 가드로 폴백.
-        if relevance_query and not _is_table_relevant(relevance_query, stat_name_str):
+        # [P32 2026-05-22] 룰베이스 가드 false negative 회복용 LLM fallback:
+        #   - indicator의 토큰이 2글자뿐이거나, table_name과 동일 분류 트리에 있지만
+        #     단어 형태가 달라 룰이 못 잡는 케이스 (예: "체외 충격파 쇄석술 장비"
+        #     vs "시군구별 주요 의료장비 현황")에서 LLM이 *의미적*으로 한 번 더 판단.
+        #   - 룰 통과 시엔 LLM 호출 안 함 (속도). 룰 거부 + rows/prior_success로도
+        #     건질 수 없을 때만 LLM에 위임.
+        # [2026-05-26] relevance_guard.enabled=false면 가드 전체 우회.
+        # catalog_ranker가 이미 의미 점수로 거부했을 거라 중복 판단 불필요.
+        _kosis_cfg_top = self._connector_config or {}
+        _rg_cfg_top = _kosis_cfg_top.get("relevance_guard") or {}
+        _rg_enabled = bool(_rg_cfg_top.get("enabled", True))
+        if not _rg_enabled:
+            logger.debug(
+                f"[KOSISDataSource] relevance_guard.enabled=false → "
+                f"테이블 관련성 가드 전체 우회: [{stat_id_str}]"
+            )
+        elif relevance_query and not _is_table_relevant(relevance_query, stat_name_str):
             if _indicator_in_rows(rows, claim_indicator):
                 logger.info(
                     f"[KOSISDataSource] 표 이름엔 지표 없으나 행 데이터에 "
@@ -1056,12 +1374,52 @@ class KOSISDataSource(BaseDataSource):
                     f"[{stat_id_str}] — row 매칭 단계에서 indicator 검증"
                 )
             else:
-                logger.warning(
-                    f"[KOSISDataSource] 테이블 관련성 없음 → fetch 거부: "
-                    f"[{stat_id_str}] {stat_name_str!r} vs "
-                    f"indicator={claim_indicator!r} population={claim_population!r}"
-                )
-                return None
+                # [P32] LLM fallback — relevance_guard.llm_fallback=true면 룰 거부
+                # 결정 전에 의미 기반 LLM 판단 1회. self.config가 KOSISDataSource에는
+                # 없으므로 _connector_config(= data_sources.kosis 섹션) 안의
+                # relevance_guard 키를 본다. LLM config는 LLMClient가 환경변수에서
+                # NCP_API_KEY를 알아서 찾으므로 None으로 넘겨도 동작.
+                _kosis_cfg = self._connector_config or {}
+                _rg_cfg = _kosis_cfg.get("relevance_guard") or {}
+                _llm_rescued = False
+                if bool(_rg_cfg.get("llm_fallback", True)):
+                    try:
+                        from structverify.retrieval.relevance_judge import (
+                            is_table_relevant_semantic as _llm_judge,
+                        )
+                        _claim_text = (params.get("raw_claim") or params.get("claim_text") or "")
+                        _parent_path = (params.get("parent_path") or "")
+                        _rel, _reason = await _llm_judge(
+                            claim_text=str(_claim_text)[:400],
+                            indicator=claim_indicator,
+                            population=claim_population,
+                            parent_path=str(_parent_path),
+                            table_name=stat_name_str,
+                            config={"kosis": {"relevance_guard": _rg_cfg}},
+                        )
+                        if _rel is True:
+                            _llm_rescued = True
+                            logger.info(
+                                f"[KOSISDataSource] 룰 거부 → LLM rescued: "
+                                f"[{stat_id_str}] {stat_name_str!r} "
+                                f"(reason={_reason[:80]!r})"
+                            )
+                        elif _rel is False:
+                            logger.info(
+                                f"[KOSISDataSource] 룰 + LLM 둘 다 거부: "
+                                f"[{stat_id_str}] (reason={_reason[:80]!r})"
+                            )
+                        # _rel is None (LLM 실패/파싱 실패) → 보수적으로 룰 결정 유지
+                    except Exception as _e:
+                        logger.debug(f"[KOSISDataSource] LLM relevance fallback 실패: {_e}")
+
+                if not _llm_rescued:
+                    logger.warning(
+                        f"[KOSISDataSource] 테이블 관련성 없음 → fetch 거부: "
+                        f"[{stat_id_str}] {stat_name_str!r} vs "
+                        f"indicator={claim_indicator!r} population={claim_population!r}"
+                    )
+                    return None
 
         # ★ rows에서 indicator + time_period 매칭 row 직접 선택
         # connector가 drows[0]만 official_value로 만들기 때문에 통합표에서 잘못된 row를 받음.
@@ -1086,13 +1444,33 @@ class KOSISDataSource(BaseDataSource):
 
         best_row = None
         if rows:
-            best_row = _select_best_row(
+            # [P33c 2026-05-22] llm_fallback_ctx — _select_best_row가 indicator
+            # 룰 매칭 0건일 때 LLM row matcher에 위임. raw_claim/parent_path은
+            # P32 흐름으로 이미 params에 들어옴 (fetch_evidence Tool에서 주입).
+            _kosis_cfg_for_row = self._connector_config or {}
+            _row_llm_enabled = bool(
+                (_kosis_cfg_for_row.get("relevance_guard") or {}).get(
+                    "row_match_llm_fallback", True
+                )
+            )
+            _row_llm_ctx: dict[str, Any] | None = None
+            if _row_llm_enabled:
+                _row_llm_ctx = {
+                    "claim_text": params.get("raw_claim") or params.get("claim_text") or "",
+                    "parent_path": params.get("parent_path") or "",
+                    "population": params.get("population") or "",
+                    "config": {
+                        "kosis": {"relevance_guard": _kosis_cfg_for_row.get("relevance_guard") or {}},
+                    },
+                }
+            best_row = await _select_best_row(
                 rows,
                 indicator=params.get("indicator"),
                 time_period=params.get("time_period"),
                 population=params.get("population"),
                 unit_hint=params.get("unit_hint"),
                 match_criteria=params.get("match_criteria"),
+                llm_fallback_ctx=_row_llm_ctx,
             )
 
         if best_row is not None:
