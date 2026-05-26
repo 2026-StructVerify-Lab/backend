@@ -329,6 +329,105 @@ class Workspace:
     def _successful_stat_ids_key(self) -> str:
         return f"{self._prefix}/successful_stat_ids.json"
 
+    # ── [2026-05-26] fetched_values 캐시 (job-level) ──────────────────
+    # 같은 (stat_id, indicator, time, population)에 대한 fetch 결과 즉시 저장.
+    # verified_facts는 finish 시 저장이라 *같은 claim 안에서 반복 fetch* 시
+    # 적중 못 함. fetched_values는 fetch 성공 직후 저장 → 같은 claim의 다음
+    # iter도, 같은 job의 다른 claim도 재사용.
+    # 키: (stat_id, indicator, time_period, population) 정규화 후 비교.
+    def _fetched_values_key(self) -> str:
+        return f"{self._prefix}/fetched_values.json"
+
+    @staticmethod
+    def _norm_key_part(s: str | None) -> str:
+        """캐시 키 정규화 — 공백 제거, 소문자, None은 빈 문자열."""
+        if s is None:
+            return ""
+        return str(s).strip().replace(" ", "").lower()
+
+    def read_fetched_values(self) -> list[dict]:
+        """fetched_values 캐시 전체 read.
+
+        각 항목: {stat_id, indicator, time_period, population, evidence, recorded_at}
+        """
+        key = self._fetched_values_key()
+        if not self.backend.exists(key):
+            return []
+        try:
+            return json.loads(self.backend.read_text(key))
+        except Exception:
+            return []
+
+    def lookup_fetched_value(
+        self,
+        stat_id: str,
+        indicator: str,
+        time_period: str,
+        population: str | None = None,
+    ) -> dict | None:
+        """캐시에서 매칭 evidence 검색. 없으면 None.
+
+        정규화 비교: 공백/대소문자 무시. population은 빈/None도 매칭.
+        """
+        sid_n = self._norm_key_part(stat_id)
+        ind_n = self._norm_key_part(indicator)
+        tp_n = self._norm_key_part(time_period)
+        pop_n = self._norm_key_part(population)
+        if not sid_n or not ind_n or not tp_n:
+            return None
+        for entry in self.read_fetched_values():
+            if (self._norm_key_part(entry.get("stat_id")) == sid_n
+                    and self._norm_key_part(entry.get("indicator")) == ind_n
+                    and self._norm_key_part(entry.get("time_period")) == tp_n
+                    and self._norm_key_part(entry.get("population")) == pop_n):
+                return entry.get("evidence")
+        return None
+
+    def append_fetched_value(
+        self,
+        stat_id: str,
+        indicator: str,
+        time_period: str,
+        population: str | None,
+        evidence: dict,
+    ) -> None:
+        """fetch 성공 결과를 캐시에 저장. 같은 키 entry가 있으면 덮어쓰지 않음."""
+        if not evidence or evidence.get("value") is None:
+            return
+        sid_n = self._norm_key_part(stat_id)
+        ind_n = self._norm_key_part(indicator)
+        tp_n = self._norm_key_part(time_period)
+        pop_n = self._norm_key_part(population)
+        if not sid_n or not ind_n or not tp_n:
+            return
+        entries = self.read_fetched_values()
+        for e in entries:
+            if (self._norm_key_part(e.get("stat_id")) == sid_n
+                    and self._norm_key_part(e.get("indicator")) == ind_n
+                    and self._norm_key_part(e.get("time_period")) == tp_n
+                    and self._norm_key_part(e.get("population")) == pop_n):
+                return  # 이미 있음
+        entries.append({
+            "stat_id": stat_id,
+            "indicator": indicator,
+            "time_period": time_period,
+            "population": population or "",
+            "evidence": dict(evidence) if hasattr(evidence, "items") else evidence,
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+        })
+        try:
+            self.backend.write_text(
+                self._fetched_values_key(),
+                json.dumps(entries, ensure_ascii=False, indent=2, default=str),
+            )
+            logger.info(
+                f"[workspace] fetched_value 저장: stat_id={stat_id!r} "
+                f"indicator={indicator!r} time={time_period!r} "
+                f"population={population!r} value={evidence.get('value')}"
+            )
+        except Exception as e:
+            logger.debug(f"[workspace] fetched_value 저장 실패: {e}")
+
     # ── [P20 2026-05-22] KOSIS API raw 응답 캐시 ────────────────────────
     # 같은 (stat_id, prdSe, startPrdDe, endPrdDe, newEstPrdCnt) 조합 호출을
     # workspace-scope로 캐싱. 같은 job 내 다른 sub-claim들이 같은 표를 호출하면
@@ -342,7 +441,12 @@ class Workspace:
         candidate_id: str,
         fetch_params: dict,
     ) -> str:
-        """KOSIS fetch 파라미터 → cache key (filesystem-safe)."""
+        """KOSIS fetch 파라미터 → cache key (filesystem-safe).
+
+        [P34 2026-05-22] dim_overrides (itmId/objL1~objL8)도 key에 포함 — 같은
+        stat_id + 같은 시점이라도 *다른 차원 슬라이스*면 응답이 달라지므로
+        별도 cache 항목으로 저장해야 함.
+        """
         parts = [
             str(candidate_id or ""),
             str(fetch_params.get("prdSe") or ""),
@@ -350,6 +454,12 @@ class Workspace:
             str(fetch_params.get("endPrdDe") or ""),
             str(fetch_params.get("newEstPrdCnt") or ""),
         ]
+        # dim_overrides — itmId + objL1~8
+        _dim = fetch_params.get("dim_overrides") or {}
+        if isinstance(_dim, dict) and _dim:
+            parts.append(str(_dim.get("itmId") or ""))
+            for _lv in range(1, 9):
+                parts.append(str(_dim.get(f"objL{_lv}") or ""))
         # / · 공백 → 언더스코어. KOSIS 표 ID/시점은 일반적으로 안전한 ASCII.
         return "_".join(p.replace("/", "_").replace(" ", "") for p in parts)
 
@@ -452,6 +562,54 @@ class Workspace:
             f"(누적 {len(ids)}개) — 다음 claim fetch fallback 1순위로 사용"
         )
 
+    # ── [P33b 2026-05-22] failed stat_id blacklist ────────────────────
+    # fetch_evidence가 거부/매칭 실패한 stat_id 목록 (per claim).
+    # 다음 catalog_search 호출 시 결과에서 제외 → 같은 표 무한 반복 방지.
+    # successful_stat_ids는 *job 공유* (claim 간 공유), failed는 *per-claim*
+    # (한 claim에서 실패한 표를 다른 claim도 같은 검증인 게 아니라 다르게
+    # 시도할 수 있어 공유 X). 단순 list[str] 저장.
+    def _failed_stat_ids_key(self, claim_id: str | UUID) -> str:
+        return f"{self._claim_dir(claim_id)}/failed_stat_ids.json"
+
+    def read_failed_stat_ids(self, claim_id: str | UUID) -> list[str]:
+        """이 claim에서 fetch가 실패한 stat_id 목록.
+
+        catalog_search Tool이 후보를 받은 뒤 이 list에 든 id를 제외하면
+        매번 같은 5개 후보를 받는 헛돌이를 차단할 수 있다.
+        """
+        key = self._failed_stat_ids_key(claim_id)
+        if not self.backend.exists(key):
+            return []
+        try:
+            data = json.loads(self.backend.read_text(key))
+            return data if isinstance(data, list) else []
+        except Exception:
+            return []
+
+    def append_failed_stat_id(
+        self, claim_id: str | UUID, stat_id: str, reason: str = "",
+    ) -> None:
+        """fetch_evidence 실패(관련성 거부/row 매칭 실패 등) 시 stat_id 기록."""
+        sid = (stat_id or "").strip()
+        if not sid:
+            return
+        ids = self.read_failed_stat_ids(claim_id)
+        if sid in ids:
+            return
+        ids.append(sid)
+        try:
+            self.backend.write_text(
+                self._failed_stat_ids_key(claim_id),
+                json.dumps(ids, ensure_ascii=False, indent=2),
+            )
+            logger.info(
+                f"[workspace] failed_stat_id 저장: {sid!r} "
+                f"(claim={claim_id}, 누적 {len(ids)}개, reason={reason[:80]!r}) "
+                f"— 다음 catalog_search에서 제외"
+            )
+        except Exception as e:
+            logger.debug(f"[workspace] failed_stat_id 저장 실패: {e}")
+
     def read_verified_facts(self) -> list[dict]:
         """job에서 지금까지 검증된 사실 목록.
 
@@ -483,11 +641,37 @@ class Workspace:
         ind = str(fact.get("indicator", "") or "").strip()
         tp = str(fact.get("time_period", "") or "").strip()
         pop = str(fact.get("population", "") or "").strip()
+        new_val = fact.get("value")
         for f in facts:
             if (str(f.get("indicator", "") or "").strip() == ind
                     and str(f.get("time_period", "") or "").strip() == tp
                     and str(f.get("population", "") or "").strip() == pop):
                 return  # 이미 있음 — 중복 저장 안 함
+
+        # [P35 2026-05-22] cross-population 값 collision 검출.
+        # 같은 (indicator, time)에 *다른 population*의 fact가 이미 있고 값이
+        # *완전히 동일*하면, 한쪽 검증이 *잘못 매칭*돼 *다른 지역의 값을 받았을*
+        # 가능성. 예: (의료장비 수, 2023, 서울)=12741이 이미 있는데
+        # (의료장비 수, 2023, 강원도)=12741이 들어오면 누수 의심 → 저장 거부.
+        # 안 그러면 cache hit가 잘못된 값을 다음 trace에 영구 흘려보냄.
+        # 값이 진짜 동일한 케이스(드물지만 0/N/A 같은 특수값)는 stale cache의
+        # 위험 대비 손실이 적어 거부가 안전.
+        if ind and tp and pop and new_val is not None:
+            for f in facts:
+                if (str(f.get("indicator", "") or "").strip() == ind
+                        and str(f.get("time_period", "") or "").strip() == tp):
+                    other_pop = str(f.get("population", "") or "").strip()
+                    other_val = f.get("value")
+                    if (other_pop and other_pop != pop
+                            and other_val is not None and other_val == new_val):
+                        logger.warning(
+                            f"[workspace] verified_fact 저장 거부 — *cross-population 값 collision*: "
+                            f"indicator={ind!r} time={tp!r} 신규 pop={pop!r} value={new_val} "
+                            f"vs 기존 pop={other_pop!r} value={other_val} "
+                            f"(다른 지역인데 값이 같음 → 한쪽이 잘못 매칭됐을 가능성 → 저장 안 함)"
+                        )
+                        return
+
         fact = dict(fact)
         fact.setdefault("recorded_at", datetime.now(timezone.utc).isoformat())
         facts.append(fact)
