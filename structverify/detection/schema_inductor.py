@@ -75,7 +75,21 @@ CLAIM_SCHEMA_JSON_SCHEMA: dict[str, Any] = {
             "type": "string",
             "description": (
                 "기준 시점. 형식: 'YYYY' 또는 'YYYY-MM'. "
-                "예: '2024', '2024-10'. 한글 표기('2024년 10월') 금지."
+                "예: '2024', '2024-10'. 한글 표기('2024년 10월') 금지.\n"
+                "★ 월 추론 규칙 — 원문 자연어 시점 표현을 *적극적으로* month까지 해석:\n"
+                "  - '2025년 마지막 월/연말/12월 말'   → '2025-12'\n"
+                "  - '2025년 초/연초/1월 초/신년'      → '2025-01'\n"
+                "  - '2025년 상반기 말/6월 말'         → '2025-06'\n"
+                "  - '2025년 하반기 초/7월 초'         → '2025-07'\n"
+                "  - '2025년 1분기'                    → '2025-03' (분기 말월)\n"
+                "  - '2025년 4분기/2025년 말'          → '2025-12'\n"
+                "  - '2025년 봄'                       → '2025-04' (대표 월)\n"
+                "  - '지난달' + anchor='2025-04'       → '2025-03'\n"
+                "  - '최근/현재' + anchor_year=2025    → '2025' (월 단서 없음)\n"
+                "★ 추론 가드 — 환각 금지:\n"
+                "  - 원문에 *시점 표현이 전혀 없으면* anchor_year만 쓰거나 빈 문자열. 추론 금지.\n"
+                "  - '월/분기/초/말/상반기/하반기/봄/여름/가을/겨울' 등 *명시적 단서가 있을 때만* month 추론.\n"
+                "★ 추론 근거가 된 표현은 source_phrase 또는 *해당 schema의 다른 phrase 필드*에 원문 그대로 남깁니다."
             ),
         },
         "unit": {
@@ -264,6 +278,20 @@ SCHEMA_INDUCTION_PROMPT = """당신은 뉴스 수치 주장에서 공식 통계 
       parent_path: "인구 > 출생 > 합계출산율"}}
   ]
 
+[예시 — ★ 자연어 시점 표현의 month 추론]
+검증 대상 문장: "2025년도 마지막 월의 출생아 수 증가율은 3.9%이다"
+결과:
+  schemas: [
+    {{indicator: "출생아 수 증가율", value: 3.9, unit: "%", time_period: "2025-12",
+      source_phrase: "3.9%",
+      prev_value: null, prev_time_period: "2024-12", prev_phrase: "",
+      parent_path: "인구 > 출생 > 출생아 수"}}
+  ]
+  ★ 핵심: "마지막 월" → 12월로 추론 → time_period="2025-12" (연 단위가 아님).
+     prev_time_period="2024-12"도 "전년 동월" 규칙으로 연쇄 추론.
+  ★ 만약 원문이 단순히 "2025년 출생아 수 증가율은 3.9%"였다면 (월 단서 없음)
+     → time_period="2025" 으로 두고 month 추론 금지.
+
 [예시 — rank 표현만 (검증 불가)]
 검증 대상 문장: "출생아 수, 34년 만에 최대 증가"
 결과:
@@ -320,6 +348,47 @@ SCHEMA_INDUCTION_PROMPT = """당신은 뉴스 수치 주장에서 공식 통계 
      → 검증 단계에서 통계 DB의 2022년 출생아 수를 조회해
         (현재값 - 2022년값) 으로 7.7% 를 직접 계산·검증함.
 
+[예시 — ★★ 동사형 변화량 표현 (도입/들여와/추가/늘어/줄어 + 증가율 결합)]
+검증 대상 문장: "서울과 경기, 인천은 각각 652개, 592개, 169개의 장비를 들여와 5.5%~6.5%의 증가세를 보인 반면, 강원도는 단 52개로 4% 증가에 그쳤다"
+결과:
+  schemas: [
+    {{indicator: "의료장비 증가 수", value: 652, unit: "대", time_period: "2024",
+      population: "서울", source_phrase: "652개",
+      parent_path: "보건 > 의료자원 > 의료장비"}},
+    {{indicator: "의료장비 증가 수", value: 592, unit: "대", time_period: "2024",
+      population: "경기", source_phrase: "592개"}},
+    {{indicator: "의료장비 증가 수", value: 169, unit: "대", time_period: "2024",
+      population: "인천", source_phrase: "169개"}},
+    {{indicator: "의료장비 증가 수", value: 52, unit: "대", time_period: "2024",
+      population: "강원도", source_phrase: "52개"}},
+    {{indicator: "의료장비 증가율", value: 6.0, unit: "%", time_period: "2024",
+      population: "서울", source_phrase: "5.5%~6.5%",
+      modifier: "범위(5.5~6.5)의 중앙값"}},
+    {{indicator: "의료장비 증가율", value: 4.0, unit: "%", time_period: "2024",
+      population: "강원도", source_phrase: "4%"}}
+  ]
+  ★★ 핵심: 문장에 *동사*("들여와", "도입했다", "추가했다", "신규로 늘렸다", "줄어들었다")가
+     있고 그 옆에 *개수*와 *%*가 함께 나오면 → *두 가지 schema*로 분기:
+     (1) "<원지표> 증가 수" (또는 감소 수) — value는 변화 *개수*
+     (2) "<원지표> 증가율" (또는 감소율) — value는 변화 *%*
+  ★★ value를 단순히 *총 보유 수*로 해석하면 안 됨.
+     "652개의 장비를 들여와" → 652는 *신규 도입 수*이지 *총 보유 수*가 아님.
+  ★★ 범위 표현("5.5%~6.5%")이 있으면 *중앙값*을 value로, 원문은 source_phrase + modifier로.
+
+[예시 — ★★ 동사로만 표현된 변화 (수치는 한쪽만)]
+검증 대상 문장: "지난해 입국자가 30만 명 늘어나 전년 대비 8% 증가했다"
+결과:
+  schemas: [
+    {{indicator: "입국자 증가 수", value: 300000, unit: "명", time_period: "2024",
+      source_phrase: "30만 명",
+      parent_path: "인구 > 이주 > 입국자"}},
+    {{indicator: "입국자 증가율", value: 8.0, unit: "%", time_period: "2024",
+      source_phrase: "8%",
+      prev_value: null, prev_time_period: "2023", prev_phrase: ""}}
+  ]
+  ★★ "X 늘어나 Y%" 패턴 → *두 schema 모두* 생성 (증가 수 + 증가율).
+     X(30만 명)는 *총량 아닌 변화량* — indicator에 "증가 수" 명시 필수.
+
 [예시 — ★ 한 문장에 지역별 수치 나열 (같은 지표, 지역만 다름)]
 검증 대상 문장: "동작구가 10.6%로 가장 높았다. 이어 성동구(8.9%), 마포구(8.7%), 영등포구(7.9%)"
 결과:
@@ -362,6 +431,19 @@ SCHEMA_INDUCTION_PROMPT = """당신은 뉴스 수치 주장에서 공식 통계 
      → 각 지역마다 별도 schema. indicator는 동일, population=지역명,
         value=각 수치. 절대 하나로 합치거나 value=null로 두지 마세요.
    · 이 규칙은 지역뿐 아니라 연령대·업종·품목 등 *모든 분류 축*에 적용.
+
+2-1. **★★ 동사형 변화 표현 — *총량 vs 변화량* 구분이 핵심**:
+   문장에 *변화/증감을 나타내는 동사*(들여와, 도입했다, 추가됐다, 신규로,
+   늘어, 줄어, 감소, 증가, 매입, 신축, 폐기 등)가 있으면, 그 옆 수치는
+   *총량이 아니라 변화량*임. indicator에 "증가 수"/"감소 수"/"신규 도입 수"
+   등 변화 의미를 *명시*해야 함:
+   · "X개 들여와" → indicator="<원지표> 증가 수" (or "신규 도입 수"), value=X
+   · "X명 늘어" → indicator="<원지표> 증가 수", value=X
+   · "X건 줄어" → indicator="<원지표> 감소 수", value=X
+   같은 문장에 % 표현이 함께 있으면 *증가율 schema*도 별도 생성:
+   · "X개 들여와 Y% 증가세" → 2개 schema (증가 수=X + 증가율=Y)
+   ★ 절대 X를 *총량*으로 해석하지 마세요. "652개 들여와" → 652는 *신규 도입*.
+   ★ 범위 표현(`5.5%~6.5%`)이 있으면 *중앙값*을 value로, 원문은 source_phrase + modifier로.
 
 3. **★ value/unit/source_phrase 일관성**:
    · source_phrase가 "X%" → unit="%", value는 비율
@@ -657,6 +739,19 @@ async def _induce_multiple(
     except Exception as e:
         logger.warning(f"스키마 유도 LLM 호출 예외: {e}")
         return []
+
+    # [2026-05-25] LLM thought 디버깅용 — LLM이 어떤 schema 후보를 *왜* 추출했는지
+    # 화면 UI에서 보기 어려운 케이스 대응. 응답 원본 json을 INFO로 펼쳐 보여줌.
+    try:
+        import json as _json
+        logger.info(
+            f"[schema_inductor] LLM 응답 본문 (claim_text={claim_text[:60]!r}...) ↓\n"
+            f"────── SCHEMA RESPONSE START ──────\n"
+            f"{_json.dumps(r, ensure_ascii=False, indent=2)}\n"
+            f"────── SCHEMA RESPONSE END ──────"
+        )
+    except Exception:
+        logger.info(f"[schema_inductor] LLM 응답 raw: {str(r)[:1000]}")
 
     schemas_raw = r.get("schemas") or []
     if not isinstance(schemas_raw, list):
