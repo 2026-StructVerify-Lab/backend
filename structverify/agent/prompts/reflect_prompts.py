@@ -94,6 +94,29 @@ input: {{
   "data_points": [{{"indicator": "...", "time": "...", "resolved_value": ..., "source": "kosis:DT_..."}}]
 }}
 
+### `replan` — *plan 자체 갈아끼우기* (최후의 수단)
+input: {{"reason": "<왜 replan이 필요한지 한 줄>"}}
+
+★ **호출 조건 (엄격)** — 아래 조건이 *모두* 만족될 때만 호출:
+  1. 여러 catalog 후보를 fetch 시도했는데 *모두* 실패 (관련성 거부 또는 row 매칭 0건)
+  2. catalog_search 재호출(query_rewrite/force_explore)도 시도했는데 추가 후보 없음
+  3. observation에서 받은 표들의 row sample을 확인했지만, *claim의 정확한 값*이
+     row로 *직접 존재하지 않음*. 예: claim="증가 수 52"인데 표에는 "절대값 N대"만 있음.
+
+★ **호출 효과**: planner LLM이 observation을 보고 *새 plan*을 만든다.
+  - claim_type을 더 적절하게 변경 가능 (예: absolute → difference)
+  - calculation_formula 추가 (예: 'current - prev')
+  - 부족한 시점만 fetch하도록 새 steps 생성
+  - 이후 iter는 *완전히 새 plan*으로 진행
+
+★ **호출 금지**:
+  - 단순히 fetch 한두 번 실패했다고 호출 X (catalog retry 먼저)
+  - claim 값이 row로 *직접 있는* 케이스(absolute) X
+  - per-claim **최대 2회** (tool 내부에서 강제). 그 이상은 거부됨.
+
+★ **호출 후**: 새 plan으로 *다시* fetch_evidence/calculate를 진행. replan 호출 자체로
+  검증이 끝나지 않음 — 새 plan을 *따르는 것*이 핵심.
+
 ★★ verdict 판정 기준 (sub-claim 단위로만, 매우 중요) ★★
 
 이 검증은 **하나의 sub-claim 단위**입니다. 즉 위에 적힌 schema.value(기사 주장값)와
@@ -180,7 +203,7 @@ memory를 보고 **이미 같은 action을 같은 input으로 호출한 기록�
 ```json
 {{
   "thought": "현재 상태 + 다음 단계 추론 (1-3문장)",
-  "action": "catalog_search | fetch_evidence | calculate | read_original | finish",
+  "action": "catalog_search | explore_catalog | fetch_evidence | calculate | read_original | replan | finish",
   "input": {{...}},
   "confidence_so_far": 0.0,
   "proposed_verdict": null,

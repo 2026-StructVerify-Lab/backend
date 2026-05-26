@@ -1548,6 +1548,7 @@ async def agent_loop(
             datasources=datasources,
             iter_num=iter_num,
             claim=claim,   # fetch_evidence가 claim.schema 사용
+            current_plan=plan,  # [2026-05-26] replan tool이 원래 plan 참고용
         )
 
         try:
@@ -1578,6 +1579,38 @@ async def agent_loop(
                         success=False, error=f"{type(e).__name__}: {e}",
                     )
 
+        # ── [2026-05-26] replan tool 결과 처리 — plan 통째 교체 ──
+        # ReplanTool이 성공하면 output에 new_plan(dict)이 들어있음.
+        # 이걸 받아 *plan 객체 자체*를 새로 만들고 plan_step_idx, _seen_action_keys
+        # 등 plan-관련 상태를 리셋. 이후 iter는 새 plan으로 진행.
+        if (
+            next_step.action == ActionType.REPLAN
+            and last_result.success
+            and isinstance(last_result.output, dict)
+            and last_result.output.get("new_plan")
+        ):
+            try:
+                _new_plan_dict = last_result.output["new_plan"]
+                # 직렬화 안전성을 위해 claim_id는 기존 plan것 유지
+                _new_plan_dict.setdefault("claim_id", str(plan.claim_id))
+                _new_plan = Plan.model_validate(_new_plan_dict)
+                _old_type = plan.claim_type.value
+                _new_type = _new_plan.claim_type.value
+                plan = _new_plan
+                # plan-관련 상태 리셋
+                plan_step_idx = 0
+                plan_exhausted = False
+                # 중복 차단 카운터 리셋 (새 plan이라 처음부터 다시)
+                _seen_action_keys.clear()
+                _consecutive_dup = 0
+                logger.info(
+                    f"[loop] {claim_id}: ★ plan 교체 완료 (replan) — "
+                    f"claim_type: {_old_type} → {_new_type}, "
+                    f"new steps: {len(plan.initial_steps)}"
+                )
+            except Exception as _e:
+                logger.warning(f"[loop] {claim_id}: replan 결과 plan 파싱 실패: {_e}")
+
         # ── Observation 생성 + memory 기록 ──
         # [P28 2026-05-22] T2 — fetch_evidence 실패(no row matched/not relevant 등) 시
         # observation summary에 fallback hint 주입 → 다음 reflect turn이 catalog_search를
@@ -1605,6 +1638,9 @@ async def agent_loop(
                 "가져와 LLM이 '이 표에 indicator가 직접 있는가' 판단. 정답이 후보에는 "
                 "있으나 점수가 낮아 묻힌 경우 회복."
                 "\n  먼저 (a)를 시도하고 그래도 부족하면 (b). 둘 다 한 번에 켜도 OK."
+                "\n  ★ (a)/(b)도 *전부* 시도했는데 또 fail이고, 받은 표 sample을 봐도 "
+                "claim의 정확한 값이 row로 없으면 → *replan* action 호출. "
+                "(예: claim '증가 수 52'인데 표엔 절대값만 — 계산 필요)"
             )
 
         last_observation = Observation(
