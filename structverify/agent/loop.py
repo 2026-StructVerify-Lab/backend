@@ -1311,16 +1311,21 @@ async def agent_loop(
     plan_step_idx = 0
     plan_exhausted = False
 
-    # ── [중복 action 차단] reflect 모드 전용 ─────────────────────────
+    # ── [중복 action 대응] reflect 모드 전용 ─────────────────────────
     # reflect(HCX)가 thought엔 "다른 검색어"라 쓰면서 action.input.query는
-    # 동일하게 두는 일이 잦다 → 같은 catalog_search를 max_iter까지 반복하는
-    # 헛돌이 발생. loop이 결정적으로 차단한다:
-    #   - 같은 (action, input) 조합이 이미 실행됐으면 tool 실행을 스킵하고
-    #     reflect에게 "이미 시도함, 다른 검색어를 쓰라"는 observation을 줌.
-    #   - 연속 중복이 임계치를 넘으면 헛돌이로 보고 loop 종료.
+    # 동일하게 두는 일이 잦다. 이전엔 *강제 종료*했으나, 이는 fetch fail
+    # 후 retry 기회를 박탈해 진짜 정답에 도달 못 하는 부작용이 컸음
+    # (project_fetch_lockup, 2026-05-26).
+    #
+    # 새 정책: 중복 감지 시 *이전 observation을 그대로 반환 + 다음 행동 hint*.
+    # 연속 N회 이상 지속되면 강제 다음 action 또는 종료.
+    #   1회 중복: cached observation + soft hint
+    #   2회 중복: cached observation + strong hint (다음 action 명시)
+    #   3회 이상: 헛돌이 — 종료
     _seen_action_keys: set[str] = set()
+    _action_key_to_observation: dict[str, Observation] = {}
     _consecutive_dup = 0
-    _DUP_LIMIT = 2  # 연속 중복 이 횟수 도달 시 종료
+    _DUP_HARD_LIMIT = 3  # 연속 N회 도달 시 종료
 
     def _action_key(step: PlanStep) -> str:
         """action + 입력으로 중복 판별 키. 문자열 값은 공백 제거 정규화."""
@@ -1458,31 +1463,52 @@ async def agent_loop(
                 )
             continue  # 다음 iter — reflect가 finish 결정하도록
 
-        # ── [중복 action 차단] reflect 모드에서만 ──────────────────
-        # 같은 (action, input)이 이미 실행됐으면 tool 실행 스킵.
-        # reflect에게 "이미 시도함" observation을 줘 다른 결정을 유도.
+        # ── [중복 action 대응] reflect 모드에서만 ──────────────────
+        # 같은 (action, input)이 이미 실행됐으면 *cached observation 반환* +
+        # 다음 행동 hint. 연속 N회면 종료.
         if loop_config.mode == "reflect":
             _akey = _action_key(next_step)
             if _akey in _seen_action_keys:
                 _consecutive_dup += 1
-                logger.warning(
+                _cached_obs = _action_key_to_observation.get(_akey)
+                logger.info(
                     f"[loop] {claim_id} iter {iter_num}: 중복 action 감지 "
                     f"(action={next_step.action.value}, 연속 {_consecutive_dup}회) "
-                    f"— tool 실행 스킵"
+                    f"— cached observation 재사용"
                 )
+
+                # cached observation summary 그대로 + hint 추가
+                _base_summary = (
+                    _cached_obs.summary if _cached_obs is not None
+                    else f"이전 iter에서 같은 입력으로 실행된 적이 있습니다."
+                )
+                if _consecutive_dup == 1:
+                    _hint = (
+                        " | [hint] 이 입력은 직전에 이미 시도했고 동일한 결과가 나왔습니다. "
+                        "결과를 다시 검토하고 *다음에 할 action을 결정*하세요. "
+                        "(예: catalog_search 결과를 보고 fetch_evidence로 후보 시도, "
+                        "또는 다른 query/category로 catalog_search 재호출)"
+                    )
+                elif _consecutive_dup == 2:
+                    _hint = (
+                        " | [strong hint] 동일 입력 2회 반복입니다. *반드시 다른 action* "
+                        "또는 *다른 query/input*을 선택하세요. catalog_search 반복 금지 — "
+                        "fetch_evidence(다른 candidate_id) 또는 explore_catalog를 쓰거나 "
+                        "이미 충분한 정보가 있으면 finish(unverifiable)로 종료."
+                    )
+                else:
+                    _hint = (
+                        " | [final hint] 동일 입력 3회 이상 — 헛돌이로 판단합니다."
+                    )
+
                 last_observation = Observation(
                     iter_num=iter_num,
                     action=next_step.action,
                     input=next_step.input,
-                    output={},
-                    summary=(
-                        f"[중복 차단] 이 action({next_step.action.value})과 "
-                        f"동일한 입력은 이미 이전 iter에서 시도했고 결과가 같았습니다. "
-                        f"같은 검색을 반복하지 마세요 — 반드시 *다른 검색어*를 쓰거나 "
-                        f"다른 action(fetch_evidence/read_original/finish)을 선택하세요."
-                    ),
-                    success=False,
-                    error="duplicate_action",
+                    output=(_cached_obs.output if _cached_obs is not None else {}),
+                    summary=_base_summary + _hint,
+                    success=(_cached_obs.success if _cached_obs is not None else False),
+                    error="duplicate_action_cached",
                 )
                 try:
                     append_iteration(
@@ -1496,7 +1522,7 @@ async def agent_loop(
                     )
                 except Exception as e:
                     logger.warning(f"[loop] 중복 observation 기록 실패: {e}")
-                if _consecutive_dup >= _DUP_LIMIT:
+                if _consecutive_dup >= _DUP_HARD_LIMIT:
                     logger.warning(
                         f"[loop] {claim_id}: 중복 action {_consecutive_dup}회 연속 "
                         f"→ 헛돌이로 판단, iter {iter_num}에서 종료"
@@ -1504,7 +1530,7 @@ async def agent_loop(
                     plan_exhausted = True
                     stop_reason = StopReason.MAX_ITERATIONS
                     break
-                continue  # 다음 iter — reflect가 다른 결정을 하도록
+                continue  # 다음 iter — reflect가 cached + hint 보고 결정
             # 중복 아님 — 키 등록, 연속 카운터 리셋
             _seen_action_keys.add(_akey)
             _consecutive_dup = 0
@@ -1553,15 +1579,49 @@ async def agent_loop(
                     )
 
         # ── Observation 생성 + memory 기록 ──
+        # [P28 2026-05-22] T2 — fetch_evidence 실패(no row matched/not relevant 등) 시
+        # observation summary에 fallback hint 주입 → 다음 reflect turn이 catalog_search를
+        # 2단계 fallback으로 재호출하도록 유도.
+        # [P30 2026-05-22] 2단계 fallback hint:
+        #   1. query_rewrite=true — LLM이 표 이름 친화 어휘로 query 변형 후 재검색.
+        #      catalog 후보에 정답 표가 진입조차 못 한 경우 회복.
+        #   2. force_explore=true (explore_mode=meta 기본) — top 후보 표의 항목/분류
+        #      메타(ITM/OBJ)를 받아 LLM이 정답 표 식별. 정답이 후보에 있으나 cosine
+        #      점수가 낮아 묻힌 경우 회복.
+        _summary = last_result.summary
+        if (
+            next_step.action == ActionType.FETCH_EVIDENCE
+            and not last_result.success
+            and loop_config.mode == "reflect"
+        ):
+            _summary = (
+                _summary
+                + " | [hint] 이 표에서 row를 찾지 못했습니다. 다음 turn에 catalog_search "
+                "재호출 시 *두 옵션 중 하나*를 추가하세요:"
+                "\n  (a) input에 \"query_rewrite\": true — LLM이 검색어를 표 이름 친화 "
+                "어휘로 변형(예: '체외 충격파 쇄석술 장비' → '시군구별 의료장비'). "
+                "원본 query가 row 항목 키워드일 때 정답 표가 후보에 진입하도록 도움."
+                "\n  (b) input에 \"force_explore\": true — top 표들의 *항목 메타*(ITM/OBJ)를 "
+                "가져와 LLM이 '이 표에 indicator가 직접 있는가' 판단. 정답이 후보에는 "
+                "있으나 점수가 낮아 묻힌 경우 회복."
+                "\n  먼저 (a)를 시도하고 그래도 부족하면 (b). 둘 다 한 번에 켜도 OK."
+            )
+
         last_observation = Observation(
             iter_num=iter_num,
             action=next_step.action,
             input=next_step.input,
             output=last_result.output,
-            summary=last_result.summary,
+            summary=_summary,
             success=last_result.success,
             error=last_result.error,
         )
+        # [중복 action 대응] 같은 (action, input) 재호출 시 cache 재사용
+        if loop_config.mode == "reflect":
+            try:
+                _action_key_to_observation[_action_key(next_step)] = last_observation
+            except Exception:
+                pass
         # B2 sanity check용 — fetch가 성공할 때마다 갱신 (finish가 덮어쓰지 못하게)
         if next_step.action == ActionType.FETCH_EVIDENCE and last_result.success:
             last_fetch_observation = last_observation
