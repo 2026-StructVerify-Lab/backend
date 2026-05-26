@@ -125,11 +125,19 @@ prdSe는 time_period 형식에 맞춰 (YYYY-MM이면 "M", YYYY-Q1이면 "Q", YYY
 
 **fetch_evidence 직후 (claim_type별로 다름 — plan을 따르세요)**:
 
-- **claim_type=absolute**: 단일 값 검증. evidence value가 claim과 매칭되면 → finish.
+- **claim_type=absolute**: 단일 값 검증. evidence value가 claim의 time_period와 매칭되면 → finish.
   *calculate 호출 금지* — 절대값 검증에 수식이 필요 없음.
+  ★★ **prev_time_period 또는 다른 시점 fetch 절대 금지**. absolute claim은 *오직
+     claim.time_period* 한 시점만 필요. "지난 달", "전년", "지난해 같은 달", "이전 시점"
+     같은 *derived 의도*를 가지지 말 것. 다른 sub-claim(증가율)이 같은 sent에 있어도
+     이 claim과 무관. 같은 sent의 다른 claim은 별도 처리됨.
+  ★★ claim.time_period의 evidence가 이미 fetch 됐다면 *그 자리에서 finish*.
+     같은 indicator 다른 시점을 또 fetch하지 말 것 (헛돌이).
 
 - **claim_type=growth_rate / difference**: prev + current 두 값 다 받은 후에만 calculate
   → finish. prev 아직 없으면 또 fetch_evidence (prev_time_period로).
+  ★ fetch 시점은 *오직* claim.time_period + claim.prev_time_period 두 개만.
+     인접 월/분기 같은 *임의 시점*은 fetch 금지.
 
 - **claim_type=comparison / ranking**: N개 비교 대상을 *각각 fetch*만 하고 → finish.
   비교 자체는 *부등호*이지 수식이 아니므로 **calculate 호출 절대 금지**. 차이값을
@@ -142,6 +150,11 @@ prdSe는 time_period 형식에 맞춰 (YYYY-MM이면 "M", YYYY-Q1이면 "Q", YYY
 ★ **plan의 initial_steps를 우선 따르세요**. plan에 finish가 박혀있으면 그 시점에
    finish 호출. plan을 *넘어선* 액션(특히 plan.claim_type과 무관한 calculate)은
    부르지 마세요.
+
+★★ **finish 조기 종료 기준 (latency 최적화)**:
+   - absolute claim: claim.time_period 매칭 evidence를 *1개라도 success*로 받으면 즉시 finish.
+   - growth_rate / difference: prev + current 두 값 다 받으면 calculate → finish.
+   - 더 받아도 결과 안 바뀜. 추가 fetch는 헛돌이.
 
 ## ★ 중복 action 방지 (매우 중요)
 
@@ -303,6 +316,14 @@ def build_reflect_prompt(
     if plan is not None:
         ct = getattr(plan, "claim_type", None)
         claim_type = ct.value if hasattr(ct, "value") else str(ct or "unknown")
+
+    # [2026-05-25] ABSOLUTE claim에선 prev_value/prev_time을 prompt에서 *제거*.
+    # 이유: LLM이 prev 정보를 보고 "증가율 검증"이라 잘못 판단해 작년 동월 fetch를
+    # 시도함 (실제 케이스: claim_type=ABSOLUTE인데 LLM이 2024-04 fetch 자행).
+    # 같은 sent 안 derived sub-claim의 메타가 잔재로 남은 것이라, absolute에선 안 봐도 됨.
+    if claim_type == "absolute":
+        prev_value = "(absolute claim — 사용 안 함)"
+        prev_time = "(absolute claim — 사용 안 함)"
         req = getattr(plan, "required_data", []) or []
         req_simplified = []
         for d in req:
