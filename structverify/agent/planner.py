@@ -564,6 +564,14 @@ class Planner:
                     f"[planner] {claim_id}: LLM 응답 받음 ({len(last_response)}자) "
                     f"[시도 {attempt + 1}/{self.config.max_retries + 1}]"
                 )
+                # [2026-05-25] LLM thought 디버깅용 — 응답 본문을 INFO에 펼침.
+                # 화면 UI에서 plan 결정 사유 추적하기 어려운 케이스 대응.
+                logger.info(
+                    f"[planner] {claim_id}: LLM 응답 본문 ↓\n"
+                    f"────── PLAN RESPONSE START ──────\n"
+                    f"{last_response}\n"
+                    f"────── PLAN RESPONSE END ──────"
+                )
             except Exception as e:
                 logger.warning(
                     f"[planner] {claim_id}: LLM 호출 실패 [시도 {attempt + 1}]: "
