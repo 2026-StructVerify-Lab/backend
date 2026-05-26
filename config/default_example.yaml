@@ -20,11 +20,18 @@ agent:
     persist_after_job: true                   # dev=true (디버깅), prod=false (정리)
     cleanup_after_days: 7                     # persist=false 시 며칠 후 자동 삭제
     # [2026-05-21] workspace 격리 단위:
-    #   - "doc_hash" : 본문 텍스트 md5 hash 기준 (같은 본문 = 캐시 공유, 같은 기사 재검증 빠름).
-    #                  단점: KOSIS 데이터 갱신돼도 stale 가능 + 멀티-테넌트 격리 X.
-    #   - "job_id"   : API job_id 기준 (매 요청 cold start, 정확성↑ 속도↓).
+    #   - "doc_hash" : 본문 텍스트 md5 hash 기준. *같은 본문이면 같은 디렉토리*라
+    #                  KOSIS fetch 캐시(verified_facts/sibling_evidence/successful_stat_ids)가
+    #                  API 호출 사이에 살아있어 같은 기사 재검증이 빠름. 단점: KOSIS
+    #                  쪽 데이터가 갱신돼도 stale 캐시 사용 가능 + 다른 유저가 같은 텍스트
+    #                  넣으면 캐시 공유 (멀티-테넌트 격리 필요하면 부적합).
+    #   - "job_id"   : API job_id (sv_platform이 발급한 UUID) 기준. *매 요청마다 cold*
+    #                  start라 정확성↑ 속도↓. 라이브러리 단독 사용(CLI 등)에서 external_job_id
+    #                  미제공 시 fresh UUID로 폴백.
     scope: "doc_hash"
-    external_job_id: null                     # scope="job_id"일 때 sv_platform이 주입
+    # 외부에서 주입한 job_id (scope="job_id"일 때 사용). sv_platform이 자동 set.
+    # 라이브러리 직접 사용 시 None 두면 호출당 fresh UUID 발급.
+    external_job_id: null
 
   memory:
     backend: "file"                           # file | redis (지금은 file만)
@@ -59,6 +66,30 @@ agent:
 data_sources:
   enabled: ["kosis"]                          # 회사: ["custom_db", "custom_csv"]
   default_source: "kosis"
+
+  # KOSIS 데이터소스 — 검색/ranking/관련성 가드 설정
+  # 주의: 여기 'kosis' 섹션은 KOSISDataSource 생성자에 전달됨 (self._connector_config).
+  # 기존 top-level 'kosis:' 섹션(API URL, catalog 빌드 등)과 *별도*.
+  kosis:
+    # [2026-05-26] catalog_ranker — LLM batch ranking으로 키워드 가드 + per-table
+    # relevance_judge를 통합 대체. catalog_search + explore_catalog 결과를 union해
+    # 메타데이터(표 이름, 기관, category_path)와 함께 LLM에 1회 전달 → 의미 점수 순위.
+    catalog_ranker:
+      enabled: true                  # false면 기존 키워드 가드(Indicator Semantic Guard) 사용
+      score_threshold: 0.15          # 이 미만은 reject (안전망: 거부된 표도 try_ids 마지막에 추가)
+      pool_limit: 20                 # ranker에 보낼 후보 최대 개수
+      max_try: 10                    # ranker 순위로 try_ids 만들 때 상한
+      model_tier: "light"            # HCX-DASH-002
+
+    # [2026-05-26] relevance_guard.enabled — false면 per-table LLM judge skip.
+    # catalog_ranker가 이미 의미 판단하므로 중복. 1차엔 둘 다 작동시켜 안전,
+    # 두 케이스(18대/1336개) OK 확인 후 false로 전환.
+    relevance_guard:
+      enabled: true                  # false면 per-table relevance_judge 완전 비활성
+      llm_fallback: true             # P32: 룰 거부 시 LLM 의미 판단 1회
+      model_tier: "light"
+      row_match_llm_fallback: true   # P33c: _select_best_row 매칭 0건일 때 LLM rescue
+      row_match_model_tier: "light"
 
   # custom_csv — 회사 업로드 파일
   custom_csv:
@@ -117,8 +148,15 @@ llm:
   temperature: 0.1
   max_tokens: 4096   # [2026-05-21] 2048 → 4096: reflect의 finish action에서 explanation이 길어져 JSON이 잘리는 케이스 방지. HCX-DASH-002 한도 내.
   api_key_env: "NCP_API_KEY" # .env에 세팅
-  # 프로세스 전역 HCX 호출 사이 최소 간격(ms). 250 = ~4 req/sec ceiling.
-  min_call_interval_ms: 250
+  # [2026-05-21] 프로세스 전역 HCX 호출 사이 최소 간격(ms). 0이면 비활성.
+  # 22:24 로그 분석: 250ms(=4req/s)로 깔아도 21건 candidate 처리 중 지속적 429 발생.
+  # HCX 실제 sustained 한도는 1~2 req/s 추정 → 600ms로 상향.
+  # 권장값:
+  #   - 250ms (4 req/s)  : 너무 공격적, 429 빈발
+  #   - 500ms (2 req/s)  : 보통
+  #   - 600ms (≈1.6 r/s) : 안전 기본값
+  #   - 1000ms (1 req/s) : 매우 안전, 느림
+  min_call_interval_ms: 600
 
 embedding:
   provider: "hcx"
@@ -139,6 +177,26 @@ kosis:
     rebuild: false          # true: 강제 재수집, false: DB에 있으면 skip
     embed_batch_size: 100   # 임베딩 배치 크기
     min_rows: 1000          # 이 수 이상이면 "이미 구축됨"으로 판단
+  # [P20 2026-05-22] KOSIS API raw 응답 캐시 TTL (시간).
+  # 같은 (stat_id, prdSe, startPrdDe, endPrdDe) 조합 재호출 시 API 호출 없이 캐시 사용.
+  # workspace 단위 파일 캐시 (agent_workspace/job_<id>/kosis_cache/<key>.json).
+  # scope=doc_hash 모드면 같은 본문 재검증 시 모든 KOSIS API 호출 skip.
+  #   - 0   : 영구 캐시 (만료 안 됨, 가장 빠름. KOSIS 갱신 시 수동 cleanup 필요)
+  #   - 24  : 24시간 (기본값, KOSIS 일일 갱신 대응)
+  #   - 168 : 1주일
+  cache_ttl_hours: 24
+
+  # [P32 2026-05-22] 표 관련성 가드 LLM fallback.
+  relevance_guard:
+    llm_fallback: true
+    model_tier: "light"
+    row_match_llm_fallback: true
+    row_match_model_tier: "light"
+
+  # [P34 2026-05-22] N차원 슬라이스 코드 결정 (itmId/objL1~).
+  dimension_resolver:
+    enabled: true
+    model_tier: "light"
 
 database:
   url: "postgresql://structverify:svpass123@localhost:5432/structverify"
@@ -178,13 +236,50 @@ verification:
   tolerance_percent: 1.0
   min_confidence: 0.7
   
+# [P21 2026-05-22] catalog_search 의미 정확도 보강 — LLM rerank
+catalog_search:
+  # rerank_mode:
+  #   - "none"        : catalog 임베딩 + prior score만 사용 (기본)
+  #   - "table_name"  : top N 표 이름만 LLM에 노출해서 best 선택 (저비용)
+  #   - "row_preview" : top N 표의 *샘플 row 1개*를 미리 fetch해서 LLM에 노출.
+  #                     ITM_NM/C1_NM/C2_NM 같은 실제 row 컬럼 값을 LLM이 보고
+  #                     claim과 가장 매칭되는 표 선택. P20 KOSIS cache hit이면
+  #                     비용 거의 0. cold 시작 시 top N 만큼 추가 fetch 발생.
+  rerank_mode: "none"               # P25에서 disable. P28 deep_explore가 대체.
+  rerank_top_n: 5
+  rerank_min_score_gap: 0.15
+
+  # [P28 2026-05-22] Deep Exploration — row 단서 기반 외삽 reasoning.
+  # [P30 2026-05-22] explore_mode/include_obj 추가.
+  deep_explore:
+    enabled: true
+    top_n: 3
+    rows_per_table: 5
+    trigger_low_score: 0.6
+    trigger_score_gap: 0.1
+    max_per_claim: 2
+    model_tier: "light"            # heavy / light / structured / reasoning
+    explore_mode: "meta"           # "meta" (권장) | "row_preview"
+    include_obj: true
+
+  # [P30 2026-05-22] Query rewriter — row-level query → 표 이름 친화 어휘 변형.
+  query_rewriter:
+    enabled: true
+    n_variations: 3
+    model_tier: "light"
+
 candidate_detection:
   enabled: true
   threshold: 0.65
   use_surface_signals: true
   teacher_llm_fallback: true
-  # LLM 동시 호출 상한 — HCX 429 rate limit 회피. 안전 기본값 4.
-  concurrency: 4
+  # [2026-05-21] LLM 동시 호출 상한.
+  # candidate scoring(step 1) + check-worthiness(step 2) 두 단계가 각각 이 값을
+  # Semaphore 상한으로 사용. HCX-003은 *초당 요청 수* 제한이 빡세서 5 이상이면
+  # 429 Too Many Requests 폭주(2026-05-21 21:42 로그 — 5 concurrent → 전부 429).
+  # 22:24 재테스트: 4 concurrent + min_call_interval_ms=250도 지속 429 발생.
+  # → 2로 하향. min_call_interval_ms와 함께 *실제 처리량*을 결정.
+  concurrency: 2
 
 observability:
   langfuse_enabled: false
