@@ -63,6 +63,31 @@ from structverify.explanation.explainer import generate_explanation
 from structverify.memory import DocumentWorkingMemory  # [머지 이수민 main]
 from structverify.utils.logger import get_logger
 
+
+def _claims_from_all_sentences(sir_doc: "SIRDocument") -> list["Claim"]:
+    """[2026-05-27 oracle mode] detect_claims 우회 — 모든 문장을 Claim 객체로.
+
+    FEVER/SciFact 스타일의 oracle setting (claim_text를 직접 input으로 받음)
+    평가 시 사용. config.eval.bypass_detection=true일 때만 호출됨.
+    """
+    out: list[Claim] = []
+    for block in (sir_doc.blocks or []):
+        for sent in (block.sentences or []):
+            txt = (sent.text or "").strip()
+            if not txt:
+                continue
+            try:
+                out.append(Claim(
+                    doc_id=sir_doc.doc_id,
+                    block_id=block.block_id,
+                    sent_id=sent.sent_id,
+                    claim_text=txt,
+                    check_worthy_score=1.0,  # oracle이므로 만점
+                ))
+            except Exception:
+                continue
+    return out
+
 logger = get_logger(__name__)
 
 
@@ -127,8 +152,22 @@ class RuntimeAgent:
         # Thought: "검증 가능한 주장 문장을 찾아야 한다"
         # Observation: Claim 객체 리스트
         # TODO [김예슬]: domain-packs 기반 도메인별 few-shot 예시 주입
-        claims = await detect_claims(sir_doc, self.config)
-        logger.info(f"[Agent A] Step 4 detect_claims → {len(claims)}건")
+        #
+        # [2026-05-27] Oracle mode (evaluation용) — config.eval.bypass_detection=true이면
+        # detect_claims LLM 필터링을 건너뛰고 *모든 문장*을 claim으로 변환. FEVER/SciFact
+        # style의 oracle claim setting에 사용. 일반 검증 흐름엔 영향 X (config 기본 false).
+        _bypass_det = bool(
+            (self.config.get("eval", {}) or {}).get("bypass_detection", False)
+        )
+        if _bypass_det:
+            claims = _claims_from_all_sentences(sir_doc)
+            logger.info(
+                f"[Agent A] Step 4 detect_claims (BYPASSED — oracle mode) → "
+                f"{len(claims)}건 (모든 문장 claim 변환)"
+            )
+        else:
+            claims = await detect_claims(sir_doc, self.config)
+            logger.info(f"[Agent A] Step 4 detect_claims → {len(claims)}건")
 
         if not claims:
             logger.info("[Agent A] 검증 가능한 주장 없음 — 파이프라인 종료")
