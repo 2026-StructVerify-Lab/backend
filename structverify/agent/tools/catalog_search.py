@@ -84,6 +84,23 @@ class CatalogSearchTool(ToolBase):
         "category": "(선택) 분류 힌트 리스트. 예: ['인구', '출생']",
         "top_k": "(선택) 최대 후보 수. 기본 5",
         "source": "(선택) 데이터 소스 이름. 기본은 config.data_sources.default_source",
+        "force_explore": (
+            "(선택) true면 catalog top1 점수와 무관하게 deep_explore "
+            "(top 표들에서 sample row 가져와 LLM이 row 단서 기반 reasoning) "
+            "강제 발동. fetch_evidence가 row를 못 찾아 회복이 필요할 때 사용."
+        ),
+        "explore_mode": (
+            "(선택) force_explore=true 시 사용할 방식. 'meta'(기본, 권장): KOSIS "
+            "getMeta(ITM/OBJ) 호출로 표 항목/분류 list만 받아 LLM이 정답 표 식별 "
+            "(빠름, ~표당 1초). 'row_preview': 표 전체 row preview 받아 LLM이 외삽 "
+            "reasoning (느림, 표당 22초). 'meta'가 정답 표 직접 식별에 유리."
+        ),
+        "query_rewrite": (
+            "(선택) true면 catalog_search 실행 *전에* LLM이 query를 표 이름 친화 "
+            "어휘로 변형(예: '체외 충격파 쇄석술 장비 수' → '시군구별 의료장비'). "
+            "원본 query에 row-level keyword만 있어 catalog 후보에 정답 표가 안 들어올 "
+            "때 사용. 각 변형으로 search → 합집합 반환."
+        ),
     }
 
     async def execute(
@@ -105,10 +122,15 @@ class CatalogSearchTool(ToolBase):
             category = [str(category)]
 
         try:
-            top_k = int(input_data.get("top_k") or 5)
+            top_k = int(input_data.get("top_k") or 15)
         except (TypeError, ValueError):
-            top_k = 5
-        top_k = max(1, min(top_k, 20))
+            top_k = 10
+        # [P29' 2026-05-22] 기본 5 → 15. catalog 임베딩이 표 이름만 보는 한계로
+        # row-level keyword 쿼리(예: "체외 충격파 쇄석술 장비")는 정답 표가
+        # cosine 6~15위에 깔리는 경우가 있어 top 5만 노출하면 reflect/deep_explore
+        # 모두 정답에 접근 불가. 19개 합집합을 거의 그대로 노출해도 prompt
+        # context 부담은 적당하고 정답 진입률 ↑.
+        top_k = max(15, min(top_k, 20))
 
         # ── [패치 R1.5] explore_catalog 결과 자동 활용 ─────────────────
         # LLM이 explore_catalog 결과를 무시하고 자기 머릿속 카테고리 어휘를
@@ -153,11 +175,85 @@ class CatalogSearchTool(ToolBase):
                 ),
             )
 
-        # 검색 실행
+        # ── [P30 2026-05-22] query_rewrite — 검색 *전*에 LLM이 query 변형 ──
+        # query가 row-level keyword면 catalog 표 이름과 매칭이 약함. LLM이
+        # 표 이름 친화 어휘로 변형 후 각 변형으로 검색 → 합집합. 원본 + 변형
+        # 둘 다 시도해 정답 표 진입률 ↑.
+        _queries_to_search: list[str] = [query]
+        _qr_applied: list[str] = []
+        if bool(input_data.get("query_rewrite")) and context.claim is not None:
+            try:
+                from .query_rewriter import rewrite_query as _rewrite_query
+                _variations = await _rewrite_query(
+                    query=query, claim=context.claim, config=context.config,
+                )
+                for v in _variations:
+                    if v and v not in _queries_to_search:
+                        _queries_to_search.append(v)
+                        _qr_applied.append(v)
+                if _qr_applied:
+                    logger.info(
+                        f"[catalog_search] query_rewrite 적용 — 원본={query!r} + "
+                        f"변형 {len(_qr_applied)}개: {_qr_applied}"
+                    )
+            except Exception as _e:
+                logger.warning(f"[catalog_search] query_rewrite 실패: {_e}")
+
+        # [P31 2026-05-22] claim에서 schema 정보 추출 → source.search_catalog의
+        # context로 전달. KOSIS DataSource는 이걸 ConnectorQuery.extra_params에 묶어
+        # _extract_category_and_keyword에 전달하므로:
+        #   - parent_path 있으면 LLM 카테고리 추출 *skip*하고 KOSIS 어휘 그대로 사용
+        #   - raw_claim 있으면 LLM이 전체 문장 보고 더 정확한 카테고리/검색어
+        # claim/schema가 없으면 None인 채로 안전하게 동작.
+        _ctx_for_source: dict[str, Any] = {}
+        _claim = context.claim
+        if _claim is not None:
+            _claim_text = getattr(_claim, "claim_text", None)
+            if _claim_text:
+                _ctx_for_source["raw_claim"] = str(_claim_text)[:200]
+            _schema = getattr(_claim, "schema", None)
+            if _schema is not None:
+                for _k in ("parent_path", "population", "indicator"):
+                    _v = getattr(_schema, _k, None)
+                    if _v:
+                        _ctx_for_source[_k] = str(_v)
+
+        # 검색 실행 — 단일 query 또는 다중 query 합집합
         try:
-            candidates = await source.search_catalog(
-                query=query, category=category, top_k=top_k,
-            )
+            if len(_queries_to_search) == 1:
+                candidates = await source.search_catalog(
+                    query=query, category=category, top_k=top_k,
+                    context=_ctx_for_source or None,
+                )
+            else:
+                import asyncio as _aio
+                _all = await _aio.gather(
+                    *[
+                        source.search_catalog(
+                            query=q, category=category, top_k=top_k,
+                            context=_ctx_for_source or None,
+                        )
+                        for q in _queries_to_search
+                    ],
+                    return_exceptions=True,
+                )
+                # 합집합 + 중복 제거 (id 기준)
+                candidates = []
+                _seen: set[str] = set()
+                for res in _all:
+                    if isinstance(res, Exception):
+                        continue
+                    for c in (res or []):
+                        cid = c.get("id") if hasattr(c, "get") else None
+                        if not cid or cid in _seen:
+                            continue
+                        _seen.add(cid)
+                        candidates.append(c)
+                # 점수순 정렬 (각 query의 score를 그대로 사용)
+                candidates.sort(
+                    key=lambda c: float(c.get("score", 0.0) or 0.0),
+                    reverse=True,
+                )
         except Exception as e:
             logger.exception(f"[catalog_search] source={source_name} query={query!r} 실패")
             return ToolResult(
@@ -173,6 +269,32 @@ class CatalogSearchTool(ToolBase):
             # dict이거나 dict-like
             d = dict(c) if hasattr(c, "items") else {}
             normalized.append(d)
+
+        # ── [P33b 2026-05-22] 이전 fetch 실패 stat_id 제외 ────────────
+        # 같은 claim에서 catalog_search → fetch_evidence가 *관련성 거부* 또는
+        # *row 매칭 실패*로 None 반환한 표는 *다음 catalog_search에서도 다시
+        # 후보로 올라옴* (KOSIS 검색이 deterministic). reflect가 thought엔
+        # "다른 표 시도"라 쓰지만 input은 거의 같은 query라 결국 같은 5개
+        # 후보 → 같은 표 반복 거부 → 무한 헛돌이.
+        # workspace에 *이 claim에서 실패한 stat_id 목록*을 두고 결과에서 제거.
+        _failed_count = 0
+        try:
+            _failed_ids = set(
+                context.workspace.read_failed_stat_ids(context.claim_id)
+                if context.workspace else []
+            )
+        except Exception:
+            _failed_ids = set()
+        if _failed_ids:
+            _before = len(normalized)
+            normalized = [c for c in normalized if c.get("id") not in _failed_ids]
+            _failed_count = _before - len(normalized)
+            if _failed_count > 0:
+                logger.info(
+                    f"[catalog_search] 이전 fetch 실패 stat_id {_failed_count}개 제외 "
+                    f"({sorted(_failed_ids)[:5]}{'...' if len(_failed_ids) > 5 else ''}) "
+                    f"— 같은 표 무한 반복 방지"
+                )
 
         # ── [패치 D] job에서 이미 fetch 성공한 stat_id를 결과 맨 앞에 prepend ──
         # 같은 KOSIS 표가 여러 지표(출생아 수/합계출산율/혼인 건수)를 같이
@@ -315,11 +437,118 @@ class CatalogSearchTool(ToolBase):
                     reverse=True,
                 )
 
-        # ── [P21B 2026-05-22] Row-aware LLM rerank ───────────────────────
+        # ── [P28 2026-05-22] Deep Exploration (T1 — 사전 보강) ────────────
+        # catalog top1 점수가 낮거나 top1-top2 gap이 작으면, top N 표의 sample row를
+        # 가져와 LLM이 row 단서 기반 reasoning으로 best 표 추천. P21B와 달리:
+        #   - top 3 (기본), 표당 row 5개, Y prdSe만 → KOSIS 부하 ↓
+        #   - prompt: "row 단서로 더 파볼 가치 있는 표 외삽 추천" (best 단순 선택 X)
+        #   - none_signal → output에 표시 → reflect가 query refinement 결정
+        # 또 force_explore=True (T2 회복용)면 점수 조건 무시하고 발동.
+        _cs_cfg = (context.config or {}).get("catalog_search") or {}
+        _dx_cfg = _cs_cfg.get("deep_explore") or {}
+        _dx_enabled = bool(_dx_cfg.get("enabled", False))
+        _force_explore = bool(input_data.get("force_explore"))
+        _explore_meta: dict[str, Any] | None = None
+
+        if _dx_enabled and normalized and context.claim is not None:
+            _low_score_thr = float(_dx_cfg.get("trigger_low_score") or 0.6)
+            _gap_thr = float(_dx_cfg.get("trigger_score_gap") or 0.1)
+            _top1_score = float(normalized[0].get("score", 0.0) or 0.0)
+            _top2_score = (
+                float(normalized[1].get("score", 0.0) or 0.0)
+                if len(normalized) >= 2 else 0.0
+            )
+            _t1_fire = (
+                _top1_score < _low_score_thr
+                or (_top1_score - _top2_score) < _gap_thr
+            )
+            # per-claim 발동 횟수 제한 (loop 방지)
+            _max_per_claim = int(_dx_cfg.get("max_per_claim") or 2)
+            _dx_obs_count = 0
+            try:
+                for _n in context.workspace.list_observations(context.claim_id):
+                    if "deep_explore" in _n.lower():
+                        _dx_obs_count += 1
+            except Exception:
+                pass
+
+            if (_force_explore or _t1_fire) and _dx_obs_count < _max_per_claim:
+                trigger_label = "T2/force" if _force_explore else "T1/score"
+                # [P30 2026-05-22] explore_mode 분기:
+                #   - "meta" (기본): getMeta(ITM/OBJ) → 빠름 + 정확
+                #   - "row_preview": 표 전체 row preview → 느림 + 외삽
+                # input의 explore_mode가 우선, 없으면 config의 default 사용.
+                _explore_mode = str(
+                    input_data.get("explore_mode")
+                    or _dx_cfg.get("explore_mode")
+                    or "meta"
+                ).strip().lower()
+                logger.info(
+                    f"[catalog_search] deep_explore 발동 ({trigger_label}, "
+                    f"mode={_explore_mode}) — top1={_top1_score:.3f}, "
+                    f"gap={_top1_score-_top2_score:.3f}, prev_calls={_dx_obs_count}"
+                )
+                try:
+                    if _explore_mode == "meta":
+                        from .meta_explore import meta_explore as _explore_fn
+                    else:
+                        from .deep_explore import deep_explore as _explore_fn
+                    _result = await _explore_fn(
+                        query=query,
+                        candidates=normalized,
+                        claim=context.claim,
+                        source=source,
+                        workspace=context.workspace,
+                        config=context.config,
+                    )
+                    if _result.used:
+                        _explore_meta = {
+                            "best_table_id": _result.best_table_id,
+                            "reasoning": _result.reasoning,
+                            "none_signal": _result.none_signal,
+                            "previewed_ids": _result.previewed_ids,
+                            "trigger": trigger_label,
+                            "mode": _explore_mode,
+                        }
+                        # workspace observation으로도 별도 기록 (per-claim counter용)
+                        try:
+                            context.workspace.write_observation(
+                                context.claim_id,
+                                f"iter{context.iter_num:03d}_deep_explore",
+                                _explore_meta,
+                            )
+                        except Exception as _e:
+                            logger.debug(
+                                f"[catalog_search] deep_explore observation 저장 실패: {_e}"
+                            )
+                        # best가 있으면 해당 표를 normalized top으로 승격
+                        if _result.best_table_id and not _result.none_signal:
+                            _ids = [c.get("id", "") for c in normalized]
+                            if _result.best_table_id in _ids:
+                                _idx = _ids.index(_result.best_table_id)
+                                if _idx != 0:
+                                    normalized = (
+                                        [normalized[_idx]]
+                                        + [c for i, c in enumerate(normalized) if i != _idx]
+                                    )
+                                    logger.info(
+                                        f"[catalog_search] deep_explore best="
+                                        f"{_result.best_table_id!r} → top1 승격"
+                                    )
+                except Exception as _e:
+                    logger.warning(
+                        f"[catalog_search] deep_explore 실패 (catalog 원본 유지): {_e}"
+                    )
+            elif _dx_obs_count >= _max_per_claim:
+                logger.info(
+                    f"[catalog_search] deep_explore skip — claim당 호출 한도 "
+                    f"({_dx_obs_count}/{_max_per_claim})"
+                )
+
+        # ── [P21B 2026-05-22] Row-aware LLM rerank (P25에서 disable, P28과 별개) ───
         # top N 표에 sample row 1개 fetch해 LLM이 claim과 가장 잘 매칭되는 표 선택.
         # 임베딩 score만으론 "치료 가능 사망률"과 "사망률"·"의료장비"를 잘 못 구분
         # 하는 케이스 (23:54 로그) 대응. P20 KOSIS cache hit이면 비용 거의 0.
-        _cs_cfg = (context.config or {}).get("catalog_search") or {}
         _rerank_mode = str(_cs_cfg.get("rerank_mode") or "none").lower()
         _rerank_top_n = int(_cs_cfg.get("rerank_top_n") or 5)
         _rerank_gap = float(_cs_cfg.get("rerank_min_score_gap") or 0.15)
@@ -380,19 +609,43 @@ class CatalogSearchTool(ToolBase):
             top_names.append(
                 f"[{cid}] {cname}" + (f" (score={score:.3f})" if isinstance(score, (int, float)) else "")
             )
+        summary_qr = (
+            f" | query_rewrite +{len(_qr_applied)}" if _qr_applied else ""
+        )
         summary = (
             f"catalog_search({source_name}) query={query!r} → "
-            f"{len(normalized)}개 후보. Top: {' | '.join(top_names) if top_names else '(없음)'}"
+            f"{len(normalized)}개 후보{summary_qr}. "
+            f"Top: {' | '.join(top_names) if top_names else '(없음)'}"
         )
 
+        _out: dict[str, Any] = {
+            "source": source_name,
+            "query": query,
+            "category": category,
+            "candidates": normalized,
+            "candidate_count": len(normalized),
+        }
+        if _qr_applied:
+            _out["_query_rewrite"] = {
+                "original": query,
+                "variations": _qr_applied,
+            }
+        if _explore_meta is not None:
+            _out["_deep_explore"] = _explore_meta
+            # summary에도 신호 추가 — reflect가 observation summary만 봐도 알도록
+            if _explore_meta.get("none_signal"):
+                summary += (
+                    " | deep_explore: top 표들의 sample row에서 적합한 row 없음 — "
+                    "다른 검색어로 catalog_search 재시도 권장."
+                )
+            elif _explore_meta.get("best_table_id"):
+                summary += (
+                    f" | deep_explore best={_explore_meta['best_table_id']} "
+                    f"({_explore_meta.get('reasoning', '')[:60]})"
+                )
+
         return ToolResult(
-            output={
-                "source": source_name,
-                "query": query,
-                "category": category,
-                "candidates": normalized,
-                "candidate_count": len(normalized),
-            },
+            output=_out,
             summary=summary,
             success=True,
         )
@@ -537,7 +790,17 @@ async def _row_preview_rerank(
         _match = _re.search(r"\{[^{}]*\}", raw, _re.DOTALL)
         if _match:
             data = _json.loads(_match.group(0))
-            _best = (data.get("best_stat_id") or "").strip() or None
+            _raw_best = (data.get("best_stat_id") or "").strip() or None
+            # [P24 2026-05-22] LLM이 brackets/quotes 포함해서 반환하는 케이스 정규화.
+            # prompt에 후보를 "1. [DT_XXX] 표이름" 형식으로 노출하니 LLM이 그대로
+            # "[DT_XXX]" 복사하는 일이 잦음. brackets/quotes/공백 strip + (옵션)
+            # candidates list에 substring 매칭 fallback.
+            if _raw_best:
+                _best = _raw_best.strip().strip("[]").strip("'\"").strip()
+                if _best != _raw_best:
+                    logger.info(
+                        f"[catalog_search.rerank] best 정규화: {_raw_best!r} → {_best!r}"
+                    )
             _reason = data.get("reason") or ""
             if _best:
                 logger.info(
@@ -552,10 +815,27 @@ async def _row_preview_rerank(
 
     # best를 0번으로 끌어올리기
     _ids = [c.get("id", "") for c in candidates]
+    # [P24] substring fallback — 여전히 매칭 안 되면 candidates 중 best가 substring으로
+    # 들어가는 표 찾기 (예: LLM이 'DT_117049_A083_2020' 대신 'DT_117049_A083' 반환).
     if _best not in _ids:
-        logger.info(
-            f"[catalog_search.rerank] best={_best!r}가 후보 list에 없음 — rerank skip"
-        )
+        _substring_match = None
+        for _cid in _ids:
+            if not _cid:
+                continue
+            if _best in _cid or _cid in _best:
+                _substring_match = _cid
+                break
+        if _substring_match:
+            logger.info(
+                f"[catalog_search.rerank] best={_best!r} substring 매칭 → "
+                f"{_substring_match!r} 사용"
+            )
+            _best = _substring_match
+        else:
+            logger.info(
+                f"[catalog_search.rerank] best={_best!r}가 후보 list "
+                f"{_ids[:5]}에 없음 — rerank skip"
+            )
         return None
     _best_idx = _ids.index(_best)
     if _best_idx == 0:
