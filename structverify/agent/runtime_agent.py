@@ -334,6 +334,25 @@ class RuntimeAgent:
                 f"successful_stat_ids 캐시가 다음 level로 전파됨"
             )
 
+            # ── [2026-05-25 패치 X] derived prev_time prefetch ──
+            # Level 1(base) 끝난 후 Level 2+(derived)가 필요로 하는 prev_time_period
+            # 시점들을 *시스템이 미리 fetch*해 verified_facts에 저장. derived loop이
+            # 그 자리에서 캐시 적중하므로 재fetch 안 함.
+            #
+            # 배경: A 패치(reflect prompt에서 absolute claim 시 prev 시점 fetch 금지)로
+            # base claim이 prev 시점을 fetch하지 않게 됐는데, 그러면 derived가 또 직접
+            # fetch해야 함. 이전엔 LLM 헛돌이로 우연히 prev도 fetch되어 cache 풍부했음.
+            # 이제 *시스템이 명시적으로* prev 시점만 미리 잡아 둠.
+            try:
+                await self._prefetch_derived_prev_times(
+                    base_claims=_level_claims,
+                    future_levels=_exec_levels[_lvl_idx + 1:],
+                    workspace=workspace,
+                    memory=memory,
+                )
+            except Exception as _e:
+                logger.debug(f"[Agent A] derived prev prefetch 실패 (무시): {_e}")
+
         # 원래 claim 순서대로 정렬 (results 인덱스 보존)
         results: list[VerificationResult] = []
         for _c in claims:
@@ -404,6 +423,161 @@ class RuntimeAgent:
         return claims, results, all_nodes, all_edges
 
     # ── [Phase D] Agent Loop 경로 헬퍼 ──────────────────────────────────────
+
+    async def _prefetch_derived_prev_times(
+        self,
+        base_claims: list,
+        future_levels: list[list],
+        workspace: Any,
+        memory: Any,
+    ) -> None:
+        """[2026-05-25 패치 X] base 레벨이 끝난 후, 후속 derived 레벨의
+        prev_time_period 시점들을 시스템이 미리 fetch해 verified_facts에 저장.
+
+        목적: derived(증가율/차이) claim의 loop이 prev 시점을 캐시에서 적중하도록.
+              이전엔 LLM 헛돌이로 base 처리 중 prev도 fetch됐었지만, A 패치 이후
+              base는 자기 시점만 정확히 fetch 함. 그래서 derived가 prev 재fetch
+              필요해진 부작용을 시스템이 명시적으로 보완.
+
+        흐름:
+          1) future_levels의 모든 derived claim에서 (indicator_base, prev_time_period,
+             population, unit) 추출 (indicator는 derived suffix strip).
+          2) workspace.lookup_verified_fact로 이미 있는지 확인.
+          3) 없으면 base claim의 successful_stat_id를 1순위로 KOSISDataSource.fetch_evidence
+             직접 호출. 결과를 workspace.append_verified_fact + sibling_evidence 저장.
+        """
+        if not future_levels:
+            return
+        from structverify.agent.workspace import _strip_derived_suffix
+
+        # 1) prefetch 대상 수집 — 중복 제거
+        _targets: dict[tuple[str, str, str, str], dict] = {}
+        for _next_lvl in future_levels:
+            for _dc in _next_lvl:
+                _sch = getattr(_dc, "schema", None)
+                if _sch is None:
+                    continue
+                _ind = (getattr(_sch, "indicator", "") or "").strip()
+                _prev_t = (getattr(_sch, "prev_time_period", "") or "").strip()
+                if not _ind or not _prev_t:
+                    continue
+                _pop = (getattr(_sch, "population", "") or "").strip()
+                _unit = (getattr(_sch, "unit", "") or "").strip()
+                _ind_base = _strip_derived_suffix(_ind)
+                _key = (_ind_base, _prev_t, _pop, _unit)
+                if _key not in _targets:
+                    _targets[_key] = {
+                        "indicator": _ind_base,
+                        "time_period": _prev_t,
+                        "population": _pop,
+                        "unit": _unit,
+                        "sent_id": str(getattr(_dc, "sent_id", "") or ""),
+                    }
+
+        if not _targets:
+            return
+
+        # 2) 이미 캐시된 건 skip
+        _to_fetch: list[dict] = []
+        for _t in _targets.values():
+            try:
+                _hit = workspace.lookup_verified_fact(
+                    _t["indicator"], _t["time_period"],
+                    unit_hint=_t["unit"] or None,
+                    population=_t["population"] or None,
+                )
+            except Exception:
+                _hit = None
+            if _hit is None:
+                _to_fetch.append(_t)
+
+        if not _to_fetch:
+            logger.info(
+                f"[Agent A] derived prev prefetch: {len(_targets)}개 시점 — "
+                f"모두 이미 verified_facts에 있음. skip."
+            )
+            return
+
+        logger.info(
+            f"[Agent A] derived prev prefetch 시작: {len(_to_fetch)}개 (indicator, prev_time) "
+            f"미리 fetch (예: {_to_fetch[0]['indicator']!r} {_to_fetch[0]['time_period']!r})"
+        )
+
+        # 3) base의 successful stat_id 1순위로 fetch
+        try:
+            _prior_stat_ids = workspace.read_successful_stat_ids() or []
+        except Exception:
+            _prior_stat_ids = []
+        if not _prior_stat_ids:
+            logger.info(
+                f"[Agent A] derived prev prefetch skip: base에서 successful_stat_id 없음."
+            )
+            return
+
+        _stat_id = _prior_stat_ids[0]
+
+        # KOSISDataSource를 *직접* 호출 (loop tool wrap 없이) — verified_facts 저장만 목적
+        _kosis_source = None
+        try:
+            from structverify.retrieval.registry import build_datasource
+            import structverify.retrieval.kosis_source  # noqa: F401 — @register_datasource 트리거
+            _ds_cfg = (self.config.get("data_sources") or {}).get("kosis", {}) or {}
+            _kosis_source = build_datasource("kosis", config=_ds_cfg)
+        except Exception as _e:
+            logger.info(f"[Agent A] derived prev prefetch skip: KOSISDataSource 인스턴스 실패 — {_e}")
+            return
+        if _kosis_source is None:
+            return
+
+        for _t in _to_fetch:
+            _params = {
+                "indicator": _t["indicator"],
+                "time_period": _t["time_period"],
+                "population": _t["population"] or None,
+                "unit_hint": _t["unit"] or None,
+            }
+            try:
+                _ev = await _kosis_source.fetch_evidence(
+                    candidate_id=_stat_id, params=_params, workspace=workspace,
+                )
+            except Exception as _e:
+                logger.debug(
+                    f"[Agent A] derived prev prefetch fetch 실패: {_t} stat={_stat_id} — {_e}"
+                )
+                continue
+            if _ev is None:
+                continue
+            _val = _ev.get("value") if hasattr(_ev, "get") else getattr(_ev, "value", None)
+            if _val is None:
+                continue
+
+            # verified_facts에 저장
+            _fact = {
+                "indicator": _t["indicator"],
+                "time_period": _t["time_period"],
+                "population": _t["population"] or "",
+                "value": _val,
+                "unit": (
+                    _ev.get("unit") if hasattr(_ev, "get") else getattr(_ev, "unit", "")
+                ) or "",
+                "source": f"KOSIS:{_stat_id}",
+                "claim_id": "prefetch",
+                "verdict": "prefetch",
+            }
+            try:
+                workspace.append_verified_fact(_fact)
+                # sibling_evidence에도 같은 sent_id로 박아 두면 derived loop이 즉시 활용
+                if _t["sent_id"]:
+                    workspace.record_sibling_evidence(
+                        sent_id=_t["sent_id"], role="base", evidence=_fact,
+                    )
+                logger.info(
+                    f"[Agent A] derived prev prefetch 성공: "
+                    f"indicator={_t['indicator']!r} time={_t['time_period']!r} "
+                    f"value={_val} (stat_id={_stat_id})"
+                )
+            except Exception as _e:
+                logger.debug(f"[Agent A] derived prev prefetch verified_fact 저장 실패: {_e}")
 
     def _get_source_text(self, sir_doc: "SIRDocument") -> str:
         """SIR 문서에서 원문 텍스트 복원 — planner의 source_text로 사용."""
@@ -701,9 +875,40 @@ class RuntimeAgent:
                 )
 
             # ── 3) supporting: derived claim에만 — primary 외 후보 ──
+            # [2026-05-25] supporting은 *claim이 의도한 시점*에만 한정.
+            # 기존엔 workspace의 모든 fetch_obs를 supporting에 덤프해서, 4월 증가율
+            # claim 검증 중 시도된 3월/5월 fetch가 "함께 참조한 데이터"로 노출됨
+            # → UI 노이즈. claim.time_period + claim.prev_time_period 두 시점에
+            # 매칭되는 evidence만 인정.
+            _relevant_times: set[str] = set()
+            if _claim_target_time:
+                _relevant_times.add(_norm_time(_claim_target_time))
+            if claim.schema and getattr(claim.schema, "prev_time_period", None):
+                _relevant_times.add(_norm_time(claim.schema.prev_time_period))
+
+            def _time_is_relevant(t: str) -> bool:
+                """_relevant_times에 정확/prefix 매칭되면 True. 빈 set면 모두 허용 (보수)."""
+                if not _relevant_times:
+                    return True
+                tn = _norm_time(t)
+                if not tn:
+                    return False
+                for rt in _relevant_times:
+                    if not rt:
+                        continue
+                    if tn == rt or tn.startswith(rt) or rt.startswith(tn):
+                        return True
+                return False
+
             if _is_derived and _primary is not None:
                 for _c in _deduped:
                     if _c is _primary:
+                        continue
+                    if not _time_is_relevant(_c.get("time", "")):
+                        logger.debug(
+                            f"[Agent A] supporting 제외 (claim 의도 시점 불일치): "
+                            f"time={_c.get('time')!r} not in {_relevant_times}"
+                        )
                         continue
                     supporting_evidence.append(Evidence(
                         source_name="KOSIS",
