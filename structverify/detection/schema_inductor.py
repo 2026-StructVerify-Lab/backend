@@ -1282,3 +1282,211 @@ def _safe_float(v: Any) -> float | None:
             except ValueError:
                 pass
     return None
+
+
+# ── [2026-05-27] regenerate_schema ───────────────────────────────────
+# replan tool용 — 초기 induction이 잘못 분류한 schema를 *표 row sample 보고* 재분류.
+#
+# 배경: schema_inductor의 초기 호출은 *원문 텍스트만* 보고 schema를 만듦. 그래서:
+#   - "강원도 의료장비 *증가 수* 52" 같은 동사형 변화량을 *base*(absolute)로 잘못 분류
+#   - 표 row에 "52"라는 절대값 row가 없음에도 LLM이 absolute로 처리
+# replan 시점엔 *실제 표 데이터*까지 봤기 때문에, "52는 row로 안 들어있고 표엔
+# 절대값 N대만 있음"을 LLM에 보여주면 → "이건 delta"로 재분류 가능.
+#
+# 호출 위치: structverify.agent.tools.replan.ReplanTool
+# 결과: 새 schema dict (또는 None). 호출자는 이걸로 claim.schema 업데이트 후
+#       planner.plan() 재호출.
+
+REGENERATE_SCHEMA_PROMPT = """당신은 통계 검증 schema 수정자입니다.
+
+초기 schema induction이 원문만 보고 만든 schema가 실제 표 데이터와 *구조적으로
+맞지 않는다*는 게 드러났습니다. 표의 row sample을 보고 **schema를 재분류**하세요.
+
+[원문 claim]
+{claim_text}
+
+[현재 schema — 초기 induction 결과]
+{original_schema_json}
+
+[실제 표에서 받은 데이터 — observation summary]
+{observations_summary}
+
+[★ 재분류 룰 — 매우 중요]
+1. claim.value가 표의 *row에 직접 매칭되는 값*인가?
+   - YES → value_role="base" (absolute claim). 그대로 유지.
+   - NO + 표에 *해당 indicator의 원시 절대값* 존재 → 계산 필요:
+     · indicator 접미사가 "증가율/감소율/증감률/변동률" → value_role="derived_rate"
+     · indicator 접미사가 "증가 수/감소 수/증감/변화량/늘었/줄었" → value_role="derived_difference"
+   - NO + 표에 *집계 단서*(다년 평균/합계 등) → value_role="aggregation"
+
+2. value_role을 *base가 아닌 것*으로 바꾸면, prev_time_period 채우기:
+   - time_period 단위가 연(예: '2024')이면 → prev_time_period = "전년" (예: '2023')
+   - 월(예: '2024-04')이면 → prev_time_period = "전년 동월" (예: '2023-04')
+   - 분기는 전년 동분기.
+
+3. 표에 *claim 시점 데이터가 없음*이 확실하면 (예: 표 PRD_DE 분포가 2021-2023뿐인데
+   claim time_period='2024') → 그건 schema 문제가 아닌 *데이터 부재* 문제.
+   schema 재분류로 해결 안 됨. 이 경우엔 value_role 그대로 두고 notes에 명시.
+
+[★ 금지]
+- value, unit, indicator는 원문 의도와 같으면 *변경 금지*.
+- 표 row에 직접 매칭되는 row가 있는데 derived로 바꾸는 것 금지 (no-op 회피).
+- 단순 retry plan을 만들기 위한 schema "복제"는 금지 — 실제로 *구조*가 바뀌어야 한다.
+
+[출력 형식 — JSON only, 다른 텍스트 금지]
+{{
+  "indicator": "...",
+  "time_period": "...",
+  "unit": "...",
+  "population": "...",
+  "value": <number>,
+  "value_role": "base | derived_rate | derived_difference | aggregation",
+  "prev_value": <number or null>,
+  "prev_time_period": "<YYYY 또는 YYYY-MM 또는 null>",
+  "prev_phrase": "<원문에서 직접 인용한 prev 단서 또는 ''>",
+  "parent_path": "...",
+  "modifier": "<범위/근사 표현 등 or null>",
+  "reason": "<왜 이렇게 재분류했는지 한 줄>"
+}}
+"""
+
+
+def _summarize_observations_for_schema(observations: list[dict]) -> str:
+    """observation list를 schema regeneration 프롬프트용으로 요약.
+
+    fetch_evidence observation에서 추출:
+      - 시도된 stat_id, 표 이름
+      - PRD_DE 분포 (어떤 시점 데이터가 있는지)
+      - ITM_NM/C2_NM unique 값 (어떤 분류가 있는지)
+      - 매칭된 sample row의 indicator + value (있으면)
+    """
+    if not observations:
+        return "(없음)"
+    lines: list[str] = []
+    for i, ob in enumerate(observations[:10], 1):  # 최대 10개
+        if not isinstance(ob, dict):
+            continue
+        action = ob.get("action", "")
+        summary = str(ob.get("summary", ""))[:160]
+        success = ob.get("success")
+        line = f"  [{i}] action={action} success={success}\n      summary={summary!r}"
+        # fetch 관련 부가 정보
+        if action == "fetch_evidence":
+            stat_id = ob.get("stat_id")
+            fv = ob.get("fetched_value")
+            ft = ob.get("fetched_time")
+            if stat_id:
+                line += f"\n      stat_id={stat_id!r}"
+            if fv is not None:
+                line += f" fetched_value={fv} time={ft!r}"
+            tried = ob.get("tried_candidates")
+            if tried:
+                line += f"\n      tried_candidates={tried}"
+        elif action == "catalog_search":
+            top3 = ob.get("candidates_top3")
+            if top3:
+                line += f"\n      top3={top3}"
+        lines.append(line)
+    return "\n".join(lines) if lines else "(없음)"
+
+
+async def regenerate_schema(
+    *,
+    claim_text: str,
+    original_schema: dict | None,
+    observations: list[dict],
+    config: dict | None = None,
+) -> dict | None:
+    """원문 + observation으로 schema 재분류.
+
+    Args:
+        claim_text: 원본 claim 문장.
+        original_schema: 초기 induction이 만든 schema dict.
+        observations: ReplanTool이 수집한 observation 요약 리스트.
+        config: 전체 config.
+
+    Returns:
+        새 schema dict (value_role 등 갱신). 실패 시 None.
+    """
+    import json
+
+    if not claim_text:
+        logger.warning("[schema_inductor.regenerate] claim_text 비어있음")
+        return None
+    orig_json = "(없음)"
+    if original_schema:
+        try:
+            orig_json = json.dumps(
+                original_schema, ensure_ascii=False, indent=2, default=str,
+            )
+        except Exception:
+            orig_json = str(original_schema)
+
+    obs_summary = _summarize_observations_for_schema(observations or [])
+
+    prompt = REGENERATE_SCHEMA_PROMPT.format(
+        claim_text=claim_text,
+        original_schema_json=orig_json,
+        observations_summary=obs_summary,
+    )
+    logger.info(
+        f"[schema_inductor.regenerate] prompt 구성 완료 ({len(prompt)}자) — "
+        f"obs={len(observations or [])}건"
+    )
+
+    llm = LLMClient(config=(config or {}).get("llm") or {})
+    try:
+        raw = await llm.generate(
+            prompt=prompt,
+            system_prompt="당신은 통계 검증 schema 수정자입니다. JSON만 응답.",
+            model_tier="heavy",
+        )
+    except Exception as e:
+        logger.warning(f"[schema_inductor.regenerate] LLM 호출 실패: {e}")
+        return None
+
+    logger.info(
+        f"[schema_inductor.regenerate] LLM 응답 본문 ↓\n"
+        f"────── SCHEMA REGEN RESPONSE START ──────\n"
+        f"{raw}\n"
+        f"────── SCHEMA REGEN RESPONSE END ──────"
+    )
+
+    # JSON 추출
+    m = re.search(r"\{[\s\S]*\}", raw or "")
+    if not m:
+        logger.warning("[schema_inductor.regenerate] JSON 블록 못 찾음")
+        return None
+    try:
+        new_schema = json.loads(m.group(0))
+    except json.JSONDecodeError as e:
+        logger.warning(f"[schema_inductor.regenerate] JSON parse 실패: {e}")
+        return None
+    if not isinstance(new_schema, dict):
+        return None
+
+    # 정규화 (필수 키 유지)
+    out: dict[str, Any] = {}
+    for k in [
+        "indicator", "time_period", "unit", "population",
+        "value", "value_role",
+        "prev_value", "prev_time_period", "prev_phrase",
+        "parent_path", "modifier",
+    ]:
+        if k in new_schema:
+            out[k] = new_schema[k]
+    # value/prev_value는 안전 float
+    if "value" in out:
+        out["value"] = _safe_float(out["value"])
+    if "prev_value" in out:
+        out["prev_value"] = _safe_float(out["prev_value"])
+
+    reason = new_schema.get("reason") or ""
+    logger.info(
+        f"[schema_inductor.regenerate] 새 schema — "
+        f"value_role={out.get('value_role')!r}, "
+        f"prev_time_period={out.get('prev_time_period')!r}, "
+        f"prev_value={out.get('prev_value')!r}, "
+        f"reason={reason[:160]!r}"
+    )
+    return out
