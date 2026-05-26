@@ -86,6 +86,97 @@ def _autoload_fallback_candidate_ids(
     return out
 
 
+def _collect_candidate_pool(
+    workspace, claim_id, current_id: str, limit: int = 20,
+) -> list[dict]:
+    """catalog_search + explore_catalog observation에서 후보 표 dict 수집.
+
+    각 후보 dict는 {id, name, score, category_path, raw?, _pool_source} 형태.
+    탈중복 by id. catalog_ranker가 메타데이터까지 보고 의미 점수를 매기기 위함.
+
+    수집 순서:
+      1. 현재 claim의 catalog_search candidates (cosine recall — 점수 보존)
+      2. 현재 claim의 explore_catalog example tables (categorical recall — 다른 path)
+      3. 같은 job 다른 claim의 catalog candidates (job-level diversity)
+    """
+    seen: set[str] = set()
+    if current_id:
+        seen.add(current_id)
+    pool: list[dict] = []
+
+    def _add(cand: dict, source: str) -> bool:
+        cid = str(cand.get("id") or "").strip()
+        if not cid or cid in seen:
+            return len(pool) < limit
+        seen.add(cid)
+        out = dict(cand)
+        out["_pool_source"] = source
+        pool.append(out)
+        return len(pool) < limit
+
+    def _collect_catalog(claim_cid: str) -> None:
+        try:
+            names = workspace.list_observations(claim_cid)
+        except Exception:
+            return
+        cat_names = sorted(
+            [n for n in names if "catalog_search" in n.lower()],
+            reverse=True,
+        )
+        for name in cat_names:
+            data = workspace.read_observation(claim_cid, name)
+            if not isinstance(data, dict):
+                continue
+            cands = (data.get("output") or {}).get("candidates") or []
+            for c in cands:
+                if isinstance(c, dict):
+                    if not _add(c, "catalog"):
+                        return
+
+    def _collect_explore(claim_cid: str) -> None:
+        try:
+            names = workspace.list_observations(claim_cid)
+        except Exception:
+            return
+        ex_names = sorted(
+            [n for n in names if "explore_catalog" in n.lower()],
+            reverse=True,
+        )
+        for name in ex_names:
+            data = workspace.read_observation(claim_cid, name)
+            if not isinstance(data, dict):
+                continue
+            cats = data.get("categories") or []
+            for cat in cats:
+                if not isinstance(cat, dict):
+                    continue
+                category_label = cat.get("category_label", "")
+                for ex in (cat.get("examples") or []):
+                    if isinstance(ex, dict) and ex.get("stat_id"):
+                        if not _add({
+                            "id": ex.get("stat_id"),
+                            "name": ex.get("stat_name", ""),
+                            "score": 0.0,
+                            "category_path": category_label,
+                        }, "explore"):
+                            return
+
+    _collect_catalog(claim_id)
+    _collect_explore(claim_id)
+
+    if len(pool) < limit:
+        try:
+            other_cids = [c for c in workspace.list_claims() if c != str(claim_id)]
+        except Exception:
+            other_cids = []
+        for other in other_cids:
+            if len(pool) >= limit:
+                break
+            _collect_catalog(other)
+
+    return pool
+
+
 @register_tool(ActionType.FETCH_EVIDENCE)
 class FetchEvidenceTool(ToolBase):
     """카탈로그 후보의 실제 수치 데이터 조회.
@@ -168,24 +259,79 @@ class FetchEvidenceTool(ToolBase):
                 params["population"] = _sch_pop
             if not params.get("unit_hint") and getattr(schema, "unit", None):
                 params["unit_hint"] = schema.unit
+            # [P32 2026-05-22] LLM 기반 relevance fallback이 활용할 컨텍스트.
+            # raw_claim(원문 문장)과 parent_path(계층 카테고리)를 params에 실어
+            # KOSISDataSource의 v6.17 가드에서 LLM judge에 전달.
+            if not params.get("parent_path") and getattr(schema, "parent_path", None):
+                params["parent_path"] = schema.parent_path
+            if not params.get("raw_claim"):
+                _claim_text = getattr(claim, "claim_text", None)
+                if _claim_text:
+                    params["raw_claim"] = str(_claim_text)[:400]
             # [패치] derived claim (~증가율 등)의 unit_hint='%'는 KOSIS 표의
             # base 단위 row(명/건) 매칭을 막아 evidence 0건 → unverifiable로
             # 죽이는 원인. derived claim에서는 fetch 시 base row를 받아야
             # loop의 growth_rate/difference 직접계산 경로가 작동한다.
             # claim.schema.indicator(원본)에 derived suffix가 있으면
             # unit_hint를 비워 _select_best_row의 unit 가드를 우회한다.
-            _DERIVED_SUFFIXES = (
+            #
+            # [P27 2026-05-22] suffix list 확장 + *indicator unwrap*.
+            # "X 증가 수", "X 감소 수", "X 증가량" 등 *공백 포함 두 단어 표현*도 derived
+            # 류로 인식. derived 감지 시 fetch params의 indicator를 *원지표(X)*로
+            # unwrap해서 KOSIS 검색. KOSIS는 "X 증가 수" 자체 row가 거의 없으니
+            # 원지표 row를 받아 loop이 (cur - prev) 직접 계산하도록 유도.
+            #
+            # 한국어 동사형 변화 표현 — 도메인 무관 일반 패턴 (의료/인구/경제 공통).
+            _DERIVED_RATE_SUFFIXES = (
                 "증가율", "감소율", "증감률", "변화율", "상승률", "하락률",
+                "비율", "비중",
+            )
+            _DERIVED_DIFF_SUFFIXES = (
+                "증가 수", "감소 수", "증감 수",
+                "증가량", "감소량", "증감량",
+                "증가폭", "감소폭",
+                "신규 도입 수", "도입 수",
+                "신규 수", "추가 수",
+                "증가", "감소", "증감", "변화", "차이",  # 짧은 형태 (K 패치 기존)
             )
             _claim_ind = (getattr(schema, "indicator", "") or "").strip()
-            if any(_claim_ind.endswith(s) for s in _DERIVED_SUFFIXES):
-                if params.get("unit_hint"):
+            _matched_suffix: str | None = None
+            _is_rate = False
+            for _sfx in _DERIVED_RATE_SUFFIXES:
+                if _claim_ind.endswith(_sfx):
+                    _matched_suffix = _sfx
+                    _is_rate = True
+                    break
+            if not _matched_suffix:
+                # 긴 것 먼저 (예: "증가 수" 가 "증가"보다 먼저 매칭되도록 정렬은 list 순서로 보장)
+                for _sfx in _DERIVED_DIFF_SUFFIXES:
+                    if _claim_ind.endswith(_sfx):
+                        _matched_suffix = _sfx
+                        break
+
+            if _matched_suffix:
+                # (1) unit_hint='%' 제거 (rate 케이스)
+                if _is_rate and params.get("unit_hint"):
                     logger.info(
-                        f"[fetch_evidence] derived claim '{_claim_ind}' — "
+                        f"[fetch_evidence] derived rate claim '{_claim_ind}' — "
                         f"unit_hint={params.get('unit_hint')!r} 제거 "
                         f"(base 단위 row 매칭 위해)"
                     )
-                params.pop("unit_hint", None)
+                    params.pop("unit_hint", None)
+                # (2) indicator unwrap — KOSIS 검색용 원지표 추출
+                _root_indicator = _claim_ind[: -len(_matched_suffix)].rstrip()
+                if _root_indicator and _root_indicator != _claim_ind:
+                    logger.info(
+                        f"[fetch_evidence] derived indicator unwrap: "
+                        f"'{_claim_ind}' → '{_root_indicator}' (suffix={_matched_suffix!r}) — "
+                        f"KOSIS는 보통 *원지표 row*만 제공, 차이/증가율은 loop이 직접 계산"
+                    )
+                    params["indicator"] = _root_indicator
+                    # rate 케이스도 unit_hint 비움 (위에서 처리했지만 안전)
+                    if not _is_rate:
+                        # derived_difference 케이스: 단위는 원지표 그대로 (예: 대/명/건)
+                        # → unit_hint를 schema.unit으로 유지 (이미 위에서 채움)
+                        pass
             # ── [v6.17] growth_rate 직접계산용 — fetch 범위 확장 ──────────
             # claim에 prev_time_period가 있으면(증가율/변화량 claim),
             # startPrdDe를 prev 시점까지 당겨서 현재+이전 시점을 한 번에
@@ -369,12 +515,196 @@ class FetchEvidenceTool(ToolBase):
                 f"[fetch_evidence] 직전 success stat_id 우선 시도: "
                 f"{prior_success_ids} (job 공유)"
             )
-        # try_ids: top → prior_success → catalog fallback. 중복 제거.
-        try_ids: list[str] = []
-        for sid in [candidate_id] + prior_success_ids + list(fallback_ids):
-            if sid and sid not in try_ids:
-                try_ids.append(sid)
-        try_ids = try_ids[:5]  # 상한 5개 유지
+        # ── [2026-05-26] catalog_ranker (LLM batch ranking) ──────────────
+        # 후보 표 N개를 한 번에 LLM에 보내 의미 매칭 점수로 ranking.
+        # 키워드 가드 + per-table relevance_judge를 통합 대체.
+        # 비활성 시 (config or LLM 실패) 기존 키워드 가드로 fallback.
+        _ranker_cfg = (
+            ((context.config or {}).get("data_sources") or {})
+            .get("kosis") or {}
+        ).get("catalog_ranker") or {}
+        _ranker_enabled = bool(_ranker_cfg.get("enabled", False))
+
+        # 후보 pool 구성 — ranker 활성/비활성에 따라 다름
+        if _ranker_enabled and context.workspace is not None:
+            # 메타데이터 풍부한 pool 수집 (catalog + explore union)
+            _pool_limit = int(_ranker_cfg.get("pool_limit", 20))
+            _pool = _collect_candidate_pool(
+                context.workspace, context.claim_id, candidate_id,
+                limit=_pool_limit,
+            )
+            # current_id가 _pool에 없으면 (현재 pool은 current_id를 seen으로 skip)
+            # candidate 정보 빠지므로 catalog observation에서 보강
+            _current_cand: dict | None = None
+            try:
+                for _obs_name in context.workspace.list_observations(context.claim_id):
+                    if "catalog_search" not in _obs_name.lower():
+                        continue
+                    _obs = context.workspace.read_observation(context.claim_id, _obs_name)
+                    if not isinstance(_obs, dict):
+                        continue
+                    for _c in (_obs.get("output") or {}).get("candidates") or []:
+                        if isinstance(_c, dict) and _c.get("id") == candidate_id:
+                            _current_cand = dict(_c)
+                            _current_cand["_pool_source"] = "catalog"
+                            break
+                    if _current_cand:
+                        break
+            except Exception:
+                pass
+            if _current_cand is None:
+                _current_cand = {"id": candidate_id, "name": "", "score": 0.0, "_pool_source": "catalog"}
+
+            # 전체 ranking 대상: current + prior_success + pool. 중복 제거.
+            _rank_input: list[dict] = []
+            _rank_seen: set[str] = set()
+            def _add_to_rank(cand: dict) -> None:
+                cid = str(cand.get("id") or "")
+                if not cid or cid in _rank_seen:
+                    return
+                _rank_seen.add(cid)
+                _rank_input.append(cand)
+
+            _add_to_rank(_current_cand)
+            for sid in prior_success_ids:
+                if sid in _rank_seen:
+                    continue
+                _add_to_rank({"id": sid, "name": "[prior_success]", "score": 0.0, "_pool_source": "prior_success"})
+            for c in _pool:
+                _add_to_rank(c)
+
+            # ranker 호출
+            from structverify.retrieval.catalog_ranker import rank_candidates
+            _ranker_threshold = float(_ranker_cfg.get("score_threshold", 0.15))
+            try:
+                _rankings = await rank_candidates(
+                    claim_text=str(params.get("raw_claim") or params.get("claim_text") or ""),
+                    indicator=str(params.get("indicator") or ""),
+                    population=str(params.get("population") or ""),
+                    time_period=str(params.get("time_period") or ""),
+                    parent_path=str(params.get("parent_path") or ""),
+                    candidates=_rank_input,
+                    config=context.config,
+                )
+            except Exception as _e:
+                logger.warning(f"[fetch_evidence] catalog_ranker 호출 예외: {_e}")
+                _rankings = None
+
+            if _rankings:
+                # prior_success는 별도 캐시 가치라 ranker 점수 외에 *최우선 유지*.
+                _prior_set = set(prior_success_ids)
+                _ranked_ids = [
+                    r["id"] for r in _rankings
+                    if r["score"] >= _ranker_threshold and r["id"] not in _prior_set
+                ]
+                _rejected_ids = [
+                    r["id"] for r in _rankings if r["score"] < _ranker_threshold
+                ]
+                # try_ids: prior_success(최우선) → ranker top → 거부된 표 (안전망, 마지막 시도)
+                try_ids = []
+                for sid in prior_success_ids + _ranked_ids:
+                    if sid and sid not in try_ids:
+                        try_ids.append(sid)
+                # current candidate_id가 reject 됐어도 *맨 뒤*에 한 번 더 시도 (안전망)
+                if candidate_id and candidate_id not in try_ids:
+                    try_ids.append(candidate_id)
+                _max_try = int(_ranker_cfg.get("max_try", 10))
+                try_ids = try_ids[:_max_try]
+                # ── ranker 결정 로그: before/after 명시 + 각 표의 score+reason ──
+                _before_ids = [c["id"] for c in _rank_input if c.get("id")]
+                logger.info(
+                    f"[fetch_evidence] catalog_ranker decision:\n"
+                    f"  input ({len(_before_ids)}): {_before_ids}\n"
+                    f"  output try_ids (top {len(try_ids)}): {try_ids}\n"
+                    f"  rejected<{_ranker_threshold}: {_rejected_ids[:5]}"
+                    f"{'...' if len(_rejected_ids) > 5 else ''}"
+                )
+                for r in _rankings[:10]:
+                    _mark = (
+                        "★" if r["score"] >= _ranker_threshold and r["id"] in try_ids[:3]
+                        else " "
+                    )
+                    logger.info(
+                        f"  {_mark} rank: id={r['id']} score={r['score']:.2f} "
+                        f"reason={r.get('reason', '')[:140]!r}"
+                    )
+            else:
+                # ranker 실패 — fallback: 기존 candidate_id + prior + fallback ids
+                logger.warning("[fetch_evidence] catalog_ranker 미적용 (실패) — 기본 순서 사용")
+                try_ids = []
+                for sid in [candidate_id] + prior_success_ids + list(fallback_ids):
+                    if sid and sid not in try_ids:
+                        try_ids.append(sid)
+                try_ids = try_ids[:5]
+        else:
+            # ── 기존 동작 (ranker 비활성) ─────────────────────────────
+            # try_ids: top → prior_success → catalog fallback. 중복 제거.
+            try_ids = []
+            for sid in [candidate_id] + prior_success_ids + list(fallback_ids):
+                if sid and sid not in try_ids:
+                    try_ids.append(sid)
+            try_ids = try_ids[:5]  # 상한 5개 유지
+
+            # Indicator Semantic Guard (키워드 룰 fallback)
+            try:
+                _indicator_str = str(params.get("indicator") or "")
+                _SPECIFIC_KWS = (
+                    "체외", "쇄석", "충격파",
+                    "진단방사선", "특수의료", "특수의 료",
+                    "엑스선", "X선", "엑스레이",
+                    "CT", "MRI", "PET", "초음파",
+                    "방사선", "단층",
+                )
+                _claim_has_specific = any(
+                    kw.lower() in _indicator_str.lower() for kw in _SPECIFIC_KWS
+                )
+
+                _id_to_name: dict[str, str] = {}
+                if context.workspace is not None:
+                    try:
+                        for _obs_name in context.workspace.list_observations(context.claim_id):
+                            if "catalog_search" not in _obs_name.lower():
+                                continue
+                            _obs = context.workspace.read_observation(context.claim_id, _obs_name)
+                            if not isinstance(_obs, dict):
+                                continue
+                            for _c in (_obs.get("output") or {}).get("candidates") or []:
+                                if isinstance(_c, dict):
+                                    _cid, _cname = _c.get("id"), _c.get("name")
+                                    if _cid and _cname and _cid not in _id_to_name:
+                                        _id_to_name[_cid] = _cname
+                    except Exception:
+                        pass
+
+                def _name_specificity(name: str) -> bool:
+                    if not name:
+                        return False
+                    return any(kw.lower() in name.lower() for kw in _SPECIFIC_KWS)
+
+                def _semantic_score(sid: str) -> int:
+                    if sid in prior_success_ids:
+                        return 3
+                    _name = _id_to_name.get(sid, "")
+                    _name_has_specific = _name_specificity(_name)
+                    if _claim_has_specific and _name_has_specific:
+                        return 2
+                    if not _claim_has_specific and not _name_has_specific:
+                        return 1
+                    if _claim_has_specific and not _name_has_specific:
+                        return 0
+                    return -1
+
+                _before = list(try_ids)
+                try_ids.sort(key=lambda s: -_semantic_score(s))
+                if try_ids != _before:
+                    logger.info(
+                        f"[fetch_evidence] indicator semantic guard reorder: "
+                        f"indicator={_indicator_str!r} "
+                        f"(claim_has_specific={_claim_has_specific}) "
+                        f"{_before} → {try_ids}"
+                    )
+            except Exception as _e:
+                logger.debug(f"[fetch_evidence] indicator semantic guard 실패 (무시): {_e}")
 
         evidence = None
         used_id = candidate_id
@@ -385,7 +715,40 @@ class FetchEvidenceTool(ToolBase):
         # 입증된 것이므로, 표 이름이 indicator와 안 닿더라도 일단 fetch
         # 시도해서 _select_best_row가 진짜 row를 찾게 한다.
         prior_id_set = set(prior_success_ids)
+        # [2026-05-26] fetched_values 캐시 — fetch 진입 전 lookup용
+        _ws_for_cache = getattr(context, "workspace", None)
+        _ind_for_cache = str(params.get("indicator") or "")
+        _tp_for_cache = str(params.get("time_period") or "")
+        _pop_for_cache = str(params.get("population") or "")
         for idx, try_id in enumerate(try_ids):
+            # ── [2026-05-26] fetched_values 캐시 lookup ────────────────
+            # 같은 (stat_id, indicator, time, population) 조합이 이미 fetch
+            # 됐으면 source.fetch_evidence 호출 안 하고 캐시 값 반환.
+            # 같은 claim 내 반복 fetch (LLM이 동일 data 재요청) 또는 다른
+            # claim의 재사용 모두 처리.
+            if _ws_for_cache is not None and _ind_for_cache and _tp_for_cache:
+                try:
+                    _cached_ev = _ws_for_cache.lookup_fetched_value(
+                        stat_id=try_id,
+                        indicator=_ind_for_cache,
+                        time_period=_tp_for_cache,
+                        population=_pop_for_cache,
+                    )
+                except Exception as _e:
+                    logger.debug(f"[fetch_evidence] fetched_value lookup 실패: {_e}")
+                    _cached_ev = None
+                if _cached_ev is not None:
+                    evidence = _cached_ev
+                    used_id = try_id
+                    logger.info(
+                        f"[fetch_evidence] fetched_values 캐시 적중: "
+                        f"stat_id={try_id} indicator={_ind_for_cache!r} "
+                        f"time={_tp_for_cache!r} population={_pop_for_cache!r} "
+                        f"value={_cached_ev.get('value') if hasattr(_cached_ev, 'get') else None} "
+                        f"— source.fetch_evidence skip"
+                    )
+                    break
+
             try:
                 call_params = dict(params)
                 if try_id in prior_id_set:
@@ -393,7 +756,7 @@ class FetchEvidenceTool(ToolBase):
                 # [P20 2026-05-22] workspace 전달 — KOSIS raw 응답 캐시 활용
                 ev = await source.fetch_evidence(
                     candidate_id=try_id, params=call_params,
-                    workspace=getattr(context, "workspace", None),
+                    workspace=_ws_for_cache,
                 )
             except Exception as e:
                 logger.warning(
@@ -411,6 +774,18 @@ class FetchEvidenceTool(ToolBase):
             if ev is not None and _ev_value is not None:
                 evidence = ev
                 used_id = try_id
+                # ── [2026-05-26] fetched_values 캐시 저장 ──────────────
+                if _ws_for_cache is not None and _ind_for_cache and _tp_for_cache:
+                    try:
+                        _ws_for_cache.append_fetched_value(
+                            stat_id=try_id,
+                            indicator=_ind_for_cache,
+                            time_period=_tp_for_cache,
+                            population=_pop_for_cache,
+                            evidence=_ev_dict,
+                        )
+                    except Exception as _e:
+                        logger.debug(f"[fetch_evidence] fetched_value 저장 실패: {_e}")
                 if idx > 0:
                     logger.info(
                         f"[fetch_evidence] top 후보 실패 → 후보 {idx+1}번째 "
@@ -423,6 +798,16 @@ class FetchEvidenceTool(ToolBase):
                     f"[fetch_evidence] 후보 {try_id} → {_why} "
                     f"(관련성 거부/데이터 없음), 다음 후보 시도"
                 )
+                # [P33b 2026-05-22] 실패한 stat_id를 workspace blacklist에 기록
+                # → 다음 catalog_search에서 결과에서 제외 → 같은 표 무한 반복 차단.
+                try:
+                    _ws = getattr(context, "workspace", None)
+                    if _ws is not None and hasattr(_ws, "append_failed_stat_id"):
+                        _ws.append_failed_stat_id(
+                            context.claim_id, try_id, reason=f"fetch_failed_{_why}",
+                        )
+                except Exception as _e:
+                    logger.debug(f"[fetch_evidence] failed_stat_id 기록 실패: {_e}")
         candidate_id = used_id
 
         # evidence None 처리 (모든 후보 실패)
