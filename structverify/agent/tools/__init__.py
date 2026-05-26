@@ -50,6 +50,7 @@ from . import read_original       # noqa: F401
 from . import catalog_search      # noqa: F401
 from . import fetch_evidence      # noqa: F401
 from . import explore_catalog     # noqa: F401
+from . import replan              # noqa: F401
 
 __all__ = [
     "ToolBase",
