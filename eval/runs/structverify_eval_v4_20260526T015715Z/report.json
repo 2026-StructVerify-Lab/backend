@@ -1,0 +1,414 @@
+{
+  "dataset_id": "structverify_eval_v4",
+  "run_id": "structverify_eval_v4_20260526T015715Z",
+  "articles_total": 40,
+  "articles_with_errors": 0,
+  "claims_gold": 120,
+  "claims_matched": 30,
+  "manifest_articles_sha256": "5d52f73e1d156eaa7826ef7ce35655d39543bc070cd9238369accffa0bc0210d",
+  "summary": {
+    "verdict_accuracy": 0.23333333333333334,
+    "extraction_recall": 0.25,
+    "stat_id_accuracy": 0.36363636363636365
+  },
+  "per_verdict": {
+    "match": {
+      "precision": 1.0,
+      "recall": 0.18181818181818182,
+      "f1": 0.3076923076923077,
+      "support": 22
+    },
+    "mismatch": {
+      "precision": 0.2857142857142857,
+      "recall": 0.2857142857142857,
+      "f1": 0.2857142857142857,
+      "support": 7
+    },
+    "unverifiable": {
+      "precision": 0.05263157894736842,
+      "recall": 1.0,
+      "f1": 0.1,
+      "support": 1
+    }
+  },
+  "confusion_matrix": {
+    "labels": [
+      "match",
+      "mismatch",
+      "unverifiable"
+    ],
+    "matrix": [
+      [
+        4,
+        5,
+        13
+      ],
+      [
+        0,
+        2,
+        5
+      ],
+      [
+        0,
+        0,
+        1
+      ]
+    ]
+  },
+  "per_domain": {
+    "agriculture": {
+      "accuracy": 0.0,
+      "extraction_recall": 0.2222222222222222,
+      "matched": 2,
+      "gold": 9
+    },
+    "automotive_technology": {
+      "accuracy": 0.25,
+      "extraction_recall": 0.4,
+      "matched": 4,
+      "gold": 10
+    },
+    "economy": {
+      "accuracy": 0.3333333333333333,
+      "extraction_recall": 0.21428571428571427,
+      "matched": 3,
+      "gold": 14
+    },
+    "education": {
+      "accuracy": 0.0,
+      "extraction_recall": 0.1111111111111111,
+      "matched": 1,
+      "gold": 9
+    },
+    "employment": {
+      "accuracy": 0.0,
+      "extraction_recall": 0.0,
+      "matched": 0,
+      "gold": 9
+    },
+    "environment": {
+      "accuracy": 0.0,
+      "extraction_recall": 0.1111111111111111,
+      "matched": 1,
+      "gold": 9
+    },
+    "finance": {
+      "accuracy": 0.14285714285714285,
+      "extraction_recall": 0.5833333333333334,
+      "matched": 7,
+      "gold": 12
+    },
+    "healthcare": {
+      "accuracy": 1.0,
+      "extraction_recall": 0.16666666666666666,
+      "matched": 2,
+      "gold": 12
+    },
+    "policy": {
+      "accuracy": 0.0,
+      "extraction_recall": 0.16666666666666666,
+      "matched": 1,
+      "gold": 6
+    },
+    "population": {
+      "accuracy": 0.0,
+      "extraction_recall": 0.0,
+      "matched": 0,
+      "gold": 6
+    },
+    "real_estate": {
+      "accuracy": 0.4,
+      "extraction_recall": 0.4166666666666667,
+      "matched": 5,
+      "gold": 12
+    },
+    "weather": {
+      "accuracy": 0.0,
+      "extraction_recall": 0.3333333333333333,
+      "matched": 4,
+      "gold": 12
+    }
+  },
+  "per_article": [
+    {
+      "article_id": "eval_automotive_technology_0001",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_population_0002",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_automotive_technology_0003",
+      "accuracy": 0.0,
+      "matched": 1,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_finance_0004",
+      "accuracy": 0.0,
+      "matched": 2,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_education_0005",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_economy_0006",
+      "accuracy": 0.0,
+      "matched": 1,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_real_estate_0007",
+      "accuracy": 1.0,
+      "matched": 1,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_finance_0008",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_weather_0009",
+      "accuracy": 0.0,
+      "matched": 2,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_finance_0010",
+      "accuracy": 0.0,
+      "matched": 1,
+      "gold": 2,
+      "error": null
+    },
+    {
+      "article_id": "eval_weather_0011",
+      "accuracy": 0.0,
+      "matched": 1,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_population_0012",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_agriculture_0013",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_healthcare_0014",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_employment_0015",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_economy_0016",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_policy_0017",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_education_0018",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_agriculture_0019",
+      "accuracy": 0.0,
+      "matched": 2,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_policy_0020",
+      "accuracy": 0.0,
+      "matched": 1,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_environment_0021",
+      "accuracy": 0.0,
+      "matched": 1,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_employment_0022",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_finance_0023",
+      "accuracy": 0.25,
+      "matched": 4,
+      "gold": 4,
+      "error": null
+    },
+    {
+      "article_id": "eval_environment_0024",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_employment_0025",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_environment_0026",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_economy_0027",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_education_0028",
+      "accuracy": 0.0,
+      "matched": 1,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_weather_0029",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_automotive_technology_0030",
+      "accuracy": 0.3333333333333333,
+      "matched": 3,
+      "gold": 4,
+      "error": null
+    },
+    {
+      "article_id": "eval_real_estate_0031",
+      "accuracy": 0.0,
+      "matched": 1,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_healthcare_0032",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_agriculture_0033",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_healthcare_0034",
+      "accuracy": 1.0,
+      "matched": 2,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_weather_0035",
+      "accuracy": 0.0,
+      "matched": 1,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_real_estate_0036",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_economy_0037",
+      "accuracy": 0.5,
+      "matched": 2,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_healthcare_0038",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_economy_0039",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 2,
+      "error": null
+    },
+    {
+      "article_id": "eval_real_estate_0040",
+      "accuracy": 0.3333333333333333,
+      "matched": 3,
+      "gold": 3,
+      "error": null
+    }
+  ]
+}

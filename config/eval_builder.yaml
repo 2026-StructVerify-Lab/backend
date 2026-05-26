@@ -1,0 +1,100 @@
+# =============================================================================
+# EvalSetBuilder — KOSIS-first synthetic golden eval set 생성 설정
+#
+# 실행: python scripts/build_eval_set.py --config config/eval_builder.yaml
+# 산출: eval/datasets/{dataset_id}/articles.jsonl + manifest.json
+#
+# E2E 탐지 친화(v5, unverifiable 0%, 뉴스체 claim): config/eval_builder_v5_detectable.yaml
+#
+# gold 라벨(stat_id, official_value, verdict)은 코드/KOSIS가 확정하고,
+# LLM은 article_text / claim_text(문장)만 생성한다.
+# =============================================================================
+
+# --- 데이터셋 식별 ---
+# v4: v3 + KOSIS probe 캐시·기사 stat 재시도 상한·단일 지역 강화·quota 보강
+dataset_id: structverify_eval_v4
+
+# --- 생성 규모 프리셋 ---
+mode: pilot
+
+# --- 재현성 ---
+seed: 42
+
+# --- 도메인 universe ---
+registry_path: domain-packs/registry.yaml
+exclude_domains:
+  - general
+
+# --- 기사당 claim 수 ---
+claims_per_article:
+  min: 2
+  max: 4
+  target: 3
+  prefer_target_weight: 0.75   # verdict quota 맞추기 위해 target(3) 우선
+
+# --- quota 프리셋 ---
+quotas:
+  pilot:
+    articles: 40
+    verdict_claims:
+      match: 0.45
+      mismatch: 0.35
+      unverifiable: 0.20
+  v1:
+    articles: 120
+    verdict_claims:
+      match: 0.45
+      mismatch: 0.35
+      unverifiable: 0.20
+
+# 도메인별 기사 비율 (합 1.0). mode.articles에 곱해 정수 quota 산출 (pilot/v1 공용).
+domain_shares:
+  economy: 0.125
+  population: 0.05
+  healthcare: 0.125
+  policy: 0.05
+  employment: 0.075
+  education: 0.075
+  environment: 0.075
+  agriculture: 0.075
+  real_estate: 0.075
+  finance: 0.10
+  automotive_technology: 0.075
+  weather: 0.10
+
+output:
+  dir: eval/datasets
+  flush_every: 5
+
+kosis:
+  fetch_probe_timeout_sec: 30
+  max_sample_attempts_per_claim: 8
+  dedup_facts: true
+  pgvector_dsn_env: PGVECTOR_DSN
+  probe_cache_enabled: true    # stat_id별 enrich/fetch 결과 기사 내 재사용
+
+prose:
+  max_regenerate_attempts: 3
+  max_validation_retries: 3   # validator 실패 시 에러 피드백 재생성 횟수
+  min_article_chars: 120
+
+coherence:
+  story_anchor_enabled: true
+  year_slack: 1
+  scope_strategy: national_first      # 기사마다 전국 catalog 가능 시 national, 아니면 지역 1개 lock
+  single_region_per_article: true     # local 기사: 사회조사·시군구 path 단일 지역
+  max_stat_attempts_per_article: 3    # 같은 stat 슬롯 실패 N회 → 기사에서 제외
+  max_catalog_rows_per_slot: 15
+  slot_attempt_multiplier: 4          # max_slot = n_claims * multiplier
+  bootstrap_catalog_pool: 80          # national_first 시도용 catalog 풀 (기존 40보다 확대)
+
+builder:
+  domain_fallback_after_attempts: 3   # 같은 기사 슬롯에서 N회 실패 시 다른 도메인으로
+  domain_fallback_soft_quota: true    # 폴백 시 quota_tolerance 만큼 도메인 한도 완화
+  max_attempts_multiplier: 10         # target_articles * N 상한 (꼬리 빌드 여유)
+
+validation:
+  quota_tolerance: 2
+  reject_cross_region_articles: true
+  reject_incomplete_articles: true  # 계획 claim 수 미달 기사 폐기
+  spec_preflight_enabled: true      # LLM 전 스펙 cross-region 등 선검사

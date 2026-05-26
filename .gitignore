@@ -67,3 +67,6 @@ createTable.py
 
 # agent loop의 잡별 산출물 (workspace) — 로컬 캐시일 뿐 버전 관리 대상 아님
 agent_workspace/
+
+# eval builder resume state (local only)
+eval/builder/.build_state.json

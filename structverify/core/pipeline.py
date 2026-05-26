@@ -90,6 +90,9 @@ class VerificationPipeline:
         # [v3 김예슬] 피드백/학습 활성화 여부 (false면 Step 11~12 skip)
         self.enable_feedback = bool(self.config.get("enable_feedback", False))
 
+        # eval harness: false면 DB 저장 skip
+        self.persist_to_db = bool(self.config.get("persist_to_db", True))
+
         # TODO [김예슬]: BuilderAgent 초기화 (비동기 백그라운드 학습 루프)
         # self.builder_agent = BuilderAgent(config=self.config)
 
@@ -150,14 +153,19 @@ class VerificationPipeline:
         claims, results, nodes, edges = await self.runtime_agent.process(sir_doc)
 
         # [v1] - 박재윤: Claims → PostgreSQL 저장
-        if claims:
-            await self.db_manager.save_claims(claims, domain=sir_doc.detected_domain, source_type=src.value)
-            logger.info(f"Claims 저장 완료: {len(claims)}건")
+        if self.persist_to_db:
+            if claims:
+                await self.db_manager.save_claims(
+                    claims, domain=sir_doc.detected_domain, source_type=src.value
+                )
+                logger.info(f"Claims 저장 완료: {len(claims)}건")
 
-        # [v1] - 박재윤: Results → PostgreSQL 저장
-        if results:
-            await self.db_manager.save_results(results, claims)
-            logger.info(f"Results 저장 완료: {len(results)}건")
+            # [v1] - 박재윤: Results → PostgreSQL 저장
+            if results:
+                await self.db_manager.save_results(results, claims)
+                logger.info(f"Results 저장 완료: {len(results)}건")
+        else:
+            logger.debug("DB persist skip (persist_to_db=false)")
 
         # TODO [박재윤]: Nodes/Edges → Neo4j 저장
         # await self.graph_store.merge_nodes(nodes)

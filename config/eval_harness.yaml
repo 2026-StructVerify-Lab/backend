@@ -1,0 +1,12 @@
+# EvalHarness — E2E pipeline scoring on frozen golden datasets
+#
+# Run: python scripts/run_eval_harness.py --config config/eval_harness.yaml
+#
+# v5 detectable + 낮은 candidate threshold: config/eval_harness_v5_detectable.yaml
+
+dataset_id: structverify_eval_v4
+datasets_root: eval/datasets
+runs_dir: eval/runs
+
+persist_to_db: false
+enable_feedback: false

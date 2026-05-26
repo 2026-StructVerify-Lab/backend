@@ -1,0 +1,121 @@
+{
+  "dataset_id": "structverify_eval_v5_detectable",
+  "run_id": "structverify_eval_v5_detectable_20260526T062308Z",
+  "articles_total": 5,
+  "articles_with_errors": 0,
+  "claims_gold": 15,
+  "claims_matched": 5,
+  "manifest_articles_sha256": "c06e2fd8780ec6a2ab8dff162f831df13f27f6917d7997adf2026e50544a9285",
+  "summary": {
+    "verdict_accuracy": 0.4,
+    "extraction_recall": 0.3333333333333333,
+    "stat_id_accuracy": 1.0
+  },
+  "per_verdict": {
+    "match": {
+      "precision": 0.6666666666666666,
+      "recall": 0.6666666666666666,
+      "f1": 0.6666666666666666,
+      "support": 3
+    },
+    "mismatch": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "support": 2
+    },
+    "unverifiable": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "support": 0
+    }
+  },
+  "confusion_matrix": {
+    "labels": [
+      "match",
+      "mismatch",
+      "unverifiable"
+    ],
+    "matrix": [
+      [
+        2,
+        0,
+        1
+      ],
+      [
+        1,
+        0,
+        1
+      ],
+      [
+        0,
+        0,
+        0
+      ]
+    ]
+  },
+  "per_domain": {
+    "agriculture": {
+      "accuracy": 0.0,
+      "extraction_recall": 0.0,
+      "matched": 0,
+      "gold": 3
+    },
+    "finance": {
+      "accuracy": 0.0,
+      "extraction_recall": 0.3333333333333333,
+      "matched": 1,
+      "gold": 3
+    },
+    "healthcare": {
+      "accuracy": 0.5,
+      "extraction_recall": 0.6666666666666666,
+      "matched": 4,
+      "gold": 6
+    },
+    "real_estate": {
+      "accuracy": 0.0,
+      "extraction_recall": 0.0,
+      "matched": 0,
+      "gold": 3
+    }
+  },
+  "per_article": [
+    {
+      "article_id": "eval_healthcare_0001",
+      "accuracy": 1.0,
+      "matched": 1,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_healthcare_0002",
+      "accuracy": 0.3333333333333333,
+      "matched": 3,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_real_estate_0003",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_finance_0004",
+      "accuracy": 0.0,
+      "matched": 1,
+      "gold": 3,
+      "error": null
+    },
+    {
+      "article_id": "eval_agriculture_0005",
+      "accuracy": 0.0,
+      "matched": 0,
+      "gold": 3,
+      "error": null
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+# EvalHarness — v6 detectable dataset (프로덕션 탐지 설정 그대로)
+#
+# Run: python scripts/run_eval_harness.py --config config/eval_harness_v6_detectable.yaml
+#
+# v5 harness와 달리 candidate_detection threshold를 내리지 않음.
+# v6 골든은 빌드 시 프로덕션 detect_claims preflight를 통과한 기사만 freeze.
+
+dataset_id: structverify_eval_v6_detectable
+datasets_root: eval/datasets
+runs_dir: eval/runs
+
+persist_to_db: false
+enable_feedback: false

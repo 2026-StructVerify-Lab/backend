@@ -1,0 +1,110 @@
+# =============================================================================
+# EvalSetBuilder v6 — 프로덕션 claim 탐지 통과용 골든셋
+#
+# v5 대비 (파이프라인 변경 없음):
+#   - article_text: LLM이 통계·경제 뉴스 기사 전체 작성 (자연스러운 본문)
+#   - claim_text: LLM 단정형 (다양) + validator + detect_claims preflight
+#   - structured/template 조립은 사용하지 않음 (보고서형 틀 방지)
+#   - validator: 제목 \\n\\n, 리드 gold 수치 금지, 금지 표현·깨진 수치
+#   - freeze 전: 프로덕션 detect_claims preflight (min 1 claim, min 1 gold match)
+#
+# 실행: python scripts/build_eval_set.py --config config/eval_builder_v6_detectable.yaml
+# Harness: config/eval_harness_v6_detectable.yaml (프로덕션 탐지 threshold — v5처럼 완화하지 않음)
+# =============================================================================
+
+dataset_id: structverify_eval_v6_detectable
+
+mode: pilot
+seed: 42
+
+registry_path: domain-packs/registry.yaml
+exclude_domains:
+  - general
+
+claims_per_article:
+  min: 3
+  max: 3
+  target: 3
+  prefer_target_weight: 0.95
+
+quotas:
+  pilot:
+    articles: 40
+    verdict_claims:
+      match: 0.55
+      mismatch: 0.45
+      unverifiable: 0.0
+  v1:
+    articles: 120
+    verdict_claims:
+      match: 0.55
+      mismatch: 0.45
+      unverifiable: 0.0
+
+domain_shares:
+  economy: 0.125
+  population: 0.05
+  healthcare: 0.125
+  policy: 0.05
+  employment: 0.075
+  education: 0.075
+  environment: 0.075
+  agriculture: 0.075
+  real_estate: 0.075
+  finance: 0.10
+  automotive_technology: 0.075
+  weather: 0.10
+
+unverifiable:
+  enabled: false
+  allowed_recipes: []
+
+output:
+  dir: eval/datasets
+  flush_every: 5
+
+kosis:
+  fetch_probe_timeout_sec: 30
+  max_sample_attempts_per_claim: 8
+  dedup_facts: true
+  pgvector_dsn_env: PGVECTOR_DSN
+  probe_cache_enabled: true
+
+prose:
+  claim_text_style: news
+  claim_fallback_style: news_varied
+  force_deterministic_claim_text: false
+  article_assembly: llm
+  max_regenerate_attempts: 3
+  max_validation_retries: 3
+  min_article_chars: 120
+
+coherence:
+  story_anchor_enabled: true
+  year_slack: 1
+  scope_strategy: national_first
+  single_region_per_article: true
+  max_stat_attempts_per_article: 3
+  max_catalog_rows_per_slot: 15
+  slot_attempt_multiplier: 4
+  bootstrap_catalog_pool: 80
+
+builder:
+  domain_fallback_after_attempts: 3
+  domain_fallback_soft_quota: true
+  max_attempts_multiplier: 10
+
+validation:
+  quota_tolerance: 2
+  reject_cross_region_articles: true
+  reject_incomplete_articles: true
+  spec_preflight_enabled: true
+  require_headline_blank_line: true
+  reject_lead_gold_values: true
+  reject_banned_claim_phrasing: true
+  reject_malformed_numbers: true
+  reject_report_style_headline: true
+  reject_boilerplate_lead: true
+  detection_preflight_enabled: true
+  detection_preflight_min_claims: 1
+  detection_preflight_min_gold_matches: 1

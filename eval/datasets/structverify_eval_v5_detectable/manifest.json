@@ -1,0 +1,76 @@
+{
+  "dataset_id": "structverify_eval_v5_detectable",
+  "status": "frozen",
+  "mode": "pilot",
+  "created_at": "2026-05-26T06:22:41.115387+00:00",
+  "article_count": 40,
+  "claim_count": 120,
+  "quotas": {
+    "domain_articles": {
+      "agriculture": 3,
+      "automotive_technology": 3,
+      "economy": 5,
+      "education": 3,
+      "employment": 3,
+      "environment": 3,
+      "finance": 4,
+      "healthcare": 5,
+      "policy": 2,
+      "population": 2,
+      "real_estate": 3,
+      "weather": 4
+    },
+    "domain_shares": {
+      "economy": 0.125,
+      "population": 0.05,
+      "healthcare": 0.125,
+      "policy": 0.05,
+      "employment": 0.075,
+      "education": 0.075,
+      "environment": 0.075,
+      "agriculture": 0.075,
+      "real_estate": 0.075,
+      "finance": 0.1,
+      "automotive_technology": 0.075,
+      "weather": 0.1
+    },
+    "verdict_claims": {
+      "match": 66,
+      "mismatch": 54,
+      "unverifiable": 0
+    },
+    "verdict_ratios": {
+      "match": 0.55,
+      "mismatch": 0.45,
+      "unverifiable": 0.0
+    },
+    "scope_strategy": "national_first",
+    "scope_counts": {
+      "national": 37,
+      "local": 3
+    }
+  },
+  "registry_domains": [
+    "advertising_industry",
+    "agriculture",
+    "automotive_technology",
+    "construction_statistics",
+    "economy",
+    "education",
+    "employment",
+    "environment",
+    "finance",
+    "food_industry",
+    "healthcare",
+    "insurance",
+    "it_industry",
+    "policy",
+    "population",
+    "real_estate",
+    "transportation_industry",
+    "weather"
+  ],
+  "used_facts_count": 102,
+  "articles_sha256": "c06e2fd8780ec6a2ab8dff162f831df13f27f6917d7997adf2026e50544a9285",
+  "builder_config_hash": "4b51c7635eb32ccb"
+}

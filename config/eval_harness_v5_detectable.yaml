@@ -1,0 +1,17 @@
+# EvalHarness — v5 detectable dataset + 완화된 claim 탐지 threshold
+#
+# Run: python scripts/run_eval_harness.py --config config/eval_harness_v5_detectable.yaml
+#
+# v4 harness 대비:
+#   - structverify_eval_v5_detectable (뉴스체 claim, unverifiable 0%)
+#   - candidate_detection.threshold 0.50 (기본 코드 fallback 0.65보다 낮춤)
+
+dataset_id: structverify_eval_v5_detectable
+datasets_root: eval/datasets
+runs_dir: eval/runs
+
+persist_to_db: false
+enable_feedback: false
+
+candidate_detection:
+  threshold: 0.50

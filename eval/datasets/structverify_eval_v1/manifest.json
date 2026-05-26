@@ -1,0 +1,51 @@
+{
+  "dataset_id": "structverify_eval_v1",
+  "status": "frozen",
+  "mode": "pilot",
+  "created_at": "2026-05-25T11:08:06.246459+00:00",
+  "article_count": 40,
+  "claim_count": 106,
+  "quotas": {
+    "domain_articles": {
+      "agriculture": 3,
+      "automotive_technology": 0,
+      "economy": 6,
+      "education": 2,
+      "employment": 2,
+      "environment": 2,
+      "finance": 0,
+      "healthcare": 4,
+      "policy": 4,
+      "population": 16,
+      "real_estate": 1,
+      "weather": 0
+    },
+    "verdict_claims": {
+      "match": 54,
+      "mismatch": 42,
+      "unverifiable": 24
+    },
+    "verdict_ratios": {
+      "match": 0.45,
+      "mismatch": 0.35,
+      "unverifiable": 0.2
+    }
+  },
+  "registry_domains": [
+    "agriculture",
+    "automotive_technology",
+    "economy",
+    "education",
+    "employment",
+    "environment",
+    "finance",
+    "healthcare",
+    "policy",
+    "population",
+    "real_estate",
+    "weather"
+  ],
+  "used_facts_count": 39,
+  "articles_sha256": "c37a3699d64a05c9db0b73e4893892dd35f94cc82ecc22eb90bea7b142b46e21",
+  "builder_config_hash": "687a47a025abd9a0"
+}

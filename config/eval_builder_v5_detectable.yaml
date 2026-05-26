@@ -1,0 +1,98 @@
+# =============================================================================
+# EvalSetBuilder v5 — E2E 파이프라인 탐지·검증 친화 골든셋
+#
+# v4 대비:
+#   - unverifiable 0% (예상/전망/순위·모호 시점 U1/U4/U5 제거)
+#   - claim_text 뉴스체 (캡션체 "…로 나타났다" 지양)
+#   - 본문에 claim과 동일 수치 중복 불릿 지양 (프롬프트)
+#
+# 실행: python scripts/build_eval_set.py --config config/eval_builder_v5_detectable.yaml
+# Harness: config/eval_harness_v5_detectable.yaml (candidate threshold 완화)
+# v6 (탐지 preflight + 템플릿 본문): config/eval_builder_v6_detectable.yaml
+# =============================================================================
+
+dataset_id: structverify_eval_v5_detectable
+
+mode: pilot
+seed: 42
+
+registry_path: domain-packs/registry.yaml
+exclude_domains:
+  - general
+
+claims_per_article:
+  min: 3
+  max: 3
+  target: 3
+  prefer_target_weight: 0.95
+
+quotas:
+  pilot:
+    articles: 40
+    verdict_claims:
+      match: 0.55
+      mismatch: 0.45
+      unverifiable: 0.0
+  v1:
+    articles: 120
+    verdict_claims:
+      match: 0.55
+      mismatch: 0.45
+      unverifiable: 0.0
+
+domain_shares:
+  economy: 0.125
+  population: 0.05
+  healthcare: 0.125
+  policy: 0.05
+  employment: 0.075
+  education: 0.075
+  environment: 0.075
+  agriculture: 0.075
+  real_estate: 0.075
+  finance: 0.10
+  automotive_technology: 0.075
+  weather: 0.10
+
+# unverifiable 비율 0 — enabled false 시 verdict 비율을 match/mismatch로 재배분
+unverifiable:
+  enabled: false
+  allowed_recipes: []
+
+output:
+  dir: eval/datasets
+  flush_every: 5
+
+kosis:
+  fetch_probe_timeout_sec: 30
+  max_sample_attempts_per_claim: 8
+  dedup_facts: true
+  pgvector_dsn_env: PGVECTOR_DSN
+  probe_cache_enabled: true
+
+prose:
+  claim_text_style: news
+  max_regenerate_attempts: 3
+  max_validation_retries: 3
+  min_article_chars: 120
+
+coherence:
+  story_anchor_enabled: true
+  year_slack: 1
+  scope_strategy: national_first
+  single_region_per_article: true
+  max_stat_attempts_per_article: 3
+  max_catalog_rows_per_slot: 15
+  slot_attempt_multiplier: 4
+  bootstrap_catalog_pool: 80
+
+builder:
+  domain_fallback_after_attempts: 3
+  domain_fallback_soft_quota: true
+  max_attempts_multiplier: 10
+
+validation:
+  quota_tolerance: 2
+  reject_cross_region_articles: true
+  reject_incomplete_articles: true
+  spec_preflight_enabled: true

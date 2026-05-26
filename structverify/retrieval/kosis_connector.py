@@ -399,7 +399,13 @@ async def kosis_get_meta(
             logger.info("[kosis_get_meta] JSON 파싱 실패 (data=None)")
             return _meta_error_payload("parse")
         if isinstance(data, dict) and data.get("err") is not None and "row" not in data:
-            logger.info("[kosis_get_meta] API 오류 응답: err=%s, errMsg=%s", data.get("err"), data.get("errMsg"))
+            err_code = str(data.get("err", ""))
+            log_fn = logger.debug if err_code == "30" else logger.info
+            log_fn(
+                "[kosis_get_meta] API 오류 응답: err=%s, errMsg=%s",
+                data.get("err"),
+                data.get("errMsg"),
+            )
             return {"kosis_error": "api_err", "err": data.get("err"), "errMsg": data.get("errMsg")}
         logger.info("[kosis_get_meta] 파싱 성공: type=%s, len=%s", type(data).__name__, len(data) if isinstance(data, (list, dict)) else "-")
         return data

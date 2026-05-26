@@ -1,0 +1,6 @@
+{
+  "run_id": "structverify_eval_v5_detectable_20260526T062308Z",
+  "dataset_id": "structverify_eval_v5_detectable",
+  "article_limit": 5,
+  "persist_to_db": false
+}

@@ -1,0 +1,70 @@
+{
+  "dataset_id": "structverify_eval_v4",
+  "status": "frozen",
+  "mode": "pilot",
+  "created_at": "2026-05-25T20:33:18.922283+00:00",
+  "article_count": 40,
+  "claim_count": 120,
+  "quotas": {
+    "domain_articles": {
+      "agriculture": 3,
+      "automotive_technology": 3,
+      "economy": 5,
+      "education": 3,
+      "employment": 3,
+      "environment": 3,
+      "finance": 4,
+      "healthcare": 5,
+      "policy": 2,
+      "population": 2,
+      "real_estate": 3,
+      "weather": 4
+    },
+    "domain_shares": {
+      "economy": 0.125,
+      "population": 0.05,
+      "healthcare": 0.125,
+      "policy": 0.05,
+      "employment": 0.075,
+      "education": 0.075,
+      "environment": 0.075,
+      "agriculture": 0.075,
+      "real_estate": 0.075,
+      "finance": 0.1,
+      "automotive_technology": 0.075,
+      "weather": 0.1
+    },
+    "verdict_claims": {
+      "match": 54,
+      "mismatch": 42,
+      "unverifiable": 24
+    },
+    "verdict_ratios": {
+      "match": 0.45,
+      "mismatch": 0.35,
+      "unverifiable": 0.2
+    },
+    "scope_strategy": "national_first",
+    "scope_counts": {
+      "national": 39,
+      "local": 1
+    }
+  },
+  "registry_domains": [
+    "agriculture",
+    "automotive_technology",
+    "economy",
+    "education",
+    "employment",
+    "environment",
+    "finance",
+    "healthcare",
+    "policy",
+    "population",
+    "real_estate",
+    "weather"
+  ],
+  "used_facts_count": 83,
+  "articles_sha256": "5d52f73e1d156eaa7826ef7ce35655d39543bc070cd9238369accffa0bc0210d",
+  "builder_config_hash": "a36b9c603f3f01f2"
+}
