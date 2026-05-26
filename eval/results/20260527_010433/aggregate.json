@@ -1,0 +1,21 @@
+{
+  "total_claims": 3,
+  "verdict_accuracy": 0.0,
+  "stat_id_accuracy": 0.0,
+  "value_accuracy": 0.0,
+  "indicator_partial_accuracy": 0.0,
+  "schema_value_accuracy": 0.0,
+  "schema_time_accuracy": 0.0,
+  "schema_pop_accuracy": 0.0,
+  "mismatch_precision": 0.0,
+  "mismatch_recall": 0.0,
+  "confusion_matrix": {
+    "match→no_claim_extracted": 2,
+    "mismatch→no_claim_extracted": 1
+  },
+  "failure_modes": {
+    "claim_not_extracted": 3
+  },
+  "avg_elapsed_sec": 128.71521798769632,
+  "n_with_elapsed": 3
+}

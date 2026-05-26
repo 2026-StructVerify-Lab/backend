@@ -1,0 +1,21 @@
+{
+  "total_claims": 3,
+  "verdict_accuracy": 0.0,
+  "stat_id_accuracy": 0.0,
+  "value_accuracy": 0.0,
+  "indicator_partial_accuracy": 0.0,
+  "schema_value_accuracy": 0.0,
+  "schema_time_accuracy": 0.0,
+  "schema_pop_accuracy": 0.0,
+  "mismatch_precision": 0.0,
+  "mismatch_recall": 0.0,
+  "confusion_matrix": {
+    "match→exception": 2,
+    "mismatch→exception": 1
+  },
+  "failure_modes": {
+    "exception": 3
+  },
+  "avg_elapsed_sec": null,
+  "n_with_elapsed": 0
+}

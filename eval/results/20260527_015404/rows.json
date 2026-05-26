@@ -1,0 +1,25 @@
+[
+  {
+    "claim_id": "eval_automotive_technology_0001_c01",
+    "claim_text": "1991년 한국의 수상운송업 수익은 52백만 원을 기록하였다.",
+    "gold_verdict": "match",
+    "actual_verdict": "unverifiable",
+    "verdict_correct": false,
+    "gold_stat_id": "DT_1IA2075",
+    "actual_stat_id": null,
+    "stat_id_match": false,
+    "gold_value": 52.0,
+    "actual_value": null,
+    "value_match": false,
+    "gold_indicator": "산업 및 지역별 총괄-수상운송업",
+    "actual_indicator": "수상운송업 수익",
+    "indicator_partial_match": false,
+    "schema_value_match": true,
+    "schema_time_match": true,
+    "schema_pop_match": false,
+    "elapsed_sec": 216.5095090866089,
+    "failure_mode": "no_table_picked",
+    "article_id": "eval_automotive_technology_0001",
+    "mode": "oracle"
+  }
+]
