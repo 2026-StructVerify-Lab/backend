@@ -168,6 +168,12 @@ class LLMClient:
         if _interval_ms > 0:
             _hcx_rate_limiter.configure(_interval_ms / 1000.0)
 
+        # [2026-05-25] HTTP timeout 및 timeout 발생 시 retry 횟수.
+        # 기존 60s 하드코딩 → 응답 평균 5~15초인데 60s 끝까지 기다림 + retry 없음 →
+        # 일시 네트워크 지연/끊김에 매우 약함. 30s로 줄여 빠른 실패 + retry 1회로 회복.
+        self.http_timeout = float(self.config.get("http_timeout_seconds", 30.0))
+        self.timeout_max_retries = int(self.config.get("timeout_max_retries", 1))
+
     # ── 공개 인터페이스 ──────────────────────────────────────────────────────
 
     async def generate(
@@ -290,11 +296,13 @@ class LLMClient:
 
         # [박재윤 - 2026-05-14]: 429 exponential backoff (1초 → 2초 → 4초)
         # [2026-05-21] 매 시도 직전 전역 rate limiter 통과 — phase 간 burst 차단.
+        # [2026-05-25] timeout도 retry — 일시 네트워크 지연에 회복하도록.
         max_retries = 3
+        timeout_attempts = 0  # timeout 누적 횟수 (429와 분리)
         for attempt in range(max_retries):
             try:
                 await _hcx_rate_limiter.acquire()
-                async with httpx.AsyncClient(timeout=60.0) as client:
+                async with httpx.AsyncClient(timeout=self.http_timeout) as client:
                     resp = await client.post(url, json=payload, headers=headers)
                     resp.raise_for_status()
                     data = resp.json()
@@ -320,7 +328,17 @@ class LLMClient:
                     logger.error(f"HCX v1 HTTP 오류: {e.response.status_code} — {e.response.text[:200]}")
                     raise
             except httpx.TimeoutException:
-                logger.error(f"HCX v1 타임아웃: {url}")
+                if timeout_attempts < self.timeout_max_retries:
+                    timeout_attempts += 1
+                    import random as _random
+                    wait = 0.5 + _random.uniform(0.0, 0.5)
+                    logger.warning(
+                        f"HCX v1 타임아웃 ({self.http_timeout}s) — "
+                        f"{wait:.2f}초 후 재시도 ({timeout_attempts}/{self.timeout_max_retries})"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                logger.error(f"HCX v1 타임아웃 (재시도 소진): {url}")
                 raise
 
     # ── HCX v3 (HCX-005, HCX-DASH-002) ─────────────────────────────────────
@@ -364,11 +382,13 @@ class LLMClient:
 
         # [박재윤 - 2026-05-14]: 429 exponential backoff (1초 → 2초 → 4초)
         # [2026-05-21] 매 시도 직전 전역 rate limiter 통과 — phase 간 burst 차단.
+        # [2026-05-25] timeout도 retry.
         max_retries = 3
+        timeout_attempts = 0
         for attempt in range(max_retries):
             try:
                 await _hcx_rate_limiter.acquire()
-                async with httpx.AsyncClient(timeout=60.0) as client:
+                async with httpx.AsyncClient(timeout=self.http_timeout) as client:
                     resp = await client.post(url, json=payload, headers=headers)
                     resp.raise_for_status()
                     data = resp.json()
@@ -390,6 +410,19 @@ class LLMClient:
                 else:
                     logger.error(f"HCX v3 HTTP 오류: {e.response.status_code} — {e.response.text[:200]}")
                     raise
+            except httpx.TimeoutException:
+                if timeout_attempts < self.timeout_max_retries:
+                    timeout_attempts += 1
+                    import random as _random
+                    wait = 0.5 + _random.uniform(0.0, 0.5)
+                    logger.warning(
+                        f"HCX v3 타임아웃 ({self.http_timeout}s) — "
+                        f"{wait:.2f}초 후 재시도 ({timeout_attempts}/{self.timeout_max_retries})"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                logger.error(f"HCX v3 타임아웃 (재시도 소진): {url}")
+                raise
 
     # ── HCX Structured Outputs (HCX-007 전용) ───────────────────────────────
 
@@ -442,11 +475,13 @@ class LLMClient:
         }
 
         max_retries = 3
+        timeout_attempts = 0
         # [2026-05-21] 전역 rate limiter 통과 — phase 간 burst 차단
+        # [2026-05-25] timeout retry 추가
         for attempt in range(max_retries):
             try:
                 await _hcx_rate_limiter.acquire()
-                async with httpx.AsyncClient(timeout=60.0) as client:
+                async with httpx.AsyncClient(timeout=self.http_timeout) as client:
                     resp = await client.post(url, json=payload, headers=headers)
                     resp.raise_for_status()
                     data = resp.json()
@@ -477,6 +512,19 @@ class LLMClient:
                         f"{e.response.text[:200]}"
                     )
                     raise
+            except httpx.TimeoutException:
+                if timeout_attempts < self.timeout_max_retries:
+                    timeout_attempts += 1
+                    import random as _random
+                    wait = 0.5 + _random.uniform(0.0, 0.5)
+                    logger.warning(
+                        f"HCX Structured 타임아웃 ({self.http_timeout}s) — "
+                        f"{wait:.2f}초 후 재시도 ({timeout_attempts}/{self.timeout_max_retries})"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                logger.error(f"HCX Structured 타임아웃 (재시도 소진): {url}")
+                raise
             except json.JSONDecodeError as e:
                 logger.error(f"HCX Structured JSON 파싱 실패 (스키마 오류?): {e}")
                 raise
