@@ -196,8 +196,14 @@ def _summarize_observation(obs: dict) -> dict:
 
     output 전체는 너무 무거움 (catalog candidates의 raw StatRecord 등).
     핵심 정보만:
-      - iter, action, rationale, summary, success, error
+      - iter, action, thought, rationale, summary, success, error
       - output에서 가장 유의미한 짧은 신호 (candidates 이름 등) — 상위 3개만
+
+    [2026-05-27] LLM '생각' 노출:
+      - thought (reflect LLM의 자연어 사고) 그대로 전달
+      - confidence_so_far, proposed_verdict 동반
+      - input/summary 잘림 한계 완화 (200→1000, 400→1500). 프론트가 카드에서
+        펼쳤을 때 LLM이 실제로 어떤 정보를 보냈는지 사용자가 확인 가능.
     """
     iter_num = obs.get("iter_num") or obs.get("iter")
     action = obs.get("action")
@@ -206,6 +212,10 @@ def _summarize_observation(obs: dict) -> dict:
     summary = obs.get("summary")
     success = obs.get("success", True)
     error = obs.get("error")
+    # ↓ LLM 사고 — loop.py가 obs_dict에 박은 신규 필드 (없으면 None)
+    thought = obs.get("thought")
+    confidence_so_far = obs.get("confidence_so_far")
+    proposed_verdict = obs.get("proposed_verdict")
 
     # action별로 가장 유의미한 output 신호만 추림
     output_signal: dict[str, Any] = {}
@@ -249,23 +259,33 @@ def _summarize_observation(obs: dict) -> dict:
         "action": action,
         "rationale": (inp or {}).get("rationale") if isinstance(inp, dict) else None,
         "input": _shrink_input(inp) if isinstance(inp, dict) else None,
-        "summary": (summary or "")[:400] if isinstance(summary, str) else summary,
+        "summary": (summary or "")[:1500] if isinstance(summary, str) else summary,
         "success": success,
         "error": error,
         "output": output_signal or None,
+        # ↓ [2026-05-27] LLM 자연어 사고 + 신뢰도 + 제안된 verdict
+        "thought": thought if isinstance(thought, str) and thought else None,
+        "confidence_so_far": confidence_so_far
+            if isinstance(confidence_so_far, (int, float)) else None,
+        "proposed_verdict": proposed_verdict
+            if isinstance(proposed_verdict, str) and proposed_verdict else None,
     }
 
 
 def _shrink_input(inp: dict) -> dict:
-    """input dict에서 핵심 키만 추림 (LLM이 큰 텍스트 넣는 경우 방지)."""
+    """input dict에서 핵심 키만 추림 (LLM이 큰 텍스트 넣는 경우 방지).
+
+    [2026-05-27] 값 truncate 한계 200→1000자로 완화. 카드에서 펼쳤을 때 LLM이
+    어떤 query/params/expression을 실제로 보냈는지 확인할 수 있게.
+    """
     KEEP = ("query", "category", "candidate_id", "params", "expression", "verdict",
-            "indicator", "time_period")
+            "indicator", "time_period", "formula", "vars", "explanation", "rationale")
     out: dict[str, Any] = {}
     for k in KEEP:
         if k in inp:
             v = inp[k]
-            if isinstance(v, str) and len(v) > 200:
-                v = v[:200] + "..."
+            if isinstance(v, str) and len(v) > 1000:
+                v = v[:1000] + "..."
             out[k] = v
     return out
 
@@ -450,3 +470,73 @@ def read_partial_job_workspace(
         partial_claims.append(merged)
 
     return {"claims": partial_claims} if partial_claims else None
+
+
+# ── [2026-05-27] LLM raw trace reader (개발자 콘솔 탭용) ──────────────
+# runtime_agent가 매 LLM 호출마다 observations/llm_traces/<name>.json에
+# {name, ts, prompt, response, prompt_chars, response_chars}를 저장함.
+# 이 함수는 잡 내 모든 claim의 llm_traces를 시간순으로 평탄화해 반환.
+
+def read_job_llm_traces(
+    job_id: str,
+    base: Path = DEFAULT_WORKSPACE_BASE,
+    source_text: str | None = None,
+    created_after: float | None = None,
+) -> list[dict[str, Any]]:
+    """잡 내 모든 claim의 LLM raw trace를 평탄 리스트로.
+
+    각 entry:
+      {claim_id, name, ts, prompt, response, prompt_chars, response_chars, mtime}
+
+    ts(ISO string) 기준 오름차순 정렬 — 콘솔에서 시간순 스트림처럼 보이게.
+    """
+    job_dir = _find_job_dir(job_id, base, source_text=source_text)
+    if job_dir is None:
+        return []
+
+    claims_dir = job_dir / "claims"
+    if not claims_dir.exists():
+        return []
+
+    out: list[dict[str, Any]] = []
+    try:
+        claim_subdirs = [p for p in claims_dir.iterdir() if p.is_dir()]
+    except OSError:
+        return []
+    if created_after is not None:
+        cutoff = float(created_after)
+        claim_subdirs = [
+            p for p in claim_subdirs
+            if p.stat().st_mtime >= cutoff
+        ]
+
+    for cdir in claim_subdirs:
+        traces_dir = cdir / "observations" / "llm_traces"
+        if not traces_dir.exists():
+            continue
+        try:
+            files = [p for p in traces_dir.iterdir() if p.suffix == ".json"]
+        except OSError:
+            continue
+        for fp in files:
+            data = _safe_load_json(fp)
+            if not data:
+                continue
+            try:
+                mt = fp.stat().st_mtime
+            except OSError:
+                mt = 0.0
+            out.append({
+                "claim_id": cdir.name,
+                "name": data.get("name") or fp.stem,
+                "ts": data.get("ts"),
+                "prompt": data.get("prompt"),
+                "response": data.get("response"),
+                "prompt_chars": data.get("prompt_chars"),
+                "response_chars": data.get("response_chars"),
+                "mtime": mt,
+            })
+
+    # ts 우선, 없으면 mtime으로 정렬
+    out.sort(key=lambda d: (d.get("ts") or "", d.get("mtime") or 0))
+    return out
