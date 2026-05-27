@@ -1,0 +1,16 @@
+# 3-axis eval harness
+datasets_root: eval/datasets
+runs_root: eval/runs
+
+dataset_id: structverify_outcome_v1
+component_dataset_id: structverify_components_v1
+
+# Outcome harness
+eval:
+  domain_oracle: true
+  value_tolerance_relative: 0.005
+  value_tolerance_absolute: 0.1
+  one_claim_per_job: true
+
+# Merge with production pipeline settings (see config/default.yaml + .env)
+enable_feedback: false

@@ -67,3 +67,10 @@ createTable.py
 
 # agent loop의 잡별 산출물 (workspace) — 로컬 캐시일 뿐 버전 관리 대상 아님
 agent_workspace/
+
+# ── StructVerify eval (로컬 생성물, GitHub 미추적) ──
+# eval/README.md, eval/builder/ 등은 추적. 아래만 제외.
+eval/datasets/**
+!eval/datasets/.gitkeep
+eval/runs/**
+!eval/runs/.gitkeep
