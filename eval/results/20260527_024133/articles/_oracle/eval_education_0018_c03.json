@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_education_0018_c03",
+  "elapsed_sec": 129.03318786621094,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "11f038a1-b0dd-4c36-b531-bc28d0d68746",
+        "claim_text": "2020 향후 문화예술교육 참여 의향 - 문화예술교육 미참여자 중 참여의향 있음은(는) 1,437,5명로 나타났다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "문화예술교육 참여 의향 인구",
+          "value": 14375.0,
+          "unit": "명",
+          "time_period": "2020",
+          "population": "문화예술교육 미참여자",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "교육 > 문화 > 문화예술교육"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "11f038a1-b0dd-4c36-b531-bc28d0d68746",
+        "verdict": "unverifiable",
+        "confidence": 0.0,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"2020 향후 문화예술교육 참여 의향 - 문화예술교육 미참여자 중 참여의향 있음은(는) 1,437,5명로 나타났다.\" 에 대한 공식 통계를 찾을 수 없었습니다. 이는 국가통계포털(KOSIS)에서 '문화예술교육 참여 의향 인구', '문화예술교육 미참여자' 등 시도한 검색어로는 해당 정보를 발견할 수 없었기 때문입니다. 따라서 보다 정확한 사실 여부를 확인하기 위해서는 추가적인 조사가 필요하며, 독자들은 이를 참고하여 스스로 판단해야 합니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

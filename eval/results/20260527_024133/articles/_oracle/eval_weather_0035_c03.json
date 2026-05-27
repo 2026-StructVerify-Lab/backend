@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_weather_0035_c03",
+  "elapsed_sec": 124.9947612285614,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "166dfb63-7393-470f-943c-e05a2ccfa8ca",
+        "claim_text": "2016 향후 1년간 기상산업 부문 인력채용 규모은(는) 110개로 나타났다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "인력채용 규모",
+          "value": 110.0,
+          "unit": "개",
+          "time_period": "2016",
+          "population": null,
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "기타 > 경제활동 > 고용"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "166dfb63-7393-470f-943c-e05a2ccfa8ca",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"2016 향후 1년간 기상산업 부문 인력채용 규모은(는) 110개로 나타났다.\"와 관련된 공식 통계를 국가통계포털(KOSIS)에서 찾을 수 없었습니다. 따라서 이 주장의 사실 여부를 판단할 수 없습니다. \n\n국가통계포털에서는 '인력채용 규모 2016'이라는 검색어로는 해당 정보를 제공하지 않았습니다. 만약, 추가적인 자료나 다른 검색어를 통해 더 많은 정보를 찾고 싶다면, 국가통계포털 홈페이지(https://kosis.kr/)를 방문해보시기 바랍니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

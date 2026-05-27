@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_weather_0011_c01",
+  "elapsed_sec": 166.3210849761963,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "dae1ce06-3a1e-40d1-9110-e73fabd9a978",
+        "claim_text": "2025년에 기상산업 육성을 위해 우선 추진해야 할 정부 중점 정책적 지원 사항은 5개입니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": null,
+          "value": null,
+          "unit": null,
+          "time_period": null,
+          "population": null,
+          "value_role": null,
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": null
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "dae1ce06-3a1e-40d1-9110-e73fabd9a978",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"2025년에 기상산업 육성을 위해 우선 추진해야 할 정부 중점 정책적 지원 사항은 5개입니다.\" 에 대한 공식 통계를 찾을 수 없어 검증이 불가합니다. 이는 KOSIS에서 관련 통계표를 찾지 못했기 때문이며, 해당 정보를 확인하시려면 독자께서 직접 KOSIS에서 '2025년에 기상산업 육성을 위해 우선 추진해야 할 정부 중점 정책적 지원 사항'이라는 검색어를 입력하여 찾아보시기 바랍니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

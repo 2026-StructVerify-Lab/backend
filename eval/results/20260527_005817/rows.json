@@ -1,0 +1,32 @@
+[
+  {
+    "article_id": "eval_automotive_technology_0001",
+    "claim_id": "eval_automotive_technology_0001_c01",
+    "claim_text": "1991년 한국의 수상운송업 수익은 52백만 원을 기록하였다.",
+    "gold_verdict": "match",
+    "actual_verdict": "exception",
+    "verdict_correct": false,
+    "failure_mode": "exception",
+    "error": "ValueError: Circular reference detected (id repeated)"
+  },
+  {
+    "article_id": "eval_automotive_technology_0001",
+    "claim_id": "eval_automotive_technology_0001_c02",
+    "claim_text": "1996년 한국의 운송 관련 서비스업 업체 수는 7개였다.",
+    "gold_verdict": "match",
+    "actual_verdict": "exception",
+    "verdict_correct": false,
+    "failure_mode": "exception",
+    "error": "ValueError: Circular reference detected (id repeated)"
+  },
+  {
+    "article_id": "eval_automotive_technology_0001",
+    "claim_id": "eval_automotive_technology_0001_c03",
+    "claim_text": "1991 산업 및 지역별 총괄-수상운송업은(는) 59,8백만원로 나타났다.",
+    "gold_verdict": "mismatch",
+    "actual_verdict": "exception",
+    "verdict_correct": false,
+    "failure_mode": "exception",
+    "error": "ValueError: Circular reference detected (id repeated)"
+  }
+]

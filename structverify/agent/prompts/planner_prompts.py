@@ -34,25 +34,48 @@ PLAN_PROMPT_TEMPLATE = """당신은 한국 통계 팩트체크 시스템의 *Pla
 
 ### Claim 유형별 데이터 점 패턴
 
-**absolute** — 절대값 (예: "출생아 수 2만 717명")
-  → 데이터 점 1개 (role=current)
+★ 분류 우선순위 — schema가 단일 value(prev_value 없음)이면 **absolute**.
+   claim_text에 비교 문맥("~보다 적다", "~에 비해")이 있어도 *이 sub-claim*은
+   자기 단일 값만 검증하면 됨. 비교 자체는 별도 layer에서 sub-claim verdict들을
+   모아 도출. 단일 값 sub-claim을 comparison으로 잘못 분류하면 검증 시퀀스가
+   망가져 calculate가 잘못 호출됨.
 
-**growth_rate** — 증가율/감소율 (예: "8.7% 증가", "전년 대비 5% 감소")
+**absolute** — 단일 값 검증
+  → 데이터 점 1개 (role=current)
+  → calculation_formula 없음
+  → 시퀀스: catalog_search → fetch_evidence → finish
+
+**growth_rate** — 증가율/감소율 (schema.prev_value 있고 claim에 "%·증가율" 같은 비율 표현)
   → 데이터 점 2개 (current + prev)
   → calculation_formula: "(current - prev) / prev * 100"
+  → 시퀀스: catalog_search → fetch_evidence(prev) → fetch_evidence(current) → calculate → finish
 
-**difference** — 차이/변화량 (예: "0.06명 증가", "10만 원 감소")
+**difference** — 차이/변화량 (schema.prev_value 있고 차이가 *절대 단위*로 표현)
   → 데이터 점 2개 (current + prev)
   → calculation_formula: "current - prev"
+  → 시퀀스: catalog_search → fetch_evidence(prev) → fetch_evidence(current) → calculate → finish
 
-**comparison** — 두 시점 직접 비교 (예: "73.6% → 70.3%")
-  → 데이터 점 2개 (current + prev)
-  → calculation_formula 없음 (둘 다 *각각* 매칭)
+**comparison** — 두 *시점의 직접 값* 둘 다 명시 (예: "73.6% → 70.3%")
+  → schema에 current+prev 두 값이 *모두 명시*된 경우만 해당
+  → 데이터 점 2개 — 각각 *독립 매칭*
+  → calculation_formula 없음 (calculate 호출하지 *말 것* — 비교는 *부등호*이지 수식이 아님)
+  → 시퀀스: catalog_search → fetch_evidence × 2 → finish
 
 **ranking** — 순위 (예: "1위", "하락폭이 가장 컸다")
-  → 데이터 점 여러 개 (비교 대상들)
+  → 데이터 점 여러 개
+  → calculate 호출 *금지*
+  → 시퀀스: catalog_search → fetch_evidence × N → finish
 
 **unknown** — 분류 불가. 데이터 점은 *최소한*만.
+  → 시퀀스: catalog_search → fetch_evidence → finish
+
+★ calculate 액션은 **growth_rate/difference에만** 사용. Python eval로 수식을
+   계산하는 도구라 *부등호 비교에 쓸 수 없음*. absolute/comparison/ranking에서
+   calculate를 시퀀스에 넣지 *말 것*.
+
+★ **initial_steps에 반드시 finish step을 포함**할 것. plan이 finish로 끝나야
+   검증이 자동 종료됨. finish 안 박으면 loop이 자율 결정으로 잘못된 액션을
+   추가할 위험.
 
 ### 시점(time) 표기 규칙
 
@@ -90,13 +113,18 @@ PLAN_PROMPT_TEMPLATE = """당신은 한국 통계 팩트체크 시스템의 *Pla
   "initial_steps": [
     {{
       "action": "catalog_search",
-      "input": {{"query": "출생아 수 인구동향", "category": ["인구", "출생"], "top_k": 5}},
-      "rationale": "KOSIS에서 월별 출생아 수 표 찾기"
+      "input": {{"query": "<검색 키워드>", "category": ["<분류>"], "top_k": 5}},
+      "rationale": "데이터 소스에서 적합한 표 찾기"
     }},
     {{
       "action": "fetch_evidence",
       "input": {{"candidate_id": "<catalog_search 결과의 top id>", "params": {{}}}},
-      "rationale": "후보 1번 표의 데이터 가져와서 2025-04 row 매칭"
+      "rationale": "후보 표에서 데이터 가져와서 row 매칭"
+    }},
+    {{
+      "action": "finish",
+      "input": {{}},
+      "rationale": "검증 종료"
     }}
   ],
   "fallback": {{
@@ -117,8 +145,9 @@ PLAN_PROMPT_TEMPLATE = """당신은 한국 통계 팩트체크 시스템의 *Pla
 - `catalog_search`: 데이터 소스 표 검색
 - `fetch_evidence`: 후보 ID로 실제 수치 조회
 - `read_original`: 원문 기사 일부 다시 읽기
-- `calculate`: 모은 값으로 수식 계산
-- `finish`: 검증 종료 + verdict 결정
+- `calculate`: 모은 값으로 *수식* 계산 (growth_rate/difference 전용 — Python eval).
+              *비교는 부등호이지 수식이 아니므로 calculate 호출 금지*.
+- `finish`: 검증 종료 + verdict 결정. 모든 plan의 *마지막 step*으로 반드시 포함.
 
 이제 위 형식대로 *JSON 한 개*만 출력하세요.
 """
@@ -143,7 +172,20 @@ def build_plan_prompt(
     """
     # schema block 구성
     if schema_info:
-        lines = ["추출된 schema 정보 (참고만, 정답 아님):"]
+        lines = ["추출된 schema 정보 (이 sub-claim 전용 — claim_text 전체 해석보다 *이쪽을* 우선):"]
+        # value_role을 최상단에 노출 — schema_inductor가 분기한 *역할*을 명시
+        _role = schema_info.get("value_role")
+        if _role:
+            _role_to_plantype = {
+                "base": "absolute (단일 값 검증, calculate 호출 금지)",
+                "derived_rate": "growth_rate (비율 직접 계산)",
+                "derived_difference": "difference (절대 차이 계산)",
+            }
+            mapping_hint = _role_to_plantype.get(_role, _role)
+            lines.append(
+                f"  ★ value_role: {_role!r} → claim_type을 *{mapping_hint}*로 설정할 것. "
+                f"같은 문장의 다른 sub-claim과 헷갈리지 마세요."
+            )
         for k in ("indicator", "value", "unit", "time_period", "population",
                   "prev_value", "prev_time_period", "prev_phrase",
                   "is_approximate", "modifier", "parent_path"):

@@ -95,6 +95,7 @@ def _parse_reflect_decision(response_text: str) -> ReflectDecision | None:
         "fetch_evidence": ActionType.FETCH_EVIDENCE,
         "read_original": ActionType.READ_ORIGINAL,
         "calculate": ActionType.CALCULATE,
+        "replan": ActionType.REPLAN,
         "finish": ActionType.FINISH,
     }
     action = action_map.get(raw_action)

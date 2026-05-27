@@ -102,13 +102,23 @@ class VerificationPipeline:
         # TODO [박재윤]: GraphStore 초기화 (Neo4j)
         # self.graph_store = GraphStore(config=self.config.get("graph", {}))
 
-    async def run(self, source: str, source_type: str = "text") -> VerificationReport:
+    async def run(
+        self,
+        source: str,
+        source_type: str = "text",
+        source_text: str | None = None,
+    ) -> VerificationReport:
         """
         source 입력을 받아 전체 검증 파이프라인을 수행한다.
 
         Args:
             source: 원본 입력 (텍스트/URL/PDF 경로 등)
             source_type: "text" | "url" | "pdf" | "docx"
+            source_text: *옵션* — 이미 추출된 본문 텍스트가 있으면 전달.
+                URL/PDF 입력에서 sv_platform이 미리 추출해 Job.source_data에
+                저장한 뒤 그 텍스트를 그대로 넘겨주면 *중복 추출 없이* 파이프라인
+                진행. (실시간 partial 응답 매칭에도 사용됨.)
+                None이면 source에서 extract_text() 직접 호출.
 
         Returns:
             VerificationReport: 전체 검증 결과 보고서
@@ -123,7 +133,12 @@ class VerificationPipeline:
         #   - URL: trafilatura.extract() 호출
         #   - PDF: PyMuPDF(fitz) 페이지별 텍스트 추출
         #   - DOCX: python-docx 단락 추출
-        raw_text = await extract_text(source, src)
+        if source_text is not None and source_text.strip():
+            # sv_platform이 사전 추출해 넘긴 경우 — 중복 호출 회피
+            raw_text = source_text
+            logger.info(f"파이프라인: 사전 추출 본문 사용 ({len(raw_text)}자)")
+        else:
+            raw_text = await extract_text(source, src)
 
         # TODO [이수민]: sir_builder.py — SIR Tree 변환 검증
         #   - block 분할 + 문장 분리 + 절대 offset 보정 확인
@@ -138,6 +153,9 @@ class VerificationPipeline:
         from uuid import UUID
         text_hash = hashlib.md5(raw_text.encode()).hexdigest()
         sir_doc.doc_id = UUID(text_hash)
+        # [2026-05-21] URL/PDF 입력의 추출된 본문을 SIRDocument에 보존.
+        # sv_platform이 Job.source_data로 복사해 프론트 "원문" 패널 렌더에 사용.
+        sir_doc.raw_text = raw_text
         logger.info(f"SIR Tree: {len(sir_doc.blocks)} blocks")
 
         # TODO [박재윤]: Step 1.5 — 원본 텍스트 → Raw Storage(S3/MinIO) 저장

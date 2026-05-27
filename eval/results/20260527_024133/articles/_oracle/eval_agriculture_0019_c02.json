@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_agriculture_0019_c02",
+  "elapsed_sec": 126.19742798805237,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "1a5cd4f7-00da-46fb-8bf3-1f5151a26d66",
+        "claim_text": "쌀 가공 식품 제조업체들이 보유한 인증 개수도 2024년에는 4,416개로 확인됩니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "인증 개수",
+          "value": 4416.0,
+          "unit": "개",
+          "time_period": "2024",
+          "population": "쌀 가공 식품 제조업체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "식품 산업 > 쌀 가공 식품"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "1a5cd4f7-00da-46fb-8bf3-1f5151a26d66",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"쌀 가공 식품 제조업체들이 보유한 인증 개수도 2024년에는 4,416개로 확인됩니다.\"와 관련된 공식 통계를 찾을 수 없었습니다. 이는 KOSIS에서 해당 주제와 관련된 통계표를 발견하지 못했기 때문입니다. 따라서 현재로서는 이 주장의 진위 여부를 판단할 수 없습니다. \n\n만약 추가적인 정보나 자료를 찾고 싶다면, 국가통계포털(KOSIS) 웹사이트를 방문하여 '인증 개수', '쌀 가공 식품 제조업체', '2024' 등의 검색어를 이용해 찾아볼 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

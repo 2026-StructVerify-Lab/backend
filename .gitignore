@@ -67,3 +67,8 @@ createTable.py
 
 # agent loop의 잡별 산출물 (workspace) — 로컬 캐시일 뿐 버전 관리 대상 아님
 agent_workspace/
+# 작업 중 만든 백업 폴더 (날짜 스탬프 — 임시)
+.backup_*/
+
+# 테스트용 article 데이터 (검증 입력, 사용자 로컬에서만 유지)
+articles.jsonl

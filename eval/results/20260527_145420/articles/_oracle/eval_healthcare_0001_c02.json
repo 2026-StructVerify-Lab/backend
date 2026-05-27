@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_healthcare_0001_c02",
+  "elapsed_sec": 81.27481698989868,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "04a9e217-16d5-4f96-98c4-d882c5190b9c",
+        "claim_text": "2022년 한국에서 입원 시 과잉 진료 경험이 5건으로 보고되었다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "입원 환자 과잉 진료 건수",
+          "value": 5.0,
+          "unit": "건",
+          "time_period": "2022",
+          "population": null,
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "보건 > 의료서비스 > 진료 관리"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "04a9e217-16d5-4f96-98c4-d882c5190b9c",
+        "verdict": "unverifiable",
+        "confidence": 0.0,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"2022년 한국에서 입원 시 과잉 진료 경험이 5건으로 보고되었다\"라는 것을 검증하고자 했으나, 국가통계포털(KOSIS)에서 관련 통계 자료를 찾을 수 없어 검증이 불가능했습니다. 이와 관련된 더 자세한 정보를 얻기 위해서는 해당 조사를 실시한 기관이나 정부 부처에 문의하시는 것을 제안 드립니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

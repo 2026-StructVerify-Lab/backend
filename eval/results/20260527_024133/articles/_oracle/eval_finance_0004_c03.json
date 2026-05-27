@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_finance_0004_c03",
+  "elapsed_sec": 976.7251970767975,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "c1014641-14a4-4acc-9d7e-502d329d4efe",
+        "claim_text": "2007년 한국에서 총 14,790명이 질병 소분류별 입원 다빈도 상병 급여 현황으로 입원하였다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "질병 소분류별 입원 다빈도 상병 급여 현황",
+          "value": 14790.0,
+          "unit": "명",
+          "time_period": "2007",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "보건 > 의료자원 > 의료시설"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "c1014641-14a4-4acc-9d7e-502d329d4efe",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"2007년 한국에서 총 14,790명이 질병 소분류별 입원 다빈도 상병 급여 현황으로 입원하였다\"라는 내용을 입증할 수 있는 공식 통계를 찾을 수 없었습니다. 이와 관련하여 '질병 소분류별 입원 다빈도 상병 급여 현황 전체 2007'이라는 검색어로도 해당 정보를 파악할 수 없었으며, 시도한 통계표 또한 존재하지 않았습니다. 따라서 추가적인 조사나 검증이 필요해 보입니다. \n\n추가적으로 더 많은 정보를 얻고 싶다면 국가통계포털(KOSIS) 홈페이지 방문을 추천드립니다. 이곳에서는 국내 다양한 분야의 통계 자료를 제공하고 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

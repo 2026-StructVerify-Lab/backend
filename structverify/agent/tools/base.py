@@ -86,6 +86,10 @@ class ToolContext:
     """★ ADD: 현재 처리 중인 Claim 객체. fetch_evidence가 claim.schema에서
     indicator/time_period/population/unit을 추출해 KOSIS params에 자동 매핑하기 위해 필요."""
 
+    current_plan: Any = None
+    """[2026-05-26] 현재 loop이 실행 중인 Plan 객체. replan tool이 새 plan을
+    만들 때 *원래 plan*을 LLM에 보여주는 입력으로 사용. loop이 매 iter ctx에 주입."""
+
     # 향후 추가 가능 (Phase D+):
     # llm_client: Any = None  # LLM 호출 클라이언트 (Reflect Agent용)
     # token_budget_remaining: int = 100_000

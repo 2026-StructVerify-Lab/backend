@@ -1,0 +1,45 @@
+{
+  "total_claims": 1,
+  "label_accuracy": 0.0,
+  "fever_score": 0.0,
+  "macro_f1": 0.0,
+  "macro_precision": 0.0,
+  "macro_recall": 0.0,
+  "per_class": {
+    "match": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "support": 1
+    },
+    "mismatch": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "support": 0
+    },
+    "unverifiable": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "support": 0
+    }
+  },
+  "verdict_accuracy": 0.0,
+  "stat_id_accuracy": 0.0,
+  "value_accuracy": 0.0,
+  "indicator_partial_accuracy": 0.0,
+  "schema_value_accuracy": 0.0,
+  "schema_time_accuracy": 0.0,
+  "schema_pop_accuracy": 0.0,
+  "mismatch_precision": 0.0,
+  "mismatch_recall": 0.0,
+  "confusion_matrix": {
+    "match→no_claim_extracted": 1
+  },
+  "failure_modes": {
+    "claim_not_extracted": 1
+  },
+  "avg_elapsed_sec": 12.075140237808228,
+  "n_with_elapsed": 1
+}

@@ -325,6 +325,12 @@ def _parse_plan(
         "comparison": ClaimType.COMPARISON,
         "ratio_comparison": ClaimType.COMPARISON, # alias (legacy)
         "ranking": ClaimType.RANKING,
+        "aggregation": ClaimType.AGGREGATION,    # [2026-05-21] 다년 평균/총합
+        "aggregate": ClaimType.AGGREGATION,      # alias
+        "average": ClaimType.AGGREGATION,        # alias (LLM이 average로 출력하는 경우)
+        "mean": ClaimType.AGGREGATION,           # alias
+        "sum": ClaimType.AGGREGATION,            # alias
+        "total": ClaimType.AGGREGATION,          # alias
         "unknown": ClaimType.UNKNOWN,
         "other": ClaimType.UNKNOWN,              # alias (legacy)
     }
@@ -558,6 +564,14 @@ class Planner:
                     f"[planner] {claim_id}: LLM 응답 받음 ({len(last_response)}자) "
                     f"[시도 {attempt + 1}/{self.config.max_retries + 1}]"
                 )
+                # [2026-05-25] LLM thought 디버깅용 — 응답 본문을 INFO에 펼침.
+                # 화면 UI에서 plan 결정 사유 추적하기 어려운 케이스 대응.
+                logger.info(
+                    f"[planner] {claim_id}: LLM 응답 본문 ↓\n"
+                    f"────── PLAN RESPONSE START ──────\n"
+                    f"{last_response}\n"
+                    f"────── PLAN RESPONSE END ──────"
+                )
             except Exception as e:
                 logger.warning(
                     f"[planner] {claim_id}: LLM 호출 실패 [시도 {attempt + 1}]: "
@@ -575,6 +589,26 @@ class Planner:
 
             plan = _parse_plan(last_response, claim_id, fallback_query=fallback_query)
             if plan is not None:
+                # [2026-05-21] value_role 후처리 — schema_inductor가 분기한 *역할*과
+                # LLM이 만든 claim_type이 불일치하면 *value_role을 신뢰*하고 정정.
+                # LLM이 같은 claim_text의 sub-claim들을 동일 plan_type으로 잘못
+                # 분류하던 버그(2026-05-21 진단: 출생아 수 base + 증가율 둘 다
+                # growth_rate)를 결정론적으로 차단.
+                _role = (schema_info or {}).get("value_role") if isinstance(schema_info, dict) else None
+                _role_to_type = {
+                    "base": ClaimType.ABSOLUTE,
+                    "derived_rate": ClaimType.GROWTH_RATE,
+                    "derived_difference": ClaimType.DIFFERENCE,
+                    # [2026-05-21] 다년 집계 — 도메인 무관, schema_inductor가 분기
+                    "aggregation": ClaimType.AGGREGATION,
+                }
+                _expected_type = _role_to_type.get(_role)
+                if _expected_type and plan.claim_type != _expected_type:
+                    logger.info(
+                        f"[planner] {claim_id}: value_role={_role!r} 기반 정정 — "
+                        f"LLM type={plan.claim_type.value} → {_expected_type.value}"
+                    )
+                    plan = plan.model_copy(update={"claim_type": _expected_type})
                 logger.info(
                     f"[planner] {claim_id}: Plan 생성 완료. "
                     f"type={plan.claim_type.value}, data_points={len(plan.required_data)}, "
@@ -590,6 +624,180 @@ class Planner:
         # 모든 시도 실패 → fallback
         logger.warning(f"[planner] {claim_id}: 모든 시도 실패. heuristic fallback 사용.")
         return _heuristic_plan(claim, claim_id)
+
+    # ── [2026-05-26] regenerate_plan ─────────────────────────────────
+    # 실행 도중 plan 자체가 틀렸음이 드러났을 때 (예: claim 값이 표에 row로 없는
+    # delta/derived 지표인데 plan이 absolute로 잡힘) 새 plan을 생성.
+    # 기존 fallback(try_ids, catalog retry, row_matcher 등)이 모두 같은 plan 내에서
+    # 답 찾기였다면, regenerate_plan은 *plan 자체*를 갈아끼움.
+    async def regenerate_plan(
+        self,
+        claim: Any,
+        original_plan: Any | None,
+        observations: list[dict],
+        reason: str,
+    ) -> Plan | None:
+        """원래 plan + 실행 observation을 보고 *수정된 plan*을 생성.
+
+        Args:
+            claim: Claim 객체.
+            original_plan: 첫 실행에 사용된 Plan (있으면 LLM에 참고로 보여줌).
+            observations: workspace의 observation 요약 리스트
+                          (각 항목 {action, success, summary, fetched_value/stat_id, ...}).
+            reason: replan이 필요한 이유 (LLM이 입력으로 받음).
+
+        Returns:
+            새 Plan. 실패 시 None.
+        """
+        claim_id = _extract_claim_id(claim)
+        claim_text = _extract_claim_text(claim)
+        schema_info = _extract_schema_info(claim)
+
+        if not claim_text:
+            logger.warning(f"[planner.regenerate] {claim_id}: claim_text 비어있음, fallback X")
+            return None
+        if self.llm_call is None:
+            logger.warning(f"[planner.regenerate] {claim_id}: llm_call 미주입")
+            return None
+
+        # original plan 직렬화 (LLM 입력용)
+        orig_plan_str = ""
+        if original_plan is not None:
+            try:
+                orig_plan_str = json.dumps(
+                    original_plan.model_dump(mode="json") if hasattr(original_plan, "model_dump")
+                    else dict(original_plan),
+                    ensure_ascii=False, indent=2, default=str,
+                )
+            except Exception:
+                orig_plan_str = str(original_plan)
+
+        # observation 요약 직렬화
+        try:
+            obs_str = json.dumps(
+                observations or [], ensure_ascii=False, indent=2, default=str,
+            )
+        except Exception:
+            obs_str = str(observations)
+
+        prompt = _build_regenerate_prompt(
+            claim_text=claim_text,
+            schema_info=schema_info or {},
+            original_plan_json=orig_plan_str,
+            observations_json=obs_str,
+            reason=reason,
+        )
+        logger.info(
+            f"[planner.regenerate] {claim_id}: prompt 구성 완료 ({len(prompt)}자). "
+            f"obs_count={len(observations or [])}, reason={reason[:80]!r}"
+        )
+
+        last_response = ""
+        for attempt in range(self.config.max_retries + 1):
+            try:
+                response = await self.llm_call(prompt)
+                last_response = response or ""
+                logger.info(
+                    f"[planner.regenerate] {claim_id}: LLM 응답 ({len(last_response)}자) "
+                    f"[시도 {attempt + 1}/{self.config.max_retries + 1}]"
+                )
+                logger.info(
+                    f"[planner.regenerate] {claim_id}: LLM 응답 본문 ↓\n"
+                    f"────── REPLAN RESPONSE START ──────\n"
+                    f"{last_response}\n"
+                    f"────── REPLAN RESPONSE END ──────"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[planner.regenerate] {claim_id}: LLM 호출 실패 [시도 {attempt + 1}]: "
+                    f"{type(e).__name__}: {e}"
+                )
+                continue
+
+            # fallback query: schema.indicator
+            fallback_query = ""
+            if isinstance(schema_info, dict):
+                fallback_query = (schema_info.get("indicator") or "").strip()
+            if not fallback_query and claim_text:
+                fallback_query = claim_text.strip()[:40]
+
+            plan = _parse_plan(last_response, claim_id, fallback_query=fallback_query)
+            if plan is not None:
+                logger.info(
+                    f"[planner.regenerate] {claim_id}: 새 Plan 생성 완료. "
+                    f"type={plan.claim_type.value}, data_points={len(plan.required_data)}, "
+                    f"steps={len(plan.initial_steps)}, formula={plan.calculation_formula!r}"
+                )
+                return plan
+            logger.warning(
+                f"[planner.regenerate] {claim_id}: 파싱 실패 [시도 {attempt + 1}]. "
+                f"응답 일부: {last_response[:200]!r}"
+            )
+
+        logger.warning(f"[planner.regenerate] {claim_id}: 모든 시도 실패")
+        return None
+
+
+def _build_regenerate_prompt(
+    *,
+    claim_text: str,
+    schema_info: dict,
+    original_plan_json: str,
+    observations_json: str,
+    reason: str,
+) -> str:
+    """regenerate_plan용 LLM 프롬프트.
+
+    원래 plan + 실행 결과 + 이유를 보여주고 *수정된 plan*을 받는다.
+    Plan JSON 형식은 build_plan_prompt와 동일 (정상 parse 가능하게).
+    """
+    return f"""당신은 통계 검증 plan 수정자입니다. 아래 정보를 보고 *새 plan*을 만드세요.
+
+[원래 claim]
+{claim_text}
+
+[claim 스키마]
+{json.dumps(schema_info, ensure_ascii=False, indent=2, default=str)}
+
+[원래 plan (실패함)]
+{original_plan_json or '(없음)'}
+
+[실행 결과 요약 — 무엇을 시도했고 어떤 데이터를 받았는지]
+{observations_json or '(없음)'}
+
+[replan 이유]
+{reason or '(없음)'}
+
+[plan 수정 가이드]
+1. 위 실행 결과에서 *어떤 표/시점/지표의 데이터가 실제로 존재했는지* 먼저 파악.
+2. claim의 값이 그 표에 *직접 row로* 들어있나? → 들어있으면 claim_type='absolute'.
+3. row로 *없는데* 표에 *원시 절대값*이 있다면 → 계산 필요:
+   - "<지표> 증가 수/감소 수/증감/변화량" → claim_type='difference', formula='current - prev'
+   - "<지표> 증가율/감소율/증감률" → claim_type='growth_rate', formula='(current-prev)/prev*100'
+4. prev_time_period는 schema에 명시되었거나, time_period의 직전 단위(연→전년, 월→전월)로 추정.
+5. initial_steps는 *현재까지 부족한 데이터만* 채우도록 구성:
+   - 이미 fetch 성공한 시점이 있으면 그 시점 fetch는 *반복하지 마세요*.
+   - 부족한 시점만 fetch_evidence → calculate → finish.
+
+[출력 형식 — JSON만, 다른 텍스트 금지]
+{{
+  "claim_type": "absolute" | "growth_rate" | "difference" | "comparison" | "ranking" | "aggregation",
+  "required_data": [
+    {{"indicator": "...", "time": "...", "population": "...", "unit_hint": "...", "role": "current/prev/..."}}
+  ],
+  "calculation_formula": "current - prev" | "(current - prev) / prev * 100" | null,
+  "expected_result": <claim.value>,
+  "expected_unit": "...",
+  "verdict_logic": "계산된 값이 expected_result와 일치하면 match",
+  "initial_steps": [
+    {{"action": "fetch_evidence", "input": {{"candidate_id": "<직전 성공한 stat_id>", "params": {{"time_period": "<부족한 시점>"}}}}, "rationale": "..."}},
+    {{"action": "calculate", "input": {{"formula": "...", "vars": {{"current": ..., "prev": ...}}}}, "rationale": "..."}},
+    {{"action": "finish", "input": {{}}, "rationale": "..."}}
+  ],
+  "fallback": {{"use_original_text": false, "alternative_keywords": [], "give_up_after_attempts": 3}},
+  "notes": "replan 사유 한 줄 메모"
+}}
+"""
 
 
 # ── 편의 함수 ──────────────────────────────────────────────────────

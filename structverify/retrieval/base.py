@@ -85,6 +85,7 @@ class BaseDataSource(ABC):
         query: str,
         category: list[str] | None = None,
         top_k: int = 10,
+        context: dict[str, Any] | None = None,
     ) -> list[CatalogCandidate]:
         """카탈로그 검색.
 
@@ -92,6 +93,13 @@ class BaseDataSource(ABC):
             query: 검색 키워드 (자연어 또는 키워드 조합).
             category: 분류 힌트 (예: ['인구', '가구']).
             top_k: 반환할 최대 후보 수.
+            context: [P31 2026-05-22] source-specific 부가 정보. 검색 정확도 보강용.
+                권장 키 (source가 알 만한 것만 사용):
+                    - 'parent_path': str — schema의 계층 카테고리 (예: "보건 > 의료자원 > 의료장비")
+                    - 'raw_claim':   str — 원문 claim 텍스트 (앞 200자)
+                    - 'population':  str — schema의 대상 집단/지역
+                    - 'indicator':   str — schema의 지표명
+                source가 모르는 키는 무시. KOSIS는 LLM 카테고리 추출 시 활용.
 
         Returns:
             CatalogCandidate 리스트. score 내림차순 권장.
@@ -131,6 +139,27 @@ class BaseDataSource(ABC):
 
     async def close(self) -> None:
         """리소스 정리. DB 커넥션 등."""
+        return None
+
+    async def get_table_meta(
+        self,
+        candidate_id: str,
+        meta_type: str = "ITM",
+    ) -> dict[str, Any] | list[dict[str, Any]] | None:
+        """[P30 2026-05-22] 표의 *항목/분류 메타* 조회 — *데이터는 X*.
+
+        용도: catalog_search → fetch_evidence 사이에서, 표 이름만으론 정답인지
+        불확실할 때 LLM이 *표 내부 구조*(어떤 항목/분류 코드)를 보고 판단하기
+        위한 가벼운 메타 호출.
+
+        Args:
+            candidate_id: search_catalog 결과의 'id' (stat_id 등).
+            meta_type: source-specific 메타 타입.
+                KOSIS: "ITM" (통계항목), "OBJL01"~"OBJL08" (분류 항목), "PRD", "CMMT".
+
+        Returns:
+            메타 dict 또는 list (source 형식 그대로). 실패/미지원이면 None.
+        """
         return None
 
 

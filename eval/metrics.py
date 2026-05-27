@@ -1,0 +1,426 @@
+"""
+eval.metrics — gold vs actual 비교로 단계별 메트릭 계산.
+
+각 claim마다 다음 dict 반환:
+  {
+    "article_id", "claim_id", "claim_text",
+    "gold_verdict", "actual_verdict", "verdict_correct",
+    "gold_stat_id", "actual_stat_id", "stat_id_match",
+    "gold_value", "actual_value", "value_match",
+    "gold_indicator", "actual_indicator",
+    "indicator_partial_match",           # substring 매칭 (strict)
+    "indicator_semantic_sim",            # cosine similarity (continuous)
+    "indicator_semantic_match",          # bool (sim >= threshold)
+    "schema_value_match", "schema_time_match", "schema_pop_match",
+    "elapsed_sec", "failure_mode" (if applicable),
+  }
+
+semantic similarity는 HCX-EMB-V2 임베딩 기반.
+FactScore (Min et al. 2023, EMNLP), RARR (Gao et al. 2023, ACL) 등에서 사용하는
+soft alignment 방식.
+"""
+from __future__ import annotations
+
+import math
+import os
+import re
+from typing import Any
+
+
+# ── Embedding helpers (semantic similarity) ────────────────────────
+# HCX-EMB-V2 API. NCP_API_KEY 환경변수 필요. 미설정 시 semantic 메트릭 None.
+_HCX_EMB_API_URL = "https://clovastudio.stream.ntruss.com/v1/api-tools/embedding/v2"
+_emb_cache: dict[str, list[float]] = {}
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(x * x for x in b))
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
+
+
+async def _get_embedding(text: str) -> list[float] | None:
+    """HCX embedding API 호출, in-memory cache. NCP_API_KEY 없으면 None."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    if text in _emb_cache:
+        return _emb_cache[text]
+    api_key = os.environ.get("NCP_API_KEY")
+    if not api_key:
+        try:
+            from dotenv import load_dotenv
+            from pathlib import Path
+            _env = Path(__file__).resolve().parent.parent / ".env"
+            if _env.exists():
+                load_dotenv(_env)
+            api_key = os.environ.get("NCP_API_KEY")
+        except Exception:
+            pass
+    if not api_key:
+        return None
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(
+                _HCX_EMB_API_URL,
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={"text": text},
+            )
+            d = r.json()
+            emb = (d.get("result") or {}).get("embedding")
+            if isinstance(emb, list):
+                _emb_cache[text] = emb
+                return emb
+    except Exception:
+        pass
+    return None
+
+
+async def enrich_with_semantic_similarity(
+    rows: list[dict],
+    threshold: float = 0.65,
+) -> list[dict]:
+    """rows에 indicator_semantic_sim + indicator_semantic_match 필드 추가.
+
+    FactScore/RARR 등에서 사용하는 *soft alignment* — strict text 매칭을
+    embedding cosine similarity로 대체. 임계값 0.65 (한국어 짧은 phrase 기준).
+
+    HCX embedding API 호출은 *unique text*만 — gold/actual 중복 caching.
+    """
+    # 모든 unique text 수집
+    unique_texts: set[str] = set()
+    for r in rows:
+        for k in ("gold_indicator", "actual_indicator"):
+            t = (r.get(k) or "").strip()
+            if t:
+                unique_texts.add(t)
+
+    if not unique_texts:
+        return rows
+
+    # 일괄 embedding (concurrent)
+    import asyncio
+    text_list = list(unique_texts)
+    results = await asyncio.gather(*[_get_embedding(t) for t in text_list],
+                                     return_exceptions=True)
+    embeddings: dict[str, list[float]] = {}
+    for t, emb in zip(text_list, results):
+        if isinstance(emb, list):
+            embeddings[t] = emb
+
+    # 각 row에 필드 추가
+    for r in rows:
+        g = (r.get("gold_indicator") or "").strip()
+        a = (r.get("actual_indicator") or "").strip()
+        if g and a and g in embeddings and a in embeddings:
+            sim = _cosine(embeddings[g], embeddings[a])
+            r["indicator_semantic_sim"] = round(sim, 4)
+            r["indicator_semantic_match"] = bool(sim >= threshold)
+        else:
+            r["indicator_semantic_sim"] = None
+            r["indicator_semantic_match"] = None
+
+    return rows
+
+
+def _normalize_indicator(s: str | None) -> str:
+    """공백/조사/괄호 제거 정규화."""
+    if not s:
+        return ""
+    s = re.sub(r"[\s（）()]+", "", str(s))
+    s = re.sub(r"별$|율$|수$", "", s)
+    return s.lower()
+
+
+def _values_close(a: Any, b: Any, rel_tol: float = 0.05) -> bool:
+    """5% 이내면 같음. None은 mismatch."""
+    if a is None or b is None:
+        return a == b
+    try:
+        af, bf = float(a), float(b)
+    except (TypeError, ValueError):
+        return False
+    if bf == 0.0:
+        return abs(af) < 1e-6
+    return abs(af - bf) / max(abs(bf), 1e-9) < rel_tol
+
+
+def _classify_failure(actual_verdict: str, gold_verdict: str,
+                      actual_stat_id: str | None, gold_stat_id: str | None,
+                      actual_value: Any, gold_value: Any) -> str | None:
+    """unverifiable/mismatch 시 *왜 실패했나* 분류.
+
+    A. data_missing — gold도 unverifiable (정상)
+    B. wrong_table — actual_stat_id != gold_stat_id
+    C. no_table_picked — actual_stat_id is None
+    D. wrong_value — table 맞는데 값 다름
+    E. correct — match인데 시스템도 match (None 반환)
+    """
+    if actual_verdict == gold_verdict:
+        return None  # 정확
+    if gold_verdict == "unverifiable" and actual_verdict == "unverifiable":
+        return "data_missing"
+    if actual_verdict == "unverifiable":
+        if actual_stat_id is None:
+            return "no_table_picked"
+        if gold_stat_id and actual_stat_id != gold_stat_id:
+            return "wrong_table"
+        return "row_match_failed"
+    # verdict 자체가 다른 경우
+    if actual_stat_id and gold_stat_id and actual_stat_id != gold_stat_id:
+        return "wrong_table"
+    if not _values_close(actual_value, gold_value):
+        return "wrong_value"
+    return "verdict_mismatch"
+
+
+def compare_claim(gold: dict, actual: dict, elapsed_sec: float | None = None) -> dict:
+    """gold claim + actual (claim+result) → 메트릭 row.
+
+    Args:
+        gold: articles.jsonl의 claim dict.
+        actual: {"claim": Claim object dump, "result": VerificationResult dump}
+                두 항목 모두 dict.
+    """
+    g_verdict = (gold.get("gold_verdict") or "").lower()
+    g_schema = gold.get("gold_schema") or {}
+    g_stat = gold.get("gold_stat_id")
+    g_value = gold.get("gold_official_value")
+    g_indicator = g_schema.get("indicator")
+
+    a_claim = actual.get("claim") or {}
+    a_result = actual.get("result") or {}
+
+    a_verdict = str(a_result.get("verdict") or "").lower()
+    a_schema = a_claim.get("schema") or {}
+    a_evidence = a_result.get("evidence") or {}
+    a_stat = a_evidence.get("stat_table_id")
+    a_value = a_evidence.get("official_value")
+    # derived (calculate) 사용 시 computed_value를 actual_value로
+    if a_result.get("computed_value") is not None:
+        a_value = a_result["computed_value"]
+    a_indicator = a_schema.get("indicator")
+
+    # 기본 매칭
+    verdict_correct = a_verdict == g_verdict
+    stat_id_match = (
+        bool(a_stat) and bool(g_stat) and a_stat == g_stat
+    )
+    value_match = _values_close(a_value, g_value)
+
+    # schema 단계
+    ind_norm_g = _normalize_indicator(g_indicator)
+    ind_norm_a = _normalize_indicator(a_indicator)
+    indicator_partial_match = (
+        bool(ind_norm_g) and bool(ind_norm_a)
+        and (ind_norm_g in ind_norm_a or ind_norm_a in ind_norm_g)
+    )
+    schema_value_match = _values_close(
+        a_schema.get("value"), g_schema.get("value"),
+    )
+    schema_time_match = (
+        str(a_schema.get("time_period") or "").strip() ==
+        str(g_schema.get("time_period") or "").strip()
+    )
+    schema_pop_match = (
+        str(a_schema.get("population") or "").strip() ==
+        str(g_schema.get("population") or "").strip()
+    )
+
+    failure_mode = _classify_failure(
+        a_verdict, g_verdict, a_stat, g_stat, a_value, g_value,
+    )
+
+    return {
+        "claim_id": gold.get("claim_id"),
+        "claim_text": gold.get("claim_text"),
+        "gold_verdict": g_verdict,
+        "actual_verdict": a_verdict,
+        "verdict_correct": verdict_correct,
+        "gold_stat_id": g_stat,
+        "actual_stat_id": a_stat,
+        "stat_id_match": stat_id_match,
+        "gold_value": g_value,
+        "actual_value": a_value,
+        "value_match": value_match,
+        "gold_indicator": g_indicator,
+        "actual_indicator": a_indicator,
+        "indicator_partial_match": indicator_partial_match,
+        "schema_value_match": schema_value_match,
+        "schema_time_match": schema_time_match,
+        "schema_pop_match": schema_pop_match,
+        "elapsed_sec": elapsed_sec,
+        "failure_mode": failure_mode,
+    }
+
+
+def _macro_f1(rows: list[dict], labels: list[str]) -> dict:
+    """Macro F1 — fact-checking 논문 표준 (MultiFC, FEVER).
+
+    각 label마다 P/R/F1 계산 후 단순 평균.
+    Returns:
+        {"per_class": {label: {p, r, f1, support}}, "macro": {p, r, f1}}
+    """
+    per_class: dict[str, dict] = {}
+    p_list, r_list, f_list = [], [], []
+    for lab in labels:
+        tp = sum(1 for r in rows
+                 if r.get("gold_verdict") == lab and r.get("actual_verdict") == lab)
+        fp = sum(1 for r in rows
+                 if r.get("gold_verdict") != lab and r.get("actual_verdict") == lab)
+        fn = sum(1 for r in rows
+                 if r.get("gold_verdict") == lab and r.get("actual_verdict") != lab)
+        sup = sum(1 for r in rows if r.get("gold_verdict") == lab)
+        p = tp / (tp + fp) if (tp + fp) else 0.0
+        r_ = tp / (tp + fn) if (tp + fn) else 0.0
+        f = 2 * p * r_ / (p + r_) if (p + r_) else 0.0
+        per_class[lab] = {"precision": p, "recall": r_, "f1": f, "support": sup}
+        p_list.append(p); r_list.append(r_); f_list.append(f)
+    n = max(1, len(labels))
+    return {
+        "per_class": per_class,
+        "macro": {
+            "precision": sum(p_list) / n,
+            "recall": sum(r_list) / n,
+            "f1": sum(f_list) / n,
+        },
+    }
+
+
+def _fever_score(rows: list[dict]) -> dict:
+    """FEVER Score (Thorne et al. 2018) — strict:
+        verdict 맞고 + evidence(stat_id) 맞고 + value ±5%이면 1, else 0.
+
+    NEI/unverifiable의 경우 evidence 비교 X (verdict만으로 OK).
+    """
+    n_total = len(rows)
+    n_strict = 0
+    n_label_only = 0
+    for r in rows:
+        verdict_ok = r.get("verdict_correct", False)
+        if not verdict_ok:
+            continue
+        n_label_only += 1
+        gv = r.get("gold_verdict")
+        # unverifiable은 evidence 비교 안 함
+        if gv == "unverifiable":
+            n_strict += 1
+            continue
+        # match/mismatch는 evidence(stat_id + value) 일치도 필요
+        if r.get("stat_id_match") and r.get("value_match"):
+            n_strict += 1
+    return {
+        "fever_score": n_strict / n_total if n_total else 0.0,
+        "label_only_acc": n_label_only / n_total if n_total else 0.0,
+        "n_total": n_total,
+        "n_strict": n_strict,
+        "n_label_only": n_label_only,
+    }
+
+
+def aggregate(rows: list[dict]) -> dict:
+    """전체 row → 요약 메트릭. error 행도 안전하게 처리 (.get default 0).
+
+    포함 metrics (fact verification 논문 표준):
+      - Label Accuracy (FEVER, MultiFC)
+      - FEVER Score — strict label + evidence (Thorne et al. 2018)
+      - Macro F1 (MultiFC, TabFact)
+      - per-class P/R/F1
+      - Slot accuracy (ACE/DocRED 류)
+      - Mismatch precision/recall (misinformation detection)
+    """
+    if not rows:
+        return {"total": 0}
+
+    n = len(rows)
+    n_verdict_correct = sum(1 for r in rows if r.get("verdict_correct"))
+    n_stat_match = sum(1 for r in rows if r.get("stat_id_match"))
+    n_val_match = sum(1 for r in rows if r.get("value_match"))
+    n_ind_partial = sum(1 for r in rows if r.get("indicator_partial_match"))
+    # [2026-05-27 Option C] semantic similarity 기반 indicator 매칭
+    n_ind_semantic = sum(1 for r in rows if r.get("indicator_semantic_match") is True)
+    n_with_sim = sum(1 for r in rows if r.get("indicator_semantic_sim") is not None)
+    sim_values = [r["indicator_semantic_sim"] for r in rows
+                   if r.get("indicator_semantic_sim") is not None]
+    avg_indicator_sim = (sum(sim_values) / len(sim_values)) if sim_values else None
+    n_schema_val = sum(1 for r in rows if r.get("schema_value_match"))
+    n_schema_time = sum(1 for r in rows if r.get("schema_time_match"))
+    n_schema_pop = sum(1 for r in rows if r.get("schema_pop_match"))
+
+    # verdict 단위 confusion
+    confusion: dict[tuple, int] = {}
+    for r in rows:
+        key = (r.get("gold_verdict", "?"), r.get("actual_verdict", "?"))
+        confusion[key] = confusion.get(key, 0) + 1
+
+    # precision/recall (mismatch 기준 — misinformation detection 능력)
+    tp = sum(1 for r in rows
+             if r.get("gold_verdict") == "mismatch" and r.get("actual_verdict") == "mismatch")
+    fp = sum(1 for r in rows
+             if r.get("gold_verdict") != "mismatch" and r.get("actual_verdict") == "mismatch")
+    fn = sum(1 for r in rows
+             if r.get("gold_verdict") == "mismatch" and r.get("actual_verdict") != "mismatch")
+    precision_mm = tp / (tp + fp) if (tp + fp) else 0.0
+    recall_mm = tp / (tp + fn) if (tp + fn) else 0.0
+
+    # failure mode 분포
+    fmode: dict[str, int] = {}
+    for r in rows:
+        m = r.get("failure_mode")
+        if m:
+            fmode[m] = fmode.get(m, 0) + 1
+
+    # latency
+    elapsed = [r.get("elapsed_sec") for r in rows if r.get("elapsed_sec") is not None]
+    avg_elapsed = sum(elapsed) / len(elapsed) if elapsed else None
+
+    # mode (oracle/e2e) — row마다 박혀 있음. 보통 한 run에 하나지만 섞일 수도.
+    modes = sorted({(r.get("mode") or "?") for r in rows})
+    mode_str = modes[0] if len(modes) == 1 else "+".join(modes)
+
+    # ── 논문 표준 metrics ────────────────────────────────────────
+    labels = ["match", "mismatch", "unverifiable"]
+    macro = _macro_f1(rows, labels)
+    fever = _fever_score(rows)
+
+    return {
+        "total_claims": n,
+        "mode": mode_str,
+        # FEVER-style (논문 main metrics)
+        "label_accuracy": n_verdict_correct / n,        # = Label Accuracy
+        "fever_score": fever["fever_score"],            # FEVER Score (strict)
+        "macro_f1": macro["macro"]["f1"],
+        "macro_precision": macro["macro"]["precision"],
+        "macro_recall": macro["macro"]["recall"],
+        "per_class": macro["per_class"],
+        # 호환용 (기존 보고서 key 유지)
+        "verdict_accuracy": n_verdict_correct / n,
+        # Evidence (FEVER score 분해)
+        "stat_id_accuracy": n_stat_match / n,
+        "value_accuracy": n_val_match / n,
+        # Schema slot (ACE/DocRED 스타일)
+        "indicator_partial_accuracy": n_ind_partial / n,
+        # [Option C] Semantic indicator metrics (FactScore/RARR 스타일 soft alignment)
+        "indicator_semantic_accuracy": (
+            n_ind_semantic / n_with_sim if n_with_sim else 0.0
+        ),
+        "indicator_semantic_avg_sim": avg_indicator_sim,
+        "indicator_n_with_sim": n_with_sim,
+        "schema_value_accuracy": n_schema_val / n,
+        "schema_time_accuracy": n_schema_time / n,
+        "schema_pop_accuracy": n_schema_pop / n,
+        # Mismatch detection (misinformation 잡기)
+        "mismatch_precision": precision_mm,
+        "mismatch_recall": recall_mm,
+        # Diagnostics
+        "confusion_matrix": {
+            f"{g}→{a}": c for (g, a), c in sorted(confusion.items())
+        },
+        "failure_modes": fmode,
+        "avg_elapsed_sec": avg_elapsed,
+        "n_with_elapsed": len(elapsed),
+    }

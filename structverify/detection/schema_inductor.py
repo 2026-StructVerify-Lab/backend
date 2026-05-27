@@ -75,7 +75,21 @@ CLAIM_SCHEMA_JSON_SCHEMA: dict[str, Any] = {
             "type": "string",
             "description": (
                 "기준 시점. 형식: 'YYYY' 또는 'YYYY-MM'. "
-                "예: '2024', '2024-10'. 한글 표기('2024년 10월') 금지."
+                "예: '2024', '2024-10'. 한글 표기('2024년 10월') 금지.\n"
+                "★ 월 추론 규칙 — 원문 자연어 시점 표현을 *적극적으로* month까지 해석:\n"
+                "  - '2025년 마지막 월/연말/12월 말'   → '2025-12'\n"
+                "  - '2025년 초/연초/1월 초/신년'      → '2025-01'\n"
+                "  - '2025년 상반기 말/6월 말'         → '2025-06'\n"
+                "  - '2025년 하반기 초/7월 초'         → '2025-07'\n"
+                "  - '2025년 1분기'                    → '2025-03' (분기 말월)\n"
+                "  - '2025년 4분기/2025년 말'          → '2025-12'\n"
+                "  - '2025년 봄'                       → '2025-04' (대표 월)\n"
+                "  - '지난달' + anchor='2025-04'       → '2025-03'\n"
+                "  - '최근/현재' + anchor_year=2025    → '2025' (월 단서 없음)\n"
+                "★ 추론 가드 — 환각 금지:\n"
+                "  - 원문에 *시점 표현이 전혀 없으면* anchor_year만 쓰거나 빈 문자열. 추론 금지.\n"
+                "  - '월/분기/초/말/상반기/하반기/봄/여름/가을/겨울' 등 *명시적 단서가 있을 때만* month 추론.\n"
+                "★ 추론 근거가 된 표현은 source_phrase 또는 *해당 schema의 다른 phrase 필드*에 원문 그대로 남깁니다."
             ),
         },
         "unit": {
@@ -264,6 +278,20 @@ SCHEMA_INDUCTION_PROMPT = """당신은 뉴스 수치 주장에서 공식 통계 
       parent_path: "인구 > 출생 > 합계출산율"}}
   ]
 
+[예시 — ★ 자연어 시점 표현의 month 추론]
+검증 대상 문장: "2025년도 마지막 월의 출생아 수 증가율은 3.9%이다"
+결과:
+  schemas: [
+    {{indicator: "출생아 수 증가율", value: 3.9, unit: "%", time_period: "2025-12",
+      source_phrase: "3.9%",
+      prev_value: null, prev_time_period: "2024-12", prev_phrase: "",
+      parent_path: "인구 > 출생 > 출생아 수"}}
+  ]
+  ★ 핵심: "마지막 월" → 12월로 추론 → time_period="2025-12" (연 단위가 아님).
+     prev_time_period="2024-12"도 "전년 동월" 규칙으로 연쇄 추론.
+  ★ 만약 원문이 단순히 "2025년 출생아 수 증가율은 3.9%"였다면 (월 단서 없음)
+     → time_period="2025" 으로 두고 month 추론 금지.
+
 [예시 — rank 표현만 (검증 불가)]
 검증 대상 문장: "출생아 수, 34년 만에 최대 증가"
 결과:
@@ -280,6 +308,26 @@ SCHEMA_INDUCTION_PROMPT = """당신은 뉴스 수치 주장에서 공식 통계 
       prev_value: 0.72, prev_time_period: "2024-04", prev_phrase: ""}}
   ]
   ★ "차이 0.04" schema의 prev_value=0.72 (계산: 0.76 - 0.04). prev_phrase는 *문장에 직접 없으면* 빈 문자열.
+
+[예시 — ★ 다년 집계 (평균/총합/최대/최소 류)]
+검증 대상 문장: "최근 3년간 평균 해외이주 신고 인원은 2904명"
+결과:
+  schemas: [
+    {{indicator: "해외이주 신고 인원", value: 2904, unit: "명", time_period: "2024",
+      source_phrase: "2904명",
+      aggregation: "mean", aggregation_window: 3,
+      aggregation_time_range: ["2022", "2023", "2024"],
+      parent_path: "인구 > 이주 > 해외이주"}}
+  ]
+  ★★ 핵심: "평균/총합/최대/최소" 같은 집계 표현이 있으면 *aggregation 필드*를 채우세요.
+     - aggregation: "mean" | "sum" | "max" | "min" | "median" (영어 소문자, 연산자만)
+     - aggregation_window: "최근 N년/N분기/N개월" 의 정수 N (예: "최근 3년" → 3)
+     - aggregation_time_range: 명시적으로 추론한 시점 리스트 (예: 2024 기준 "최근 3년" → ["2022","2023","2024"])
+     - time_period: 가장 최근 시점 (단일 fetch 실패 시 fallback용)
+     - prev_value/prev_time_period/prev_phrase는 *비워둠* (집계는 단일 prev 비교 아님)
+  ★★ "최근 N년", "지난 N분기 평균", "총", "합계", "최대", "최저", "역대 가장 많은"
+     등 다년/다기간 집계 신호가 있는 경우에만 aggregation 필드를 채우세요.
+     집계가 아닌 단일 시점 값(예: "2024년 출생아 수")은 aggregation=null로 두세요.
 
 [예시 — ★ 증가율인데 비교값이 본문에 없음 (시점만 계산)]
 검증 대상 문장: "2023년 출생아 수는 23만 명으로 1년 전보다 7.7% 줄었다"
@@ -299,6 +347,47 @@ SCHEMA_INDUCTION_PROMPT = """당신은 뉴스 수치 주장에서 공식 통계 
         ("2023년" + "1년 전" → 2022 로 계산).
      → 검증 단계에서 통계 DB의 2022년 출생아 수를 조회해
         (현재값 - 2022년값) 으로 7.7% 를 직접 계산·검증함.
+
+[예시 — ★★ 동사형 변화량 표현 (도입/들여와/추가/늘어/줄어 + 증가율 결합)]
+검증 대상 문장: "서울과 경기, 인천은 각각 652개, 592개, 169개의 장비를 들여와 5.5%~6.5%의 증가세를 보인 반면, 강원도는 단 52개로 4% 증가에 그쳤다"
+결과:
+  schemas: [
+    {{indicator: "의료장비 증가 수", value: 652, unit: "대", time_period: "2024",
+      population: "서울", source_phrase: "652개",
+      parent_path: "보건 > 의료자원 > 의료장비"}},
+    {{indicator: "의료장비 증가 수", value: 592, unit: "대", time_period: "2024",
+      population: "경기", source_phrase: "592개"}},
+    {{indicator: "의료장비 증가 수", value: 169, unit: "대", time_period: "2024",
+      population: "인천", source_phrase: "169개"}},
+    {{indicator: "의료장비 증가 수", value: 52, unit: "대", time_period: "2024",
+      population: "강원도", source_phrase: "52개"}},
+    {{indicator: "의료장비 증가율", value: 6.0, unit: "%", time_period: "2024",
+      population: "서울", source_phrase: "5.5%~6.5%",
+      modifier: "범위(5.5~6.5)의 중앙값"}},
+    {{indicator: "의료장비 증가율", value: 4.0, unit: "%", time_period: "2024",
+      population: "강원도", source_phrase: "4%"}}
+  ]
+  ★★ 핵심: 문장에 *동사*("들여와", "도입했다", "추가했다", "신규로 늘렸다", "줄어들었다")가
+     있고 그 옆에 *개수*와 *%*가 함께 나오면 → *두 가지 schema*로 분기:
+     (1) "<원지표> 증가 수" (또는 감소 수) — value는 변화 *개수*
+     (2) "<원지표> 증가율" (또는 감소율) — value는 변화 *%*
+  ★★ value를 단순히 *총 보유 수*로 해석하면 안 됨.
+     "652개의 장비를 들여와" → 652는 *신규 도입 수*이지 *총 보유 수*가 아님.
+  ★★ 범위 표현("5.5%~6.5%")이 있으면 *중앙값*을 value로, 원문은 source_phrase + modifier로.
+
+[예시 — ★★ 동사로만 표현된 변화 (수치는 한쪽만)]
+검증 대상 문장: "지난해 입국자가 30만 명 늘어나 전년 대비 8% 증가했다"
+결과:
+  schemas: [
+    {{indicator: "입국자 증가 수", value: 300000, unit: "명", time_period: "2024",
+      source_phrase: "30만 명",
+      parent_path: "인구 > 이주 > 입국자"}},
+    {{indicator: "입국자 증가율", value: 8.0, unit: "%", time_period: "2024",
+      source_phrase: "8%",
+      prev_value: null, prev_time_period: "2023", prev_phrase: ""}}
+  ]
+  ★★ "X 늘어나 Y%" 패턴 → *두 schema 모두* 생성 (증가 수 + 증가율).
+     X(30만 명)는 *총량 아닌 변화량* — indicator에 "증가 수" 명시 필수.
 
 [예시 — ★ 한 문장에 지역별 수치 나열 (같은 지표, 지역만 다름)]
 검증 대상 문장: "동작구가 10.6%로 가장 높았다. 이어 성동구(8.9%), 마포구(8.7%), 영등포구(7.9%)"
@@ -342,6 +431,19 @@ SCHEMA_INDUCTION_PROMPT = """당신은 뉴스 수치 주장에서 공식 통계 
      → 각 지역마다 별도 schema. indicator는 동일, population=지역명,
         value=각 수치. 절대 하나로 합치거나 value=null로 두지 마세요.
    · 이 규칙은 지역뿐 아니라 연령대·업종·품목 등 *모든 분류 축*에 적용.
+
+2-1. **★★ 동사형 변화 표현 — *총량 vs 변화량* 구분이 핵심**:
+   문장에 *변화/증감을 나타내는 동사*(들여와, 도입했다, 추가됐다, 신규로,
+   늘어, 줄어, 감소, 증가, 매입, 신축, 폐기 등)가 있으면, 그 옆 수치는
+   *총량이 아니라 변화량*임. indicator에 "증가 수"/"감소 수"/"신규 도입 수"
+   등 변화 의미를 *명시*해야 함:
+   · "X개 들여와" → indicator="<원지표> 증가 수" (or "신규 도입 수"), value=X
+   · "X명 늘어" → indicator="<원지표> 증가 수", value=X
+   · "X건 줄어" → indicator="<원지표> 감소 수", value=X
+   같은 문장에 % 표현이 함께 있으면 *증가율 schema*도 별도 생성:
+   · "X개 들여와 Y% 증가세" → 2개 schema (증가 수=X + 증가율=Y)
+   ★ 절대 X를 *총량*으로 해석하지 마세요. "652개 들여와" → 652는 *신규 도입*.
+   ★ 범위 표현(`5.5%~6.5%`)이 있으면 *중앙값*을 value로, 원문은 source_phrase + modifier로.
 
 3. **★ value/unit/source_phrase 일관성**:
    · source_phrase가 "X%" → unit="%", value는 비율
@@ -425,22 +527,29 @@ async def induce_schemas(
         #   경우만 정리. 단, population까지 같아야 진짜 중복으로 간주.
         #   ★ "동작구 10.6%, 성동구 8.9%"처럼 지역만 다른 정상 다중 수치는
         #     population이 다르므로 합쳐지지 않음 (이전엔 다 뭉개지던 버그).
+        # [2026-05-21] seen_keys로 통합 — 같은 (indicator, time, population) 키에
+        #   *value 있는* schema가 이미 존재하면 *value=null* 후속 schema는 폐기.
+        #   효과: LLM이 base claim에 "합계출산율 0.79명" 정상 schema +
+        #   "합계출산율 null" 빈 schema를 *함께* 출력하던 케이스에서, 빈 schema가
+        #   별도 sub-claim으로 살아남아 agent loop이 4 iter 돌다가
+        #   "주장값=None명 vs KOSIS 0.8명" 으로 끝나던 회귀를 차단.
         deduped: list[ClaimSchema] = []
-        seen_null_keys: set[tuple] = set()
+        seen_keys: set[tuple] = set()
         for sch in schemas:
-            if sch.value is None:
-                key = (
-                    sch.indicator or "",
-                    sch.time_period or "",
-                    sch.population or "",   # ★ population 추가 — 지역별 구분
+            key = (
+                sch.indicator or "",
+                sch.time_period or "",
+                sch.population or "",   # ★ population 추가 — 지역별 구분
+            )
+            if sch.value is None and key in seen_keys:
+                logger.info(
+                    f"  [중복 제거] value=null schema 폐기 — 같은 키의 "
+                    f"value 있는 schema가 이미 존재 "
+                    f"(indicator={sch.indicator}, time={sch.time_period}, "
+                    f"population={sch.population})"
                 )
-                if key in seen_null_keys:
-                    logger.info(
-                        f"  [중복 제거] value=null 중복 schema 폐기 "
-                        f"(indicator={sch.indicator}, population={sch.population})"
-                    )
-                    continue
-                seen_null_keys.add(key)
+                continue
+            seen_keys.add(key)
             deduped.append(sch)
         schemas = deduped
 
@@ -631,6 +740,19 @@ async def _induce_multiple(
         logger.warning(f"스키마 유도 LLM 호출 예외: {e}")
         return []
 
+    # [2026-05-25] LLM thought 디버깅용 — LLM이 어떤 schema 후보를 *왜* 추출했는지
+    # 화면 UI에서 보기 어려운 케이스 대응. 응답 원본 json을 INFO로 펼쳐 보여줌.
+    try:
+        import json as _json
+        logger.info(
+            f"[schema_inductor] LLM 응답 본문 (claim_text={claim_text[:60]!r}...) ↓\n"
+            f"────── SCHEMA RESPONSE START ──────\n"
+            f"{_json.dumps(r, ensure_ascii=False, indent=2)}\n"
+            f"────── SCHEMA RESPONSE END ──────"
+        )
+    except Exception:
+        logger.info(f"[schema_inductor] LLM 응답 raw: {str(r)[:1000]}")
+
     schemas_raw = r.get("schemas") or []
     if not isinstance(schemas_raw, list):
         logger.warning(f"스키마 유도: schemas가 list 아님 ({type(schemas_raw)})")
@@ -670,6 +792,32 @@ async def _induce_multiple(
             corrected_value, was_corrected = _verify_and_correct_value(
                 raw_value, source_phrase
             )
+
+            # [2026-05-21] value=null fallback — LLM이 value를 빠뜨려도 source_phrase에서
+            # 숫자 복원. 도메인 무관, 한국어 키워드 하드코딩 X.
+            # ("0.79명" → 0.79, "20717명" → 20717, "1만 2741개" → 12741, "23만 8천명" → 238000)
+            #
+            # [22:40 진단] "1만 2741개"는 _extract_numbers_from_text가 {1, 2741, 12741}처럼
+            # 한글 단위 정합값(12741)뿐 아니라 부분 숫자(1, 2741)도 같이 반환해 *set 크기 >1*이
+            # 되어 폴백 미적용 → schema value=None → 서울/경기 claim이 모두 unverifiable로 떨어짐.
+            # 정답: 한글 단위 결합값(가장 큰 수)이 거의 항상 의도된 value임. set이 여러 개면 max 사용.
+            if corrected_value is None and source_phrase:
+                _fallback_nums = _extract_numbers_from_text(source_phrase)
+                if _fallback_nums:
+                    # 단일 숫자거나 한글 단위 결합값(=max)가 그 의미 — 둘 다 max로 통합.
+                    _picked = max(_fallback_nums)
+                    if len(_fallback_nums) == 1:
+                        _msg = f"단일 숫자 {_picked} 복원"
+                    else:
+                        _msg = (
+                            f"숫자 {len(_fallback_nums)}개 중 최대값 {_picked} 복원 "
+                            f"(한글 단위 결합 추정, 후보={sorted(_fallback_nums)})"
+                        )
+                    logger.warning(
+                        f"  🔧 value=null 폴백: source_phrase={source_phrase!r}에서 "
+                        f"{_msg} (LLM이 value 누락)"
+                    )
+                    corrected_value = float(_picked)
             if was_corrected:
                 logger.warning(
                     f"  🔧 value 환산 교정: LLM={raw_value} → 교정={corrected_value} "
@@ -733,6 +881,39 @@ async def _induce_multiple(
                 is_approximate=bool(item.get("is_approximate", False)),
                 modifier=item.get("modifier") or None,
             )
+
+            # [2026-05-21] aggregation 필드 추출 — null-safe, 도메인 무관.
+            # LLM이 "평균/총합/최근 N년" 류 신호를 감지해 채우며 한국어 키워드 하드코딩 X.
+            # 모두 None이면 일반 base/derived 흐름으로 폴백. ClaimSchema 구버전 호환은 try/except.
+            _agg_op_raw = item.get("aggregation")
+            _agg_op = str(_agg_op_raw).strip().lower() if _agg_op_raw else None
+            if _agg_op in ("", "null", "none"):
+                _agg_op = None
+            _agg_window_raw = item.get("aggregation_window")
+            try:
+                _agg_window = int(_agg_window_raw) if _agg_window_raw is not None else None
+                if _agg_window is not None and _agg_window <= 0:
+                    _agg_window = None
+            except (TypeError, ValueError):
+                _agg_window = None
+            _agg_range_raw = item.get("aggregation_time_range")
+            if isinstance(_agg_range_raw, list):
+                _agg_range = [str(x).strip() for x in _agg_range_raw if x is not None and str(x).strip()]
+                _agg_range = _agg_range or None
+            else:
+                _agg_range = None
+            try:
+                ClaimSchema.model_fields["aggregation"]
+                schema_kwargs["aggregation"] = _agg_op
+                schema_kwargs["aggregation_window"] = _agg_window
+                schema_kwargs["aggregation_time_range"] = _agg_range
+            except KeyError:
+                # 구버전 ClaimSchema — 무시
+                if _agg_op:
+                    logger.warning(
+                        f"  ℹ️ aggregation={_agg_op!r} 추출됐으나 ClaimSchema에 필드 없음. "
+                        f"core/schemas.py에 aggregation/aggregation_window/aggregation_time_range 추가 필요."
+                    )
             # prev_* 필드는 schemas.py에 *추가됐을 때만* 전달
             # (구버전 schemas.py와 backward compat)
             try:
@@ -747,6 +928,69 @@ async def _induce_multiple(
                         f"  ℹ️ prev_value={prev_value} 추출됐으나 ClaimSchema에 필드 없음. "
                         f"core/schemas.py에 prev_value/prev_time_period/prev_phrase 필드 추가 필요."
                     )
+
+            # [2026-05-21] value_role 자동 추론 — schema_inductor가 분기한 *이유*를
+            # downstream planner에 명시적으로 전달. LLM이 같은 claim_text를 보고
+            # base/derived를 헷갈리는 걸 방지.
+            #
+            # [K 패치 2026-05-21] indicator suffix 우선 검사. prev_value 유무는
+            #   2차 신호로 격하. 합계출산율 0.79처럼 LLM이 *base 절대값 schema*에
+            #   prev_value=0.73을 추가 정보로 박아도 *indicator에 ~증가/~차이 같은
+            #   derived suffix가 없으면 base*로 분류.
+            #
+            #   - indicator suffix(~증가율/~비율 류) + 비율 단위 → derived_rate
+            #   - indicator suffix(~증가/~감소/~차이 류, 비율 아님)    → derived_difference
+            #   - 그 외 → base (prev_value 있어도 base — 단일 값 검증)
+            try:
+                ClaimSchema.model_fields["value_role"]
+                _ind = (item.get("indicator") or "").strip()
+                _unit = (item.get("unit") or "").strip()
+                _RATE_SUFFIXES = (
+                    "증가율", "감소율", "증감률", "변화율", "상승률", "하락률",
+                    "비율", "비중",
+                )
+                _DIFF_SUFFIXES = (
+                    "증가", "감소", "증감", "변화", "차이",
+                )
+                _is_rate_indicator = any(_ind.endswith(s) for s in _RATE_SUFFIXES)
+                _is_pct_unit = _unit in ("%", "퍼센트", "퍼센트포인트", "%p")
+                _is_diff_indicator = (
+                    any(_ind.endswith(s) for s in _DIFF_SUFFIXES)
+                    and not _is_rate_indicator
+                )
+                # [2026-05-21] aggregation 우선 분기 — LLM이 aggregation 연산자를 채웠으면
+                # base/derived 분류보다 우선. 도메인 무관 (LLM이 의미 판단).
+                _has_agg = bool(_agg_op) or bool(_agg_window) or bool(_agg_range)
+                if _has_agg:
+                    schema_kwargs["value_role"] = "aggregation"
+                    # aggregation은 단일 시점이 아닌 N개 시점 fetch이므로 prev_*는 의미 없음 → clear
+                    if schema_kwargs.get("prev_value") is not None or schema_kwargs.get("prev_time_period"):
+                        logger.info(
+                            f"  [U] aggregation 분류 → prev_value/prev_time_period clear "
+                            f"(indicator={_ind!r}, agg={_agg_op!r}, window={_agg_window!r})"
+                        )
+                        schema_kwargs["prev_value"] = None
+                        schema_kwargs["prev_time_period"] = None
+                        schema_kwargs["prev_phrase"] = None
+                elif _is_rate_indicator or _is_pct_unit:
+                    schema_kwargs["value_role"] = "derived_rate"
+                elif _is_diff_indicator:
+                    schema_kwargs["value_role"] = "derived_difference"
+                else:
+                    # base — indicator suffix가 derived가 아니면 prev_value 유무
+                    # 무관하게 base. prev_value는 후처리에서 *clear* 해서 reflect
+                    # LLM이 자율 prev fetch 시도하지 않도록 한다.
+                    schema_kwargs["value_role"] = "base"
+                    if schema_kwargs.get("prev_value") is not None or schema_kwargs.get("prev_time_period"):
+                        logger.info(
+                            f"  [K] base 분류 → prev_value/prev_time_period clear "
+                            f"(indicator={_ind!r}, was prev_value={schema_kwargs.get('prev_value')!r})"
+                        )
+                        schema_kwargs["prev_value"] = None
+                        schema_kwargs["prev_time_period"] = None
+                        schema_kwargs["prev_phrase"] = None
+            except KeyError:
+                pass  # value_role 필드 없는 구버전 — 무시
 
             schema = ClaimSchema(**schema_kwargs)
         except Exception as e:
@@ -1038,3 +1282,211 @@ def _safe_float(v: Any) -> float | None:
             except ValueError:
                 pass
     return None
+
+
+# ── [2026-05-27] regenerate_schema ───────────────────────────────────
+# replan tool용 — 초기 induction이 잘못 분류한 schema를 *표 row sample 보고* 재분류.
+#
+# 배경: schema_inductor의 초기 호출은 *원문 텍스트만* 보고 schema를 만듦. 그래서:
+#   - "강원도 의료장비 *증가 수* 52" 같은 동사형 변화량을 *base*(absolute)로 잘못 분류
+#   - 표 row에 "52"라는 절대값 row가 없음에도 LLM이 absolute로 처리
+# replan 시점엔 *실제 표 데이터*까지 봤기 때문에, "52는 row로 안 들어있고 표엔
+# 절대값 N대만 있음"을 LLM에 보여주면 → "이건 delta"로 재분류 가능.
+#
+# 호출 위치: structverify.agent.tools.replan.ReplanTool
+# 결과: 새 schema dict (또는 None). 호출자는 이걸로 claim.schema 업데이트 후
+#       planner.plan() 재호출.
+
+REGENERATE_SCHEMA_PROMPT = """당신은 통계 검증 schema 수정자입니다.
+
+초기 schema induction이 원문만 보고 만든 schema가 실제 표 데이터와 *구조적으로
+맞지 않는다*는 게 드러났습니다. 표의 row sample을 보고 **schema를 재분류**하세요.
+
+[원문 claim]
+{claim_text}
+
+[현재 schema — 초기 induction 결과]
+{original_schema_json}
+
+[실제 표에서 받은 데이터 — observation summary]
+{observations_summary}
+
+[★ 재분류 룰 — 매우 중요]
+1. claim.value가 표의 *row에 직접 매칭되는 값*인가?
+   - YES → value_role="base" (absolute claim). 그대로 유지.
+   - NO + 표에 *해당 indicator의 원시 절대값* 존재 → 계산 필요:
+     · indicator 접미사가 "증가율/감소율/증감률/변동률" → value_role="derived_rate"
+     · indicator 접미사가 "증가 수/감소 수/증감/변화량/늘었/줄었" → value_role="derived_difference"
+   - NO + 표에 *집계 단서*(다년 평균/합계 등) → value_role="aggregation"
+
+2. value_role을 *base가 아닌 것*으로 바꾸면, prev_time_period 채우기:
+   - time_period 단위가 연(예: '2024')이면 → prev_time_period = "전년" (예: '2023')
+   - 월(예: '2024-04')이면 → prev_time_period = "전년 동월" (예: '2023-04')
+   - 분기는 전년 동분기.
+
+3. 표에 *claim 시점 데이터가 없음*이 확실하면 (예: 표 PRD_DE 분포가 2021-2023뿐인데
+   claim time_period='2024') → 그건 schema 문제가 아닌 *데이터 부재* 문제.
+   schema 재분류로 해결 안 됨. 이 경우엔 value_role 그대로 두고 notes에 명시.
+
+[★ 금지]
+- value, unit, indicator는 원문 의도와 같으면 *변경 금지*.
+- 표 row에 직접 매칭되는 row가 있는데 derived로 바꾸는 것 금지 (no-op 회피).
+- 단순 retry plan을 만들기 위한 schema "복제"는 금지 — 실제로 *구조*가 바뀌어야 한다.
+
+[출력 형식 — JSON only, 다른 텍스트 금지]
+{{
+  "indicator": "...",
+  "time_period": "...",
+  "unit": "...",
+  "population": "...",
+  "value": <number>,
+  "value_role": "base | derived_rate | derived_difference | aggregation",
+  "prev_value": <number or null>,
+  "prev_time_period": "<YYYY 또는 YYYY-MM 또는 null>",
+  "prev_phrase": "<원문에서 직접 인용한 prev 단서 또는 ''>",
+  "parent_path": "...",
+  "modifier": "<범위/근사 표현 등 or null>",
+  "reason": "<왜 이렇게 재분류했는지 한 줄>"
+}}
+"""
+
+
+def _summarize_observations_for_schema(observations: list[dict]) -> str:
+    """observation list를 schema regeneration 프롬프트용으로 요약.
+
+    fetch_evidence observation에서 추출:
+      - 시도된 stat_id, 표 이름
+      - PRD_DE 분포 (어떤 시점 데이터가 있는지)
+      - ITM_NM/C2_NM unique 값 (어떤 분류가 있는지)
+      - 매칭된 sample row의 indicator + value (있으면)
+    """
+    if not observations:
+        return "(없음)"
+    lines: list[str] = []
+    for i, ob in enumerate(observations[:10], 1):  # 최대 10개
+        if not isinstance(ob, dict):
+            continue
+        action = ob.get("action", "")
+        summary = str(ob.get("summary", ""))[:160]
+        success = ob.get("success")
+        line = f"  [{i}] action={action} success={success}\n      summary={summary!r}"
+        # fetch 관련 부가 정보
+        if action == "fetch_evidence":
+            stat_id = ob.get("stat_id")
+            fv = ob.get("fetched_value")
+            ft = ob.get("fetched_time")
+            if stat_id:
+                line += f"\n      stat_id={stat_id!r}"
+            if fv is not None:
+                line += f" fetched_value={fv} time={ft!r}"
+            tried = ob.get("tried_candidates")
+            if tried:
+                line += f"\n      tried_candidates={tried}"
+        elif action == "catalog_search":
+            top3 = ob.get("candidates_top3")
+            if top3:
+                line += f"\n      top3={top3}"
+        lines.append(line)
+    return "\n".join(lines) if lines else "(없음)"
+
+
+async def regenerate_schema(
+    *,
+    claim_text: str,
+    original_schema: dict | None,
+    observations: list[dict],
+    config: dict | None = None,
+) -> dict | None:
+    """원문 + observation으로 schema 재분류.
+
+    Args:
+        claim_text: 원본 claim 문장.
+        original_schema: 초기 induction이 만든 schema dict.
+        observations: ReplanTool이 수집한 observation 요약 리스트.
+        config: 전체 config.
+
+    Returns:
+        새 schema dict (value_role 등 갱신). 실패 시 None.
+    """
+    import json
+
+    if not claim_text:
+        logger.warning("[schema_inductor.regenerate] claim_text 비어있음")
+        return None
+    orig_json = "(없음)"
+    if original_schema:
+        try:
+            orig_json = json.dumps(
+                original_schema, ensure_ascii=False, indent=2, default=str,
+            )
+        except Exception:
+            orig_json = str(original_schema)
+
+    obs_summary = _summarize_observations_for_schema(observations or [])
+
+    prompt = REGENERATE_SCHEMA_PROMPT.format(
+        claim_text=claim_text,
+        original_schema_json=orig_json,
+        observations_summary=obs_summary,
+    )
+    logger.info(
+        f"[schema_inductor.regenerate] prompt 구성 완료 ({len(prompt)}자) — "
+        f"obs={len(observations or [])}건"
+    )
+
+    llm = LLMClient(config=(config or {}).get("llm") or {})
+    try:
+        raw = await llm.generate(
+            prompt=prompt,
+            system_prompt="당신은 통계 검증 schema 수정자입니다. JSON만 응답.",
+            model_tier="heavy",
+        )
+    except Exception as e:
+        logger.warning(f"[schema_inductor.regenerate] LLM 호출 실패: {e}")
+        return None
+
+    logger.info(
+        f"[schema_inductor.regenerate] LLM 응답 본문 ↓\n"
+        f"────── SCHEMA REGEN RESPONSE START ──────\n"
+        f"{raw}\n"
+        f"────── SCHEMA REGEN RESPONSE END ──────"
+    )
+
+    # JSON 추출
+    m = re.search(r"\{[\s\S]*\}", raw or "")
+    if not m:
+        logger.warning("[schema_inductor.regenerate] JSON 블록 못 찾음")
+        return None
+    try:
+        new_schema = json.loads(m.group(0))
+    except json.JSONDecodeError as e:
+        logger.warning(f"[schema_inductor.regenerate] JSON parse 실패: {e}")
+        return None
+    if not isinstance(new_schema, dict):
+        return None
+
+    # 정규화 (필수 키 유지)
+    out: dict[str, Any] = {}
+    for k in [
+        "indicator", "time_period", "unit", "population",
+        "value", "value_role",
+        "prev_value", "prev_time_period", "prev_phrase",
+        "parent_path", "modifier",
+    ]:
+        if k in new_schema:
+            out[k] = new_schema[k]
+    # value/prev_value는 안전 float
+    if "value" in out:
+        out["value"] = _safe_float(out["value"])
+    if "prev_value" in out:
+        out["prev_value"] = _safe_float(out["prev_value"])
+
+    reason = new_schema.get("reason") or ""
+    logger.info(
+        f"[schema_inductor.regenerate] 새 schema — "
+        f"value_role={out.get('value_role')!r}, "
+        f"prev_time_period={out.get('prev_time_period')!r}, "
+        f"prev_value={out.get('prev_value')!r}, "
+        f"reason={reason[:160]!r}"
+    )
+    return out

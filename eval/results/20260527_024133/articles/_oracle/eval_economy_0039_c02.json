@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_economy_0039_c02",
+  "elapsed_sec": 199.55398392677307,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "1fc313b1-50b8-4400-b7f5-addf745934cd",
+        "claim_text": "2021년 전체 광고 산업 매출액은 6,627% 개소로 집계되었습니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "광고 산업 매출액",
+          "value": 6.627e+17,
+          "unit": "원",
+          "time_period": "2021",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": 6.527e+17,
+          "prev_time_period": "2020",
+          "parent_path": "경제 > 산업 > 광고 산업"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "1fc313b1-50b8-4400-b7f5-addf745934cd",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "2021년 전체 광고 산업 매출액이 6,627% 증가했다는 주장을 검증하고자 했으나, 해당 정보를 찾을 수 없었습니다. 이는 국가통계포털(KOSIS)에서 '광고 산업 매출액 전체 2021'이라는 검색어로 자료를 찾아보았지만, 관련 통계표를 발견하지 못했기 때문입니다. 따라서 현재로서는 이 주장의 사실 여부를 판단할 수 없습니다. \n\n해당 주장의 진위 여부를 확인하려면, 먼저 출처를 확인해야 합니다. 그리고 그 출처가 신뢰할 만한 곳인지 검토해 보세요. 만약 출처가 믿을 만하다면, 다시 한번 국가통계포털(KOSIS)에서 정확한 키워드를 입력하여 검색해 보는 것도 좋은 방법입니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

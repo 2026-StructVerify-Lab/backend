@@ -57,6 +57,12 @@ class ClaimType(str, Enum):
     RANKING = "ranking"
     """순위/상대 비교. 예: '1위', '하락폭이 가장 컸다' (여러 데이터 점)."""
 
+    AGGREGATION = "aggregation"
+    """[2026-05-21] 다년/다기간 집계 — 평균/총합/최대/최소 등.
+    예: '최근 3년 평균 …', '2022~2024년 총합 …' (N개 데이터 점 + 집계 계산).
+    도메인 무관, schema_inductor가 LLM으로 신호 감지. 시퀀스:
+    catalog_search → fetch_evidence × N → calculate(agg) → finish."""
+
     UNKNOWN = "unknown"
     """분류 불가."""
 
@@ -83,6 +89,18 @@ class ActionType(str, Enum):
 
     CALCULATE = "calculate"
     """확보한 데이터로 수식 계산 (증가율, 차이 등)."""
+
+    REPLAN = "replan"
+    """[2026-05-26] plan 자체가 틀린 경우 — claim 값이 표에 직접 row로 없고
+    *계산해야 하는* 경우 (예: '증가 수 52'는 row가 아니라 current-prev delta).
+    기존 fallback(try_ids/catalog retry/row_matcher 등)이 모두 같은 plan 안에서
+    답 찾는 거라면, replan은 *plan을 통째로 새로 만든다*.
+
+    호출 조건:
+      - 모든 catalog 후보 fetch 실패 + catalog retry도 소진
+      - 표 sample을 보고 LLM이 'claim 값이 row로 없는 *계산 대상*'이라 판단할 때
+      - per-claim 최대 2회 (무한 replan 방지)
+    """
 
     FINISH = "finish"
     """판정 확정 후 종료."""

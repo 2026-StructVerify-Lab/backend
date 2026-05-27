@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_automotive_technology_0001_c02",
+  "elapsed_sec": 87.75777196884155,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "f26a008a-5045-4396-834c-a9a668bcdcdb",
+        "claim_text": "1996년 한국의 운송 관련 서비스업 업체 수는 7개였다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "운송 관련 서비스업 업체 수",
+          "value": 7.0,
+          "unit": "개",
+          "time_period": "1996",
+          "population": "한국 전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "경제/산업 > 산업 > 서비스업"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "f26a008a-5045-4396-834c-a9a668bcdcdb",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"1996년 한국의 운송 관련 서비스업 업체 수는 7개였다\"라는 것을 검증하기 위해 국가통계포털(KOSIS)에서 '운송 관련 서비스업 업체 수'와 관련된 통계 자료를 찾아보았지만, 해당 연도의 자료를 찾을 수 없었습니다. 따라서 이 주장은 현재로서는 검증이 불가능합니다. \n\n추가적인 정보나 출처를 제공해 주신다면 보다 정확한 검증이 가능할 것입니다. 또한, 독자분들께서는 필요한 경우 직접 KOSIS 홈페이지(https://kosis.kr/) 에 접속하여 관련 키워드를 검색함으로써 원하는 통계 자료를 찾아볼 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

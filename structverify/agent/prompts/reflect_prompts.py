@@ -59,15 +59,22 @@ input: {{"query": "<검색 키워드>", "category": ["<분류>"], "top_k": 5}}
 
 ### `fetch_evidence` — 후보 표에서 실제 수치 조회
 input: {{
-  "candidate_id": "<catalog_search 결과의 stat_id 예: DT_1B8000G>",
+  "candidate_id": "<catalog_search 결과의 stat_id>",
   "params": {{
     "indicator": "<지표명, claim과 일치>",
     "time_period": "<YYYY-MM 또는 YYYY>",
     "prdSe": "<M / Q / Y>",
     "startPrdDe": "<YYYYMM 또는 YYYY>",
-    "endPrdDe": "<startPrdDe와 같게>"
+    "endPrdDe": "<startPrdDe와 같게>",
+    "match_criteria": {{"<column_name>": "<expected_substring>"}}
   }}
 }}
+
+★ `match_criteria` (선택, 강력 권장 — 두 번째 fetch부터):
+   직전 fetch의 *row sample*에 노출된 컬럼명을 보고 어떤 컬럼이 어떤 값과
+   매칭돼야 하는지를 dict로 명시하면, 모든 criteria를 만족하는 row만 채택된다.
+   *컬럼명은 row sample에 실제 등장한 키를 그대로 사용* — 도메인 무관.
+   매칭 row가 한 개도 없으면 fetch 실패 처리 → 다음 fallback 표로 자동 진행.
 
 ### `calculate` — 확보된 데이터로 수식 계산 (growth_rate, difference에 필수)
 input: {{
@@ -87,6 +94,50 @@ input: {{
   "data_points": [{{"indicator": "...", "time": "...", "resolved_value": ..., "source": "kosis:DT_..."}}]
 }}
 
+### `replan` — *plan 자체 갈아끼우기* (최후의 수단)
+input: {{"reason": "<왜 replan이 필요한지 한 줄>"}}
+
+★ **호출 조건 (엄격)** — 아래 조건이 *모두* 만족될 때만 호출:
+  1. 여러 catalog 후보를 fetch 시도했는데 *모두* 실패 (관련성 거부 또는 row 매칭 0건)
+  2. catalog_search 재호출(query_rewrite/force_explore)도 시도했는데 추가 후보 없음
+  3. observation에서 받은 표들의 row sample을 확인했지만, *claim의 정확한 값*이
+     row로 *직접 존재하지 않음*. 예: claim="증가 수 52"인데 표에는 "절대값 N대"만 있음.
+
+★ **호출 효과**: planner LLM이 observation을 보고 *새 plan*을 만든다.
+  - claim_type을 더 적절하게 변경 가능 (예: absolute → difference)
+  - calculation_formula 추가 (예: 'current - prev')
+  - 부족한 시점만 fetch하도록 새 steps 생성
+  - 이후 iter는 *완전히 새 plan*으로 진행
+
+★ **호출 금지**:
+  - 단순히 fetch 한두 번 실패했다고 호출 X (catalog retry 먼저)
+  - claim 값이 row로 *직접 있는* 케이스(absolute) X
+  - per-claim **최대 2회** (tool 내부에서 강제). 그 이상은 거부됨.
+
+★ **호출 후**: 새 plan으로 *다시* fetch_evidence/calculate를 진행. replan 호출 자체로
+  검증이 끝나지 않음 — 새 plan을 *따르는 것*이 핵심.
+
+★★ verdict 판정 기준 (sub-claim 단위로만, 매우 중요) ★★
+
+이 검증은 **하나의 sub-claim 단위**입니다. 즉 위에 적힌 schema.value(기사 주장값)와
+fetch_evidence가 가져온 official value 둘 사이의 *수치 일치 여부*만 판단하세요.
+
+claim_text 원문엔 *비교 명제*("A가 B보다 적다", "전체 평균과 차이가 크다" 등)가
+포함될 수 있지만, **그건 별개의 상위 검증 단계**입니다. 이 sub-claim 단위에선
+*무시*하고, *오직 schema.value vs evidence.value 의 객관적 수치 일치*만 보세요.
+
+- **match**: |schema.value - evidence.value| / |schema.value| < 0.05 (5% 이내)
+             단위가 의미상 같으면 통과 (예: schema "개" vs evidence "대" — 둘 다
+             수량 단위라 같음). 예: schema=11573, evidence=11573 → 100% 일치 → match.
+- **mismatch**: 오차 5% 초과. 예: schema=20717, evidence=4165 → 큰 차이 → mismatch.
+- **partial**: 시점/단위 부분 일치 등 매우 드문 경우만.
+- **unverifiable**: evidence 0건 또는 매칭 row 없음.
+
+★ explanation 작성 시 주의:
+  - "이 sub-claim의 schema.value=X vs official=Y → 일치/불일치" 처럼 *수치 단위*로 단순 작성.
+  - "주장 전체가 사실이다" 같은 *거시 진위 판단 금지*.
+  - 다른 sub-claim의 값을 끌어와 비교하지 마세요 (예: 경기 claim에서 강원 1336과 비교 X).
+
 ## 결정 가이드
 
 **iter 1 (시작)**: 보통 catalog_search 먼저.
@@ -95,15 +146,38 @@ input: {{
 fetch_evidence 호출. params는 claim의 indicator/time_period 그대로 넣되,
 prdSe는 time_period 형식에 맞춰 (YYYY-MM이면 "M", YYYY-Q1이면 "Q", YYYY면 "Y").
 
-**fetch_evidence 직후**:
-  - evidence value가 claim과 일치하고 시점도 맞음 → finish (match)
-  - 값은 받았는데 시점/단위가 잘못됨 → 다른 row 시도 (다른 indicator/time params로 또 fetch_evidence)
-  - claim_type이 growth_rate/difference이고 prev 시점 데이터 아직 없음 → 또 fetch_evidence (prev_time_period로)
-  - 다른 표를 시도해야겠음 → catalog_search 다시
+**fetch_evidence 직후 (claim_type별로 다름 — plan을 따르세요)**:
 
-**두 값 다 모음 (current + prev)**: calculate (formula 적용) → finish.
+- **claim_type=absolute**: 단일 값 검증. evidence value가 claim의 time_period와 매칭되면 → finish.
+  *calculate 호출 금지* — 절대값 검증에 수식이 필요 없음.
+  ★★ **prev_time_period 또는 다른 시점 fetch 절대 금지**. absolute claim은 *오직
+     claim.time_period* 한 시점만 필요. "지난 달", "전년", "지난해 같은 달", "이전 시점"
+     같은 *derived 의도*를 가지지 말 것. 다른 sub-claim(증가율)이 같은 sent에 있어도
+     이 claim과 무관. 같은 sent의 다른 claim은 별도 처리됨.
+  ★★ claim.time_period의 evidence가 이미 fetch 됐다면 *그 자리에서 finish*.
+     같은 indicator 다른 시점을 또 fetch하지 말 것 (헛돌이).
+
+- **claim_type=growth_rate / difference**: prev + current 두 값 다 받은 후에만 calculate
+  → finish. prev 아직 없으면 또 fetch_evidence (prev_time_period로).
+  ★ fetch 시점은 *오직* claim.time_period + claim.prev_time_period 두 개만.
+     인접 월/분기 같은 *임의 시점*은 fetch 금지.
+
+- **claim_type=comparison / ranking**: N개 비교 대상을 *각각 fetch*만 하고 → finish.
+  비교 자체는 *부등호*이지 수식이 아니므로 **calculate 호출 절대 금지**. 차이값을
+  구하지 마세요 — 사용자 claim은 "A < B"의 boolean이지 "B - A"의 차이가 아닙니다.
+
+- **값/시점/단위가 안 맞음**: match_criteria로 row 좁히기 또는 다른 표로 catalog_search 다시.
 
 **시도 횟수 거의 다 씀 (iter >= max-2)** 또는 *데이터 도저히 못 찾음*: finish (unverifiable).
+
+★ **plan의 initial_steps를 우선 따르세요**. plan에 finish가 박혀있으면 그 시점에
+   finish 호출. plan을 *넘어선* 액션(특히 plan.claim_type과 무관한 calculate)은
+   부르지 마세요.
+
+★★ **finish 조기 종료 기준 (latency 최적화)**:
+   - absolute claim: claim.time_period 매칭 evidence를 *1개라도 success*로 받으면 즉시 finish.
+   - growth_rate / difference: prev + current 두 값 다 받으면 calculate → finish.
+   - 더 받아도 결과 안 바뀜. 추가 fetch는 헛돌이.
 
 ## ★ 중복 action 방지 (매우 중요)
 
@@ -129,7 +203,7 @@ memory를 보고 **이미 같은 action을 같은 input으로 호출한 기록�
 ```json
 {{
   "thought": "현재 상태 + 다음 단계 추론 (1-3문장)",
-  "action": "catalog_search | fetch_evidence | calculate | read_original | finish",
+  "action": "catalog_search | explore_catalog | fetch_evidence | calculate | read_original | replan | finish",
   "input": {{...}},
   "confidence_so_far": 0.0,
   "proposed_verdict": null,
@@ -196,10 +270,16 @@ def _format_last_observation(last_observation: Any) -> str:
                     if k in matched
                 }
                 parts.append(f"- matched_row: {key_fields}")
+                # match_criteria 박을 때 활용할 *전체 컬럼명* 노출 — 도메인 무관
+                parts.append(
+                    f"- available columns: {list(matched.keys())}  "
+                    f"# match_criteria에 사용 가능"
+                )
             rows = ev.get("rows") or []
-            # row sample (매칭 실패 케이스에서 LLM이 직접 보고 결정하라고)
-            if rows and not matched:
-                sample_keys = list((rows[0] or {}).keys())[:8]
+            # row sample은 매칭 성공/실패 둘 다 노출. 성공 시에도 LLM이 *다른
+            # 매칭 후보가 있나* 보고 다음 fetch에 정밀한 match_criteria를 박을 수 있음.
+            if rows:
+                sample_keys = list((rows[0] or {}).keys())[:10]
                 sample = [
                     {k: r.get(k) for k in sample_keys if k in r}
                     for r in rows[:3]
@@ -259,6 +339,14 @@ def build_reflect_prompt(
     if plan is not None:
         ct = getattr(plan, "claim_type", None)
         claim_type = ct.value if hasattr(ct, "value") else str(ct or "unknown")
+
+    # [2026-05-25] ABSOLUTE claim에선 prev_value/prev_time을 prompt에서 *제거*.
+    # 이유: LLM이 prev 정보를 보고 "증가율 검증"이라 잘못 판단해 작년 동월 fetch를
+    # 시도함 (실제 케이스: claim_type=ABSOLUTE인데 LLM이 2024-04 fetch 자행).
+    # 같은 sent 안 derived sub-claim의 메타가 잔재로 남은 것이라, absolute에선 안 봐도 됨.
+    if claim_type == "absolute":
+        prev_value = "(absolute claim — 사용 안 함)"
+        prev_time = "(absolute claim — 사용 안 함)"
         req = getattr(plan, "required_data", []) or []
         req_simplified = []
         for d in req:

@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_healthcare_0034_c09",
+  "elapsed_sec": 102.71561408042908,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "7c6b980c-ea37-4c67-8c89-6c3f9f059b96",
+        "claim_text": "전국적으로 급성심근경색증 입원 환자의 병원 내·외 30일 치명률은 2023년에 9.6%였습니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "급성심근경색증 입원 환자 치명률",
+          "value": 9.6,
+          "unit": "%",
+          "time_period": "2023",
+          "population": "전국",
+          "value_role": "derived_rate",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "보건 > 질병관리 > 심혈관질환 관리"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "7c6b980c-ea37-4c67-8c89-6c3f9f059b96",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"전국적으로 급성심근경색증 입원 환자의 병원 내·외 30일 치명률은 2023년에 9.6%였습니다.\" 에 대한 공식 통계를 찾을 수 없어 검증이 불가능했습니다. 이와 관련하여, 대한민국 통계청 KOSIS(국가통계포털)에서 '급성심근경색증 입원 환자 치명률 전국 2023'이라는 검색어로 찾아보았지만 해당 정보를 얻지 못했습니다. 따라서 보다 정확한 사실 여부를 확인하기 위해서는 추가적인 조사가 필요해 보입니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

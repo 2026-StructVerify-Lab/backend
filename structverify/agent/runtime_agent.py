@@ -44,10 +44,32 @@ Thought → Action(Tool Call) → Observation 순환을 통해 파이프라인 �
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from structverify.core.schemas import (
     Claim, SIRDocument, VerificationResult, GraphNode, GraphEdge, Evidence,
     GraphNodeType, GraphEdgeType,
 )
+
+
+def _cap_text(s: str, max_chars: int) -> str:
+    """긴 텍스트를 head/tail로 잘라 안전한 크기로 반환.
+
+    LLM prompt가 수십 KB 넘는 경우가 흔해 raw 저장 시 디스크 폭발 방지.
+    중간을 잘라 head 70% + truncation 표시 + tail 30%로 유지 (디버깅엔
+    양끝이 가장 유용).
+    """
+    if not s or len(s) <= max_chars:
+        return s or ""
+    head_len = int(max_chars * 0.7)
+    tail_len = max_chars - head_len - 80
+    if tail_len <= 0:
+        return s[:max_chars]
+    return (
+        s[:head_len]
+        + f"\n\n... [{len(s) - max_chars}자 truncated] ...\n\n"
+        + s[-tail_len:]
+    )
 from structverify.detection.domain_classifier import classify_domain
 from structverify.detection.claim_detector import detect_claims
 from structverify.detection.schema_inductor import induce_schemas
@@ -62,6 +84,31 @@ from structverify.verification.verifier import verify_claim
 from structverify.explanation.explainer import generate_explanation
 from structverify.memory import DocumentWorkingMemory  # [머지 이수민 main]
 from structverify.utils.logger import get_logger
+
+
+def _claims_from_all_sentences(sir_doc: "SIRDocument") -> list["Claim"]:
+    """[2026-05-27 oracle mode] detect_claims 우회 — 모든 문장을 Claim 객체로.
+
+    FEVER/SciFact 스타일의 oracle setting (claim_text를 직접 input으로 받음)
+    평가 시 사용. config.eval.bypass_detection=true일 때만 호출됨.
+    """
+    out: list[Claim] = []
+    for block in (sir_doc.blocks or []):
+        for sent in (block.sentences or []):
+            txt = (sent.text or "").strip()
+            if not txt:
+                continue
+            try:
+                out.append(Claim(
+                    doc_id=sir_doc.doc_id,
+                    block_id=block.block_id,
+                    sent_id=sent.sent_id,
+                    claim_text=txt,
+                    check_worthy_score=1.0,  # oracle이므로 만점
+                ))
+            except Exception:
+                continue
+    return out
 
 logger = get_logger(__name__)
 
@@ -127,8 +174,22 @@ class RuntimeAgent:
         # Thought: "검증 가능한 주장 문장을 찾아야 한다"
         # Observation: Claim 객체 리스트
         # TODO [김예슬]: domain-packs 기반 도메인별 few-shot 예시 주입
-        claims = await detect_claims(sir_doc, self.config)
-        logger.info(f"[Agent A] Step 4 detect_claims → {len(claims)}건")
+        #
+        # [2026-05-27] Oracle mode (evaluation용) — config.eval.bypass_detection=true이면
+        # detect_claims LLM 필터링을 건너뛰고 *모든 문장*을 claim으로 변환. FEVER/SciFact
+        # style의 oracle claim setting에 사용. 일반 검증 흐름엔 영향 X (config 기본 false).
+        _bypass_det = bool(
+            (self.config.get("eval", {}) or {}).get("bypass_detection", False)
+        )
+        if _bypass_det:
+            claims = _claims_from_all_sentences(sir_doc)
+            logger.info(
+                f"[Agent A] Step 4 detect_claims (BYPASSED — oracle mode) → "
+                f"{len(claims)}건 (모든 문장 claim 변환)"
+            )
+        else:
+            claims = await detect_claims(sir_doc, self.config)
+            logger.info(f"[Agent A] Step 4 detect_claims → {len(claims)}건")
 
         if not claims:
             logger.info("[Agent A] 검증 가능한 주장 없음 — 파이프라인 종료")
@@ -211,8 +272,19 @@ class RuntimeAgent:
             (self.config.get("agent") or {}).get("enabled", False)
         )
 
-        # agent 경로에서 쓸 문서 원문 (planner가 source_text로 사용)
-        source_text = self._get_source_text(sir_doc)
+        # agent 경로에서 쓸 문서 원문 (planner가 source_text로 사용 + workspace의
+        # source.txt 저장).
+        # [2026-05-21] sir_doc.raw_text(P10에서 추가, 원본 markdown/줄바꿈 포함)
+        # 우선. 없으면 _get_source_text(sir_doc)가 sentence들을 공백 join한 결과.
+        # 이유: workspace.initialize가 source.txt에 이 값을 저장하는데, sv_platform이
+        # /v1/jobs 폴링 시 Job.source_data(=raw_text)와 source.txt를 _normalize_ws
+        # 비교로 매칭. sentence join은 markdown 단락/리스트 구조 손실로 URL 추출본과
+        # 형태가 달라 매칭 실패 → 프론트 실시간 partial claim 안 뜸. text 입력은
+        # 단순해서 우연히 비슷했을 뿐.
+        source_text = (
+            getattr(sir_doc, "raw_text", None)
+            or self._get_source_text(sir_doc)
+        )
         anchor_year = (
             temporal_graph.get_anchor_year() if temporal_graph else None
         )
@@ -289,12 +361,63 @@ class RuntimeAgent:
                 logger.info(f"[Agent A] Step 8 verify_claim → {result.verdict.value}")
                 return result, ev_nodes, ev_edges
 
-        # 병렬 실행 — 결과는 claim 순서대로 보장됨 (gather 순서 유지)
-        _parallel = await asyncio.gather(
-            *[process_one_claim(c) for c in claims]
+        # ── [Dependency Planning 2026-05-21] level 기반 실행 ──
+        # 한 문장에서 분기된 base/derived sub-claim, 또는 같은 indicator를
+        # 공유하는 claim들을 *순차 레벨*로 묶어 evidence 재활용.
+        #   Level 1 (병렬): base claims
+        #   Level 2 (병렬): derived_rate / derived_difference claims
+        # Level 간 verified_facts / successful_stat_ids 캐시가 살아 있어 derived가
+        # base의 fetch 결과를 자동 재활용. 같은 level 안에선 기존대로 Semaphore(3)
+        # 병렬 유지.
+        from structverify.agent.dependency_planner import build_execution_levels
+        _exec_levels = build_execution_levels(claims)
+        logger.info(
+            f"[Agent A] dependency planning: {len(_exec_levels)} levels, "
+            f"sizes={[len(lvl) for lvl in _exec_levels]}"
         )
+
+        # claim_id → 결과 매핑 (원래 claim 순서대로 정렬 위해)
+        _results_by_id: dict[Any, tuple] = {}
+        for _lvl_idx, _level_claims in enumerate(_exec_levels):
+            if not _level_claims:
+                continue
+            logger.info(
+                f"[Agent A] Level {_lvl_idx + 1}/{len(_exec_levels)}: "
+                f"{len(_level_claims)}개 claim 병렬 시작"
+            )
+            _parallel = await asyncio.gather(
+                *[process_one_claim(c) for c in _level_claims]
+            )
+            for _c, _out in zip(_level_claims, _parallel):
+                _results_by_id[_c.claim_id] = _out
+            logger.info(
+                f"[Agent A] Level {_lvl_idx + 1} 완료 — verified_facts/"
+                f"successful_stat_ids 캐시가 다음 level로 전파됨"
+            )
+
+            # ── [2026-05-25 패치 X] derived prev_time prefetch ──
+            # Level 1(base) 끝난 후 Level 2+(derived)가 필요로 하는 prev_time_period
+            # 시점들을 *시스템이 미리 fetch*해 verified_facts에 저장. derived loop이
+            # 그 자리에서 캐시 적중하므로 재fetch 안 함.
+            #
+            # 배경: A 패치(reflect prompt에서 absolute claim 시 prev 시점 fetch 금지)로
+            # base claim이 prev 시점을 fetch하지 않게 됐는데, 그러면 derived가 또 직접
+            # fetch해야 함. 이전엔 LLM 헛돌이로 우연히 prev도 fetch되어 cache 풍부했음.
+            # 이제 *시스템이 명시적으로* prev 시점만 미리 잡아 둠.
+            try:
+                await self._prefetch_derived_prev_times(
+                    base_claims=_level_claims,
+                    future_levels=_exec_levels[_lvl_idx + 1:],
+                    workspace=workspace,
+                    memory=memory,
+                )
+            except Exception as _e:
+                logger.debug(f"[Agent A] derived prev prefetch 실패 (무시): {_e}")
+
+        # 원래 claim 순서대로 정렬 (results 인덱스 보존)
         results: list[VerificationResult] = []
-        for _result, _ev_nodes, _ev_edges in _parallel:
+        for _c in claims:
+            _result, _ev_nodes, _ev_edges = _results_by_id[_c.claim_id]
             results.append(_result)
             all_nodes.extend(_ev_nodes)
             all_edges.extend(_ev_edges)
@@ -362,6 +485,161 @@ class RuntimeAgent:
 
     # ── [Phase D] Agent Loop 경로 헬퍼 ──────────────────────────────────────
 
+    async def _prefetch_derived_prev_times(
+        self,
+        base_claims: list,
+        future_levels: list[list],
+        workspace: Any,
+        memory: Any,
+    ) -> None:
+        """[2026-05-25 패치 X] base 레벨이 끝난 후, 후속 derived 레벨의
+        prev_time_period 시점들을 시스템이 미리 fetch해 verified_facts에 저장.
+
+        목적: derived(증가율/차이) claim의 loop이 prev 시점을 캐시에서 적중하도록.
+              이전엔 LLM 헛돌이로 base 처리 중 prev도 fetch됐었지만, A 패치 이후
+              base는 자기 시점만 정확히 fetch 함. 그래서 derived가 prev 재fetch
+              필요해진 부작용을 시스템이 명시적으로 보완.
+
+        흐름:
+          1) future_levels의 모든 derived claim에서 (indicator_base, prev_time_period,
+             population, unit) 추출 (indicator는 derived suffix strip).
+          2) workspace.lookup_verified_fact로 이미 있는지 확인.
+          3) 없으면 base claim의 successful_stat_id를 1순위로 KOSISDataSource.fetch_evidence
+             직접 호출. 결과를 workspace.append_verified_fact + sibling_evidence 저장.
+        """
+        if not future_levels:
+            return
+        from structverify.agent.workspace import _strip_derived_suffix
+
+        # 1) prefetch 대상 수집 — 중복 제거
+        _targets: dict[tuple[str, str, str, str], dict] = {}
+        for _next_lvl in future_levels:
+            for _dc in _next_lvl:
+                _sch = getattr(_dc, "schema", None)
+                if _sch is None:
+                    continue
+                _ind = (getattr(_sch, "indicator", "") or "").strip()
+                _prev_t = (getattr(_sch, "prev_time_period", "") or "").strip()
+                if not _ind or not _prev_t:
+                    continue
+                _pop = (getattr(_sch, "population", "") or "").strip()
+                _unit = (getattr(_sch, "unit", "") or "").strip()
+                _ind_base = _strip_derived_suffix(_ind)
+                _key = (_ind_base, _prev_t, _pop, _unit)
+                if _key not in _targets:
+                    _targets[_key] = {
+                        "indicator": _ind_base,
+                        "time_period": _prev_t,
+                        "population": _pop,
+                        "unit": _unit,
+                        "sent_id": str(getattr(_dc, "sent_id", "") or ""),
+                    }
+
+        if not _targets:
+            return
+
+        # 2) 이미 캐시된 건 skip
+        _to_fetch: list[dict] = []
+        for _t in _targets.values():
+            try:
+                _hit = workspace.lookup_verified_fact(
+                    _t["indicator"], _t["time_period"],
+                    unit_hint=_t["unit"] or None,
+                    population=_t["population"] or None,
+                )
+            except Exception:
+                _hit = None
+            if _hit is None:
+                _to_fetch.append(_t)
+
+        if not _to_fetch:
+            logger.info(
+                f"[Agent A] derived prev prefetch: {len(_targets)}개 시점 — "
+                f"모두 이미 verified_facts에 있음. skip."
+            )
+            return
+
+        logger.info(
+            f"[Agent A] derived prev prefetch 시작: {len(_to_fetch)}개 (indicator, prev_time) "
+            f"미리 fetch (예: {_to_fetch[0]['indicator']!r} {_to_fetch[0]['time_period']!r})"
+        )
+
+        # 3) base의 successful stat_id 1순위로 fetch
+        try:
+            _prior_stat_ids = workspace.read_successful_stat_ids() or []
+        except Exception:
+            _prior_stat_ids = []
+        if not _prior_stat_ids:
+            logger.info(
+                f"[Agent A] derived prev prefetch skip: base에서 successful_stat_id 없음."
+            )
+            return
+
+        _stat_id = _prior_stat_ids[0]
+
+        # KOSISDataSource를 *직접* 호출 (loop tool wrap 없이) — verified_facts 저장만 목적
+        _kosis_source = None
+        try:
+            from structverify.retrieval.registry import build_datasource
+            import structverify.retrieval.kosis_source  # noqa: F401 — @register_datasource 트리거
+            _ds_cfg = (self.config.get("data_sources") or {}).get("kosis", {}) or {}
+            _kosis_source = build_datasource("kosis", config=_ds_cfg)
+        except Exception as _e:
+            logger.info(f"[Agent A] derived prev prefetch skip: KOSISDataSource 인스턴스 실패 — {_e}")
+            return
+        if _kosis_source is None:
+            return
+
+        for _t in _to_fetch:
+            _params = {
+                "indicator": _t["indicator"],
+                "time_period": _t["time_period"],
+                "population": _t["population"] or None,
+                "unit_hint": _t["unit"] or None,
+            }
+            try:
+                _ev = await _kosis_source.fetch_evidence(
+                    candidate_id=_stat_id, params=_params, workspace=workspace,
+                )
+            except Exception as _e:
+                logger.debug(
+                    f"[Agent A] derived prev prefetch fetch 실패: {_t} stat={_stat_id} — {_e}"
+                )
+                continue
+            if _ev is None:
+                continue
+            _val = _ev.get("value") if hasattr(_ev, "get") else getattr(_ev, "value", None)
+            if _val is None:
+                continue
+
+            # verified_facts에 저장
+            _fact = {
+                "indicator": _t["indicator"],
+                "time_period": _t["time_period"],
+                "population": _t["population"] or "",
+                "value": _val,
+                "unit": (
+                    _ev.get("unit") if hasattr(_ev, "get") else getattr(_ev, "unit", "")
+                ) or "",
+                "source": f"KOSIS:{_stat_id}",
+                "claim_id": "prefetch",
+                "verdict": "prefetch",
+            }
+            try:
+                workspace.append_verified_fact(_fact)
+                # sibling_evidence에도 같은 sent_id로 박아 두면 derived loop이 즉시 활용
+                if _t["sent_id"]:
+                    workspace.record_sibling_evidence(
+                        sent_id=_t["sent_id"], role="base", evidence=_fact,
+                    )
+                logger.info(
+                    f"[Agent A] derived prev prefetch 성공: "
+                    f"indicator={_t['indicator']!r} time={_t['time_period']!r} "
+                    f"value={_val} (stat_id={_stat_id})"
+                )
+            except Exception as _e:
+                logger.debug(f"[Agent A] derived prev prefetch verified_fact 저장 실패: {_e}")
+
     def _get_source_text(self, sir_doc: "SIRDocument") -> str:
         """SIR 문서에서 원문 텍스트 복원 — planner의 source_text로 사용."""
         parts: list[str] = []
@@ -410,13 +688,34 @@ class RuntimeAgent:
 
         try:
             # 1) workspace 준비
+            # [2026-05-21] scope에 따라 workspace 격리 단위 결정:
+            #   - "doc_hash" (default): claim.doc_id (= md5(raw_text))
+            #     같은 본문이면 캐시 공유. KOSIS fetch 재사용으로 빠름.
+            #   - "job_id" : ws_cfg.external_job_id (sv_platform이 set) 또는 fresh UUID.
+            #     매 요청 cold start로 정확성↑.
             ws_cfg = dict(agent_cfg.get("workspace") or {})
+            _ws_scope = str(ws_cfg.get("scope") or "doc_hash").strip().lower()
+            if _ws_scope == "job_id":
+                _external = ws_cfg.get("external_job_id")
+                if _external:
+                    _ws_job_id = str(_external)
+                else:
+                    from uuid import uuid4 as _uuid4
+                    _ws_job_id = str(_uuid4())
+                    logger.info(
+                        f"[Agent A] workspace scope='job_id'인데 external_job_id 미제공 "
+                        f"→ fresh UUID 생성: {_ws_job_id}"
+                    )
+            else:
+                # "doc_hash" — 기존 동작 (text-hash 기반 캐시 재사용)
+                _ws_job_id = str(getattr(claim, "doc_id", "") or "job")
             workspace = build_workspace(
-                job_id=str(getattr(claim, "doc_id", "") or "job"),
+                job_id=_ws_job_id,
                 config=ws_cfg,
             )
-            if not workspace.is_initialized():
-                workspace.initialize(source_text=source_text or "")
+            # [P23 2026-05-22] is_initialized 체크 제거 — initialize가 idempotent.
+            # source.txt를 매번 raw_text로 덮어씀 (stale 방지). meta는 변경 없음.
+            workspace.initialize(source_text=source_text or "")
             workspace.create_claim_dir(
                 claim.claim_id, claim_data=claim.model_dump(mode="json")
             )
@@ -436,11 +735,34 @@ class RuntimeAgent:
             from structverify.utils.llm_client import LLMClient
             plan_llm = LLMClient(config=llm_cfg)
 
+            # [2026-05-27] LLM 원본 입출력을 workspace에 영구 저장 → 프론트가
+            # "AI 콘솔" 탭에서 lazy fetch. 한 LLM 호출당 1 JSON 파일.
+            # 사이즈 안전망: prompt/response 각각 60KB로 head/tail cap.
+            def _save_llm_trace(name: str, prompt: str, response: str) -> None:
+                try:
+                    payload = {
+                        "name": name,
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "prompt": _cap_text(prompt, 60_000),
+                        "response": _cap_text(response, 60_000),
+                        "prompt_chars": len(prompt or ""),
+                        "response_chars": len(response or ""),
+                    }
+                    workspace.write_observation(
+                        claim.claim_id,
+                        name=f"llm_traces/{name}",
+                        data=payload,
+                    )
+                except Exception as _e:
+                    logger.debug(f"[runtime_agent] llm_trace 저장 실패 ({name}): {_e}")
+
             async def llm_call_for_plan(prompt: str) -> str:
-                return await plan_llm.generate(
+                _resp = await plan_llm.generate(
                     prompt=prompt,
                     system_prompt="검증 계획 수립 전문가. JSON으로만 답하세요.",
                 )
+                _save_llm_trace("planner", prompt, _resp or "")
+                return _resp
 
             planner = Planner(
                 llm_call=llm_call_for_plan,
@@ -474,8 +796,13 @@ class RuntimeAgent:
             #   mode='deterministic'이면 reflect_fn=None (기존 동작 유지).
             reflect_fn = None
             if loop_mode == "reflect":
+                # iter별로 파일명이 겹치지 않게 counter — Reflect는 매 iter 호출됨.
+                _reflect_call_counter = {"n": 0}
+
                 async def llm_call_for_reflect(prompt: str) -> str:
-                    return await plan_llm.generate(
+                    _reflect_call_counter["n"] += 1
+                    _n = _reflect_call_counter["n"]
+                    _resp = await plan_llm.generate(
                         prompt=prompt,
                         system_prompt=(
                             "당신은 사실검증 ReAct 에이전트입니다. "
@@ -483,6 +810,8 @@ class RuntimeAgent:
                             "JSON으로만 답하세요."
                         ),
                     )
+                    _save_llm_trace(f"reflect_call_{_n:02d}", prompt, _resp or "")
+                    return _resp
 
                 reflect_fn = ReflectAgent(
                     llm_call=llm_call_for_reflect,
@@ -511,20 +840,182 @@ class RuntimeAgent:
             # 6) AgentVerdict → VerificationResult 변환
             #    [v6.17] agent_loop이 검증에 쓴 KOSIS 데이터(data_points)를
             #    Evidence로 복원 → UI '공식 통계 출처' 박스에 표시됨.
+            # [2026-05-21 P7] primary/supporting 분리:
+            #   - primary: claim.schema.time_period와 매칭되는 시점의 fetch
+            #   - supporting: derived claim에서 함께 쓰인 *다른 시점* fetch
+            #     (예: 차이/증가율 검증의 prev 시점)
+            #   base claim은 supporting 비움 (헛돌이 prev fetch 노이즈 제거).
             agent_evidence = None
+            supporting_evidence: list[Evidence] = []
             _ev_category = None  # 도메인 가드용 — Evidence 스키마엔 없는 필드
+
+            def _parse_stat_id(src: str | None) -> str | None:
+                if not src:
+                    return None
+                s = str(src).strip()
+                if ":" in s:
+                    return s.split(":", 1)[1].strip() or None
+                return s or None
+
+            def _norm_time(t: str | None) -> str:
+                return str(t or "").replace("-", "").replace(".", "").strip()
+
+            # ── 1) 후보 evidence 수집 (data_points + workspace fetch obs + sibling_evidence) ──
+            _claim_target_time = (
+                getattr(claim.schema, "time_period", None) if claim.schema else None
+            )
+            _claim_role = (
+                getattr(claim.schema, "value_role", None) if claim.schema else None
+            ) or ""
+            _is_derived = _claim_role in ("derived_rate", "derived_difference")
+            _claim_sent_id = str(getattr(claim, "sent_id", "") or "").strip()
+
+            candidates: list[dict] = []
             dps = getattr(verdict, "data_points", None) or []
-            if dps:
-                dp = dps[0]  # 단일 fetch — 첫 data point가 검증 근거
-                src = (dp.source or "")
-                stat_id = src.split(":", 1)[1] if ":" in src else (src or None)
-                _ev_category = getattr(dp, "category_path", None)
+            for _dp in dps:
+                _val = getattr(_dp, "resolved_value", None)
+                if _val is None:
+                    continue
+                _sid = _parse_stat_id(getattr(_dp, "source", None))
+                _t = (getattr(_dp, "source_time", None) or getattr(_dp, "time", "") or "")
+                candidates.append({
+                    "stat_id": _sid,
+                    "value": _val,
+                    "unit": getattr(_dp, "resolved_unit", None),
+                    "time": str(_t),
+                    "category": getattr(_dp, "category_path", None),
+                    "origin": "data_point",
+                })
+
+            # workspace의 모든 fetch observation에서 evidence 수집 (헛돌이 fetch도 포함됨)
+            try:
+                for _obs_name in workspace.list_observations(claim.claim_id):
+                    if "fetch" not in _obs_name.lower():
+                        continue
+                    _obs = workspace.read_observation(claim.claim_id, _obs_name)
+                    if not isinstance(_obs, dict):
+                        continue
+                    _ev = (_obs.get("output") or {}).get("evidence") or _obs.get("evidence") or {}
+                    if not isinstance(_ev, dict):
+                        continue
+                    _val = _ev.get("value")
+                    if _val is None:
+                        continue
+                    candidates.append({
+                        "stat_id": _ev.get("stat_table_id") or None,
+                        "value": _val,
+                        "unit": _ev.get("unit") or None,
+                        "time": str(_ev.get("time_period") or ""),
+                        "category": _ev.get("category_path") or None,
+                        "origin": "fetch_obs",
+                    })
+            except Exception as _e:
+                logger.debug(f"[Agent A] fetch observation 수집 실패 (무시): {_e}")
+
+            # derived claim은 sibling_evidence의 base 결과(=current 값)도 후보로 합침
+            if _is_derived and _claim_sent_id and hasattr(workspace, "read_sibling_evidence"):
+                try:
+                    for _s in (workspace.read_sibling_evidence(_claim_sent_id) or []):
+                        if not isinstance(_s, dict):
+                            continue
+                        if _s.get("role") != "base":
+                            continue
+                        _val = _s.get("value")
+                        if _val is None:
+                            continue
+                        candidates.append({
+                            "stat_id": _parse_stat_id(_s.get("source")),
+                            "value": _val,
+                            "unit": _s.get("unit") or None,
+                            "time": str(_s.get("time_period") or ""),
+                            "category": None,
+                            "origin": "sibling_base",
+                        })
+                except Exception as _e:
+                    logger.debug(f"[Agent A] sibling_evidence 수집 실패 (무시): {_e}")
+
+            # (stat_id, time) 기준 중복 제거 — 같은 fetch 여러 번 박힌 경우
+            _seen = set()
+            _deduped: list[dict] = []
+            for _c in candidates:
+                _key = (str(_c.get("stat_id") or ""), _norm_time(_c.get("time")))
+                if _key in _seen:
+                    continue
+                _seen.add(_key)
+                _deduped.append(_c)
+
+            # ── 2) primary 선택: claim.schema.time_period 매칭 우선 ──
+            _primary: dict | None = None
+            if _claim_target_time and _deduped:
+                _tnorm = _norm_time(_claim_target_time)
+                for _c in _deduped:
+                    if _norm_time(_c.get("time")) == _tnorm:
+                        _primary = _c
+                        break
+            if _primary is None and _deduped:
+                _primary = _deduped[0]  # 시점 매칭 실패 시 첫 후보로 폴백
+
+            if _primary is not None:
+                _ev_category = _primary.get("category")
                 agent_evidence = Evidence(
                     source_name="KOSIS",
-                    stat_table_id=stat_id,
-                    official_value=dp.resolved_value,
-                    unit=dp.resolved_unit,
-                    time_period=dp.source_time,
+                    stat_table_id=_primary.get("stat_id"),
+                    official_value=_primary.get("value"),
+                    unit=_primary.get("unit"),
+                    time_period=_primary.get("time") or None,
+                )
+
+            # ── 3) supporting: derived claim에만 — primary 외 후보 ──
+            # [2026-05-25] supporting은 *claim이 의도한 시점*에만 한정.
+            # 기존엔 workspace의 모든 fetch_obs를 supporting에 덤프해서, 4월 증가율
+            # claim 검증 중 시도된 3월/5월 fetch가 "함께 참조한 데이터"로 노출됨
+            # → UI 노이즈. claim.time_period + claim.prev_time_period 두 시점에
+            # 매칭되는 evidence만 인정.
+            _relevant_times: set[str] = set()
+            if _claim_target_time:
+                _relevant_times.add(_norm_time(_claim_target_time))
+            if claim.schema and getattr(claim.schema, "prev_time_period", None):
+                _relevant_times.add(_norm_time(claim.schema.prev_time_period))
+
+            def _time_is_relevant(t: str) -> bool:
+                """_relevant_times에 정확/prefix 매칭되면 True. 빈 set면 모두 허용 (보수)."""
+                if not _relevant_times:
+                    return True
+                tn = _norm_time(t)
+                if not tn:
+                    return False
+                for rt in _relevant_times:
+                    if not rt:
+                        continue
+                    if tn == rt or tn.startswith(rt) or rt.startswith(tn):
+                        return True
+                return False
+
+            if _is_derived and _primary is not None:
+                for _c in _deduped:
+                    if _c is _primary:
+                        continue
+                    if not _time_is_relevant(_c.get("time", "")):
+                        logger.debug(
+                            f"[Agent A] supporting 제외 (claim 의도 시점 불일치): "
+                            f"time={_c.get('time')!r} not in {_relevant_times}"
+                        )
+                        continue
+                    supporting_evidence.append(Evidence(
+                        source_name="KOSIS",
+                        stat_table_id=_c.get("stat_id"),
+                        official_value=_c.get("value"),
+                        unit=_c.get("unit"),
+                        time_period=_c.get("time") or None,
+                    ))
+
+            if agent_evidence is not None:
+                logger.info(
+                    f"[Agent A] {claim.claim_id}: evidence 분리 — "
+                    f"primary(time={agent_evidence.time_period}, "
+                    f"value={agent_evidence.official_value}), "
+                    f"supporting={len(supporting_evidence)}건 "
+                    f"(role={_claim_role!r}, claim_target_time={_claim_target_time!r})"
                 )
 
             # [머지 이수민 main] 도메인 가드 — agent 경로에도 적용.
@@ -577,6 +1068,7 @@ class RuntimeAgent:
                 confidence=verdict.confidence,
                 explanation=verdict.explanation,
                 evidence=agent_evidence,
+                supporting_evidence=supporting_evidence,
             )
             return result, ev_nodes, ev_edges
 
