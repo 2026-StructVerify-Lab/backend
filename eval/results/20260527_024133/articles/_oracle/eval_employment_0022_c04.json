@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_employment_0022_c04",
+  "elapsed_sec": 74.34537601470947,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "12c26731-26c7-41c6-98a0-3254258cba82",
+        "claim_text": "2016년에 장애인 자영업 실업자 중 1,635명이 창업을 희망했다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "장애인 자영업 실업자 창업 희망자 수",
+          "value": 1635.0,
+          "unit": "명",
+          "time_period": "2016",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "노동 > 일자리 > 기타 노동 관련 지표"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "12c26731-26c7-41c6-98a0-3254258cba82",
+        "verdict": "unverifiable",
+        "confidence": 0.0,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장을 검증하기 위해 '장애인 자영업 실업자 창업 희망자 수 전체'와 관련된 통계 자료를 찾아보았지만, 찾을 수 없었습니다. 따라서 이 주장은 현재 시점에서는 검증이 불가능합니다. \n\n독자들은 국가통계포털(KOSIS)에서 해당 주제와 관련된 다양한 통계 자료를 찾아볼 수 있습니다. 다만, 이번 검증 과정에서는 필요한 통계 자료를 찾지 못했다는 점을 알려드립니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

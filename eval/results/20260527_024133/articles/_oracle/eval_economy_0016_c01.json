@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_economy_0016_c01",
+  "elapsed_sec": 309.07771492004395,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "1c001343-9a9c-4ca6-823d-aeb71c2f6ced",
+        "claim_text": "2001 취업상태/경지규모별 가구원수은(는) 2,965명로 나타났다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "취업상태/경지규모별 가구원수",
+          "value": 2965.0,
+          "unit": "명",
+          "time_period": "2001",
+          "population": null,
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "가구 > 가구구성 > 가구원수"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "1c001343-9a9c-4ca6-823d-aeb71c2f6ced",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"2001 취업상태/경지규모별 가구원수은(는) 2,965명로 나타났다.\" 에 대한 검증을 시도했으나, 국가통계포털(KOSIS)에서 해당 정보를 찾을 수 없었습니다. 이는 당시 조사가 이루어지지 않았을 가능성이 있으며, 현재 시점에서는 과거의 정확한 수치를 파악하기 어렵습니다. 따라서 추가적인 자료나 연구가 필요해 보입니다. \n\n국가통계포털(https://kosis.kr/) 에서 '취업상태', '경지규모별', '가구원수' 등의 키워드로 검색하면 더 많은 관련 통계를 찾아볼 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_environment_0024_c01",
+  "elapsed_sec": 120.0852279663086,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "5bbcb146-0555-4449-b99b-fd16cc1d9748",
+        "claim_text": "2011년에 전체 청소년 중 약 11,965.5%가 가출 경험이 있었다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "청소년 가출 경험 비율",
+          "value": 11965.5,
+          "unit": "%",
+          "time_period": "2011",
+          "population": "전체",
+          "value_role": "derived_rate",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "인구 > 사회 > 청소년 문제"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "5bbcb146-0555-4449-b99b-fd16cc1d9748",
+        "verdict": "unverifiable",
+        "confidence": 0.0,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"2011년에 전체 청소년 중 약 11,965.5%가 가출 경험이 있었다.\"라는 것을 검증하기 위해 국가통계포털(KOSIS)에서 '청소년 가출 경험 비율 전체 2011'이라는 검색어로 자료를 찾아보았지만, 해당 주제와 관련된 공식 통계를 찾을 수 없었습니다. 따라서 이 주장은 현재로서는 검증이 불가능합니다. \n\n더 정확한 정보를 얻기 위해서는 신뢰할 수 있는 기관이나 연구소에서 발표한 최신 보고서나 논문을 참고하거나, 정부기관에 문의해 보는 것도 좋은 방법일 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

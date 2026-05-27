@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_environment_0026_c01",
+  "elapsed_sec": 145.46521186828613,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "ca936946-57f6-4ea6-8594-448490838066",
+        "claim_text": "2024년 한국에서 환경 인식 긍정 비율이 69.0%임.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "환경 인식 긍정 비율",
+          "value": 69.0,
+          "unit": "%",
+          "time_period": "2024",
+          "population": "전체",
+          "value_role": "derived_rate",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "환경 > 사회 일반 > 사회적 인식"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "ca936946-57f6-4ea6-8594-448490838066",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"2024년 한국에서 환경 인식 긍정 비율이 69.0%\"라는 내용의 공식 통계를 찾을 수 없었습니다. 이는 국가통계포털(KOSIS)에서 '환경 인식 긍정 비율'이라는 주제어와 해당 연도인 '2024'를 검색했음에도 관련 통계표를 발견하지 못했기 때문입니다. 따라서, 보다 정확한 정보를 위해서는 추가적인 조사나 다른 출처를 통해 확인해 보시기 바랍니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "claim_id": "eval_education_0005_c04",
+  "elapsed_sec": 151.67633485794067,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "4a8f7db9-9fc9-4d24-bfb6-63ee861d4a75",
+        "claim_text": "2024년 한국에서 전체 학생들 중 약 42.0%가 비공식 교육을 받고 있다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "학생들의 비공식 교육 비율",
+          "value": 42.0,
+          "unit": "%",
+          "time_period": "2024",
+          "population": "전체",
+          "value_role": "derived_rate",
+          "prev_value": null,
+          "prev_time_period": "2023",
+          "parent_path": "교육 > 학생 > 교육 형태"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "4a8f7db9-9fc9-4d24-bfb6-63ee861d4a75",
+        "verdict": "mismatch",
+        "confidence": 0.95,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장은 '2024년 한국에서 전체 학생들 중 약 42.0%가 비공식 교육을 받고 있다'라고 했으나, 이는 사실이 아닙니다. 해당 연도의 실제 수치는 KOSIS 자료에 따르면 325511.0%로 확인됩니다. 따라서 두 수치 사이에는 325469.0%라는 큰 차이가 존재하며, 이는 신뢰도 95% 수준에서 유의미한 것으로 판단됩니다. 이러한 차이는 데이터 수집 및 분석 과정에서의 오류나 누락 등 다양한 요인에 의해 발생할 수 있습니다. 그러므로 추가적인 조사와 검증이 필요합니다.",
+        "evidence": {
+          "stat_table_id": "DT_443001_100",
+          "official_value": 325511.0,
+          "unit": "명",
+          "time_period": "2024",
+          "source_name": "KOSIS"
+        }
+      }
+    ]
+  }
+}

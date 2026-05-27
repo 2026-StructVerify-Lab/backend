@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_healthcare_0034_c04",
+  "elapsed_sec": 98.19175815582275,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "315743e1-008e-4750-9f23-12ee8a45dd32",
+        "claim_text": "전국적으로 급성심근경색증 입원 환자의 병원 내·외 30일 치명률은 2024년에 12%였습니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "급성심근경색증 입원 환자 치명률",
+          "value": 12.0,
+          "unit": "%",
+          "time_period": "2024",
+          "population": "전국",
+          "value_role": "derived_rate",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "보건 > 질병관리 > 심혈관질환 관리"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "315743e1-008e-4750-9f23-12ee8a45dd32",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"전국적으로 급성심근경색증 입원 환자의 병원 내·외 30일 치명률은 2024년에 12%였다\"라는 내용의 공식 통계를 찾을 수 없어 검증이 불가능했습니다. 이와 관련된 정보를 확인하시려면, 국가통계포털(KOSIS)에서 '급성심근경색증', '입원환자', '치명률', '전국', '2024' 등의 검색어를 조합하여 찾아보시기 바랍니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

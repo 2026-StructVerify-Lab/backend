@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_real_estate_0007_c02",
+  "elapsed_sec": 164.20880007743835,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "b8a96bb3-4ee8-496b-9a11-dc01cddce15f",
+        "claim_text": "real_estate 비공식 지표에 대한 주장이 제기됐다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "비공식 지표",
+          "value": 15.0,
+          "unit": "",
+          "time_period": "",
+          "population": "",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": ""
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "b8a96bb3-4ee8-496b-9a11-dc01cddce15f",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"비공식 지표에 대한 주장이 제기됐다\"라는 것을 검증하기 위해 KOSIS(국가통계포털)에서 '비공식 지표'와 관련된 통계 자료를 찾아보았지만, 해당 주제와 관련된 공식 통계를 찾을 수 없었습니다. 따라서 이 주장은 현재로서는 검증이 불가능합니다. \n\n추가적인 정보나 새로운 통계 자료가 발표되면 다시 검증해 볼 필요가 있습니다. 독자들은 국가통계포털(KOSIS)에서 원하는 주제와 관련된 다양한 통계 자료를 찾아볼 수 있으니 참고하시기 바랍니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

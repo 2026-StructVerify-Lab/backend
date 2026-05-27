@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_finance_0023_c03",
+  "elapsed_sec": 166.78188276290894,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "f38f6d9c-8aa4-4d23-86cd-fd2916c2c3bb",
+        "claim_text": "2004년 질병 소분류별 다빈도 상병 급여 현황은 3,883,062명으로 집계되었다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "질병 소분류별 다빈도 상병 급여 현황",
+          "value": 3883062.0,
+          "unit": "명",
+          "time_period": "2004",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "보건 > 질병관리 > 상병급여"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "f38f6d9c-8aa4-4d23-86cd-fd2916c2c3bb",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"2004년 질병 소분류별 다빈도 상병 급여 현황은 3,883,062명으로 집계되었다\"라는 내용을 입증할 수 있는 공식 통계를 찾을 수 없었습니다. 이와 관련하여 해당 정보를 찾기 위해 KOSIS(국가통계포털) 내 검색을 시도했으나 적절한 통계표를 발견하지 못했으며, '질병 소분류별 다빈도 상병 급여 현황 전체 2004'라는 검색어로도 원하는 자료를 얻지 못했습니다. 따라서 보다 정확한 사실 관계 파악을 위해서는 추가적인 조사가 필요해 보입니다. \n\n추가적으로 더 자세한 내용을 확인하고자 한다면 국가통계포털(https://kosis.kr/) 에 접속하시어 주제별>보건>건강보험통계연보 혹은 건강보험심사평가원의 보건의료빅데이터개방시스템(https://opendata.hira.or.kr/) 에서 원하시는 조건을 설정하신 후 검색을 통해 찾아보시기를 제안 드립니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

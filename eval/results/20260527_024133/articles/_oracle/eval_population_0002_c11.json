@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_population_0002_c11",
+  "elapsed_sec": 182.06037211418152,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "aa1b023b-1d10-4cfc-b395-9acb0862f7fe",
+        "claim_text": "2024년 한국의 인구 정책에 대한 복합적인 효과는 약 9%p 증가할 것으로 예상된다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "한국 인구 정책 효과",
+          "value": 9.0,
+          "unit": "pct",
+          "time_period": "2024",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "정책 > 인구 정책"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "aa1b023b-1d10-4cfc-b395-9acb0862f7fe",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"2024년 한국의 인구 정책에 대한 복합적인 효과는 약 9%p 증가할 것으로 예상된다\"라는 내용에 대해, 대한민국 국가통계포털(KOSIS)에서 해당 정보를 찾을 수 없어 검증이 불가능했습니다. 이와 관련된 더 자세한 사항은 KOSIS 홈페이지에서 '한국 인구 정책 효과 전체 2024' 등의 검색어를 활용하여 찾아보시기 바랍니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "claim_id": "eval_real_estate_0040_c03",
+  "elapsed_sec": 58.52107214927673,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "72cd420e-2e8f-405e-a41a-7c63e1873c83",
+        "claim_text": "2020년 하도급 단가를 결정하는 방법으로 응답한 건수는 총 45,083건입니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "하도급 단가 결정 방법 응답 건수",
+          "value": 45083.0,
+          "unit": "건",
+          "time_period": "2020",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "건설 > 계약 > 하도급"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "72cd420e-2e8f-405e-a41a-7c63e1873c83",
+        "verdict": "mismatch",
+        "confidence": 0.9,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장은 '2020년 하도급 단가를 결정하는 방법으로 응답한 건수'에 대한 것인데, 기사에서는 이 수치가 45083.0 건이라고 제시했지만, 공식적으로 확인되는 수치는 1594.0 건입니다. 무려 43489.0 건이 차이 나는 큰 불일치이며, 이는 전체 비율로 2728.3%나 됩니다. 이러한 차이는 주로 데이터 수집 및 분석 과정에서 발생할 수 있는 오류나 누락 등이 원인일 수 있습니다. 해당 자료의 출처는 따로 명시되어 있지 않지만, 근거 통계인 KOSIS 홈페이지(https://kosis.kr/statHtml/statHtml.do?orgId=101&tblId=DT_152009_D030&checkFlag=N)에서 직접 확인하실 수 있습니다.",
+        "evidence": {
+          "stat_table_id": "DT_152009_D030",
+          "official_value": 1594.0,
+          "unit": "개",
+          "time_period": "2020",
+          "source_name": "KOSIS"
+        }
+      }
+    ]
+  }
+}

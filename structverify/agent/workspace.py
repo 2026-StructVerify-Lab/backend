@@ -223,16 +223,33 @@ class Workspace:
 
     # ── 초기화 ───────────────────────────────────────────────
     def initialize(self, source_text: str, meta: dict | None = None) -> None:
-        """Job 시작 시 호출. source + meta 저장."""
+        """Job 시작 시 호출. source + meta 저장.
+
+        [P23 2026-05-22] idempotent하게 변경.
+        - meta.json은 *없을 때만* 작성 (created_at 보존)
+        - source.txt는 *매번 덮어씀*
+
+        이유: scope=doc_hash 모드에서 같은 본문이면 같은 워크스페이스 dir 재사용.
+        P18 이전 코드(sentence-join 결과를 source.txt에 저장)에서 만든 dir이
+        남아있으면, P18에서 raw_text를 박는 새 로직이 *initialize 호출 자체가 안 돼*
+        반영 안 됨. 결과: source.txt가 stale → sv_platform이 Job.source_data와
+        매칭 못 함 → URL 입력 partial 실시간 노출 실패.
+        """
         meta = dict(meta) if meta else {}
         meta.setdefault("job_id", self.job_id)
         meta.setdefault("created_at", datetime.now(timezone.utc).isoformat())
-        self.backend.write_text(
-            self._meta_key(),
-            json.dumps(meta, ensure_ascii=False, indent=2, default=str),
-        )
+        # meta는 idempotent — 이미 있으면 새 created_at으로 덮어쓰지 않음
+        if not self.backend.exists(self._meta_key()):
+            self.backend.write_text(
+                self._meta_key(),
+                json.dumps(meta, ensure_ascii=False, indent=2, default=str),
+            )
+        # source.txt는 매번 최신 raw_text로 덮어씀 (stale 방지)
         self.backend.write_text(self._source_key(), source_text)
-        logger.info(f"[workspace] initialized: job_id={self.job_id}")
+        logger.info(
+            f"[workspace] initialized: job_id={self.job_id} "
+            f"(source.txt sync {len(source_text)}자)"
+        )
 
     def create_claim_dir(self, claim_id: str | UUID, claim_data: dict) -> None:
         """claim 작업 디렉토리 생성 + 빈 memory 초기화."""
@@ -312,6 +329,204 @@ class Workspace:
     def _successful_stat_ids_key(self) -> str:
         return f"{self._prefix}/successful_stat_ids.json"
 
+    # ── [2026-05-26] fetched_values 캐시 (job-level) ──────────────────
+    # 같은 (stat_id, indicator, time, population)에 대한 fetch 결과 즉시 저장.
+    # verified_facts는 finish 시 저장이라 *같은 claim 안에서 반복 fetch* 시
+    # 적중 못 함. fetched_values는 fetch 성공 직후 저장 → 같은 claim의 다음
+    # iter도, 같은 job의 다른 claim도 재사용.
+    # 키: (stat_id, indicator, time_period, population) 정규화 후 비교.
+    def _fetched_values_key(self) -> str:
+        return f"{self._prefix}/fetched_values.json"
+
+    @staticmethod
+    def _norm_key_part(s: str | None) -> str:
+        """캐시 키 정규화 — 공백 제거, 소문자, None은 빈 문자열."""
+        if s is None:
+            return ""
+        return str(s).strip().replace(" ", "").lower()
+
+    def read_fetched_values(self) -> list[dict]:
+        """fetched_values 캐시 전체 read.
+
+        각 항목: {stat_id, indicator, time_period, population, evidence, recorded_at}
+        """
+        key = self._fetched_values_key()
+        if not self.backend.exists(key):
+            return []
+        try:
+            return json.loads(self.backend.read_text(key))
+        except Exception:
+            return []
+
+    def lookup_fetched_value(
+        self,
+        stat_id: str,
+        indicator: str,
+        time_period: str,
+        population: str | None = None,
+    ) -> dict | None:
+        """캐시에서 매칭 evidence 검색. 없으면 None.
+
+        정규화 비교: 공백/대소문자 무시. population은 빈/None도 매칭.
+        """
+        sid_n = self._norm_key_part(stat_id)
+        ind_n = self._norm_key_part(indicator)
+        tp_n = self._norm_key_part(time_period)
+        pop_n = self._norm_key_part(population)
+        if not sid_n or not ind_n or not tp_n:
+            return None
+        for entry in self.read_fetched_values():
+            if (self._norm_key_part(entry.get("stat_id")) == sid_n
+                    and self._norm_key_part(entry.get("indicator")) == ind_n
+                    and self._norm_key_part(entry.get("time_period")) == tp_n
+                    and self._norm_key_part(entry.get("population")) == pop_n):
+                return entry.get("evidence")
+        return None
+
+    def append_fetched_value(
+        self,
+        stat_id: str,
+        indicator: str,
+        time_period: str,
+        population: str | None,
+        evidence: dict,
+    ) -> None:
+        """fetch 성공 결과를 캐시에 저장. 같은 키 entry가 있으면 덮어쓰지 않음."""
+        if not evidence or evidence.get("value") is None:
+            return
+        sid_n = self._norm_key_part(stat_id)
+        ind_n = self._norm_key_part(indicator)
+        tp_n = self._norm_key_part(time_period)
+        pop_n = self._norm_key_part(population)
+        if not sid_n or not ind_n or not tp_n:
+            return
+        entries = self.read_fetched_values()
+        for e in entries:
+            if (self._norm_key_part(e.get("stat_id")) == sid_n
+                    and self._norm_key_part(e.get("indicator")) == ind_n
+                    and self._norm_key_part(e.get("time_period")) == tp_n
+                    and self._norm_key_part(e.get("population")) == pop_n):
+                return  # 이미 있음
+        entries.append({
+            "stat_id": stat_id,
+            "indicator": indicator,
+            "time_period": time_period,
+            "population": population or "",
+            "evidence": dict(evidence) if hasattr(evidence, "items") else evidence,
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+        })
+        try:
+            self.backend.write_text(
+                self._fetched_values_key(),
+                json.dumps(entries, ensure_ascii=False, indent=2, default=str),
+            )
+            logger.info(
+                f"[workspace] fetched_value 저장: stat_id={stat_id!r} "
+                f"indicator={indicator!r} time={time_period!r} "
+                f"population={population!r} value={evidence.get('value')}"
+            )
+        except Exception as e:
+            logger.debug(f"[workspace] fetched_value 저장 실패: {e}")
+
+    # ── [P20 2026-05-22] KOSIS API raw 응답 캐시 ────────────────────────
+    # 같은 (stat_id, prdSe, startPrdDe, endPrdDe, newEstPrdCnt) 조합 호출을
+    # workspace-scope로 캐싱. 같은 job 내 다른 sub-claim들이 같은 표를 호출하면
+    # 즉시 hit. scope=doc_hash 모드면 같은 본문 재검증 시 전체 KOSIS API call 0건.
+    # TTL은 config.kosis.cache_ttl_hours (default 24, 0이면 영구).
+    def _kosis_cache_dir(self) -> str:
+        return f"{self._prefix}/kosis_cache"
+
+    @staticmethod
+    def make_kosis_cache_key(
+        candidate_id: str,
+        fetch_params: dict,
+    ) -> str:
+        """KOSIS fetch 파라미터 → cache key (filesystem-safe).
+
+        [P34 2026-05-22] dim_overrides (itmId/objL1~objL8)도 key에 포함 — 같은
+        stat_id + 같은 시점이라도 *다른 차원 슬라이스*면 응답이 달라지므로
+        별도 cache 항목으로 저장해야 함.
+        """
+        parts = [
+            str(candidate_id or ""),
+            str(fetch_params.get("prdSe") or ""),
+            str(fetch_params.get("startPrdDe") or ""),
+            str(fetch_params.get("endPrdDe") or ""),
+            str(fetch_params.get("newEstPrdCnt") or ""),
+        ]
+        # dim_overrides — itmId + objL1~8
+        _dim = fetch_params.get("dim_overrides") or {}
+        if isinstance(_dim, dict) and _dim:
+            parts.append(str(_dim.get("itmId") or ""))
+            for _lv in range(1, 9):
+                parts.append(str(_dim.get(f"objL{_lv}") or ""))
+        # / · 공백 → 언더스코어. KOSIS 표 ID/시점은 일반적으로 안전한 ASCII.
+        return "_".join(p.replace("/", "_").replace(" ", "") for p in parts)
+
+    def read_kosis_response_cache(
+        self,
+        key: str,
+        ttl_hours: float | None = 24,
+    ) -> dict | None:
+        """KOSIS API 원시 응답 캐시 조회.
+
+        Args:
+            key: make_kosis_cache_key() 결과.
+            ttl_hours: TTL. None 또는 0이면 영구 캐시 (만료 안 됨).
+        Returns:
+            cache hit: 저장된 response dict (EvidenceData로 그대로 reconstruct 가능).
+            miss/expired: None.
+        """
+        path = f"{self._kosis_cache_dir()}/{key}.json"
+        if not self.backend.exists(path):
+            return None
+        try:
+            entry = json.loads(self.backend.read_text(path))
+        except Exception as e:
+            logger.debug(f"[workspace] kosis_cache 읽기 실패 {key}: {e}")
+            return None
+        # TTL 만료 검사
+        if ttl_hours and ttl_hours > 0:
+            cached_at_str = entry.get("cached_at")
+            if cached_at_str:
+                try:
+                    cached_at = datetime.fromisoformat(
+                        cached_at_str.replace("Z", "+00:00")
+                    )
+                    age_hours = (
+                        datetime.now(timezone.utc) - cached_at
+                    ).total_seconds() / 3600.0
+                    if age_hours > ttl_hours:
+                        logger.info(
+                            f"[workspace] kosis_cache 만료 (age={age_hours:.1f}h "
+                            f"> ttl={ttl_hours}h): {key}"
+                        )
+                        return None
+                except Exception:
+                    pass
+        return entry.get("response")
+
+    def write_kosis_response_cache(self, key: str, response: dict) -> None:
+        """KOSIS API 원시 응답 저장 (TTL 검증은 read 시점)."""
+        if not key or not isinstance(response, dict):
+            return
+        path = f"{self._kosis_cache_dir()}/{key}.json"
+        entry = {
+            "cached_at": datetime.now(timezone.utc).isoformat(),
+            "response": response,
+        }
+        try:
+            self.backend.write_text(
+                path,
+                json.dumps(entry, ensure_ascii=False, indent=2, default=str),
+            )
+            logger.info(
+                f"[workspace] kosis_cache 저장: {key} "
+                f"(value={response.get('value')}, rows={len(response.get('rows', []) or [])})"
+            )
+        except Exception as e:
+            logger.debug(f"[workspace] kosis_cache 저장 실패 {key}: {e}")
+
     def read_successful_stat_ids(self) -> list[str]:
         """[패치 A] job에서 fetch_evidence가 성공한 stat_table_id 목록.
 
@@ -347,6 +562,54 @@ class Workspace:
             f"(누적 {len(ids)}개) — 다음 claim fetch fallback 1순위로 사용"
         )
 
+    # ── [P33b 2026-05-22] failed stat_id blacklist ────────────────────
+    # fetch_evidence가 거부/매칭 실패한 stat_id 목록 (per claim).
+    # 다음 catalog_search 호출 시 결과에서 제외 → 같은 표 무한 반복 방지.
+    # successful_stat_ids는 *job 공유* (claim 간 공유), failed는 *per-claim*
+    # (한 claim에서 실패한 표를 다른 claim도 같은 검증인 게 아니라 다르게
+    # 시도할 수 있어 공유 X). 단순 list[str] 저장.
+    def _failed_stat_ids_key(self, claim_id: str | UUID) -> str:
+        return f"{self._claim_dir(claim_id)}/failed_stat_ids.json"
+
+    def read_failed_stat_ids(self, claim_id: str | UUID) -> list[str]:
+        """이 claim에서 fetch가 실패한 stat_id 목록.
+
+        catalog_search Tool이 후보를 받은 뒤 이 list에 든 id를 제외하면
+        매번 같은 5개 후보를 받는 헛돌이를 차단할 수 있다.
+        """
+        key = self._failed_stat_ids_key(claim_id)
+        if not self.backend.exists(key):
+            return []
+        try:
+            data = json.loads(self.backend.read_text(key))
+            return data if isinstance(data, list) else []
+        except Exception:
+            return []
+
+    def append_failed_stat_id(
+        self, claim_id: str | UUID, stat_id: str, reason: str = "",
+    ) -> None:
+        """fetch_evidence 실패(관련성 거부/row 매칭 실패 등) 시 stat_id 기록."""
+        sid = (stat_id or "").strip()
+        if not sid:
+            return
+        ids = self.read_failed_stat_ids(claim_id)
+        if sid in ids:
+            return
+        ids.append(sid)
+        try:
+            self.backend.write_text(
+                self._failed_stat_ids_key(claim_id),
+                json.dumps(ids, ensure_ascii=False, indent=2),
+            )
+            logger.info(
+                f"[workspace] failed_stat_id 저장: {sid!r} "
+                f"(claim={claim_id}, 누적 {len(ids)}개, reason={reason[:80]!r}) "
+                f"— 다음 catalog_search에서 제외"
+            )
+        except Exception as e:
+            logger.debug(f"[workspace] failed_stat_id 저장 실패: {e}")
+
     def read_verified_facts(self) -> list[dict]:
         """job에서 지금까지 검증된 사실 목록.
 
@@ -363,19 +626,52 @@ class Workspace:
     def append_verified_fact(self, fact: dict) -> None:
         """검증 완료된 수치를 job 공유 저장소에 추가.
 
-        fact: {indicator, time_period, value, unit, source, claim_id, verdict}
-        동일 (indicator, time_period) 항목이 이미 있으면 덮어쓰지 않고
-        그대로 둔다 (최초 검증 결과 우선 — 일관성).
+        fact: {indicator, time_period, population, value, unit, source, claim_id, verdict}
+        [2026-05-21] population을 dedupe 키에 포함 — 같은 (indicator, time)이라도
+        지역별 sub-claim은 *별개 entry*로 저장돼야 함. 안 그러면 강원도(1336),
+        서울(12741), 인천(2778) 다 같은 키로 들어가서 첫 번째 값만 살아남고
+        나머지가 모두 그 값으로 캐시 적중 (22:54 트레이스 — 서울 sub-claim이
+        강원도 값/197 등 다른 지역 값을 받아 잘못된 검증).
+        동일 (indicator, time, population) 항목이 이미 있으면 덮어쓰지 않음
+        (최초 검증 결과 우선 — 일관성).
         """
         if not fact or fact.get("value") is None:
             return
         facts = self.read_verified_facts()
         ind = str(fact.get("indicator", "") or "").strip()
         tp = str(fact.get("time_period", "") or "").strip()
+        pop = str(fact.get("population", "") or "").strip()
+        new_val = fact.get("value")
         for f in facts:
             if (str(f.get("indicator", "") or "").strip() == ind
-                    and str(f.get("time_period", "") or "").strip() == tp):
+                    and str(f.get("time_period", "") or "").strip() == tp
+                    and str(f.get("population", "") or "").strip() == pop):
                 return  # 이미 있음 — 중복 저장 안 함
+
+        # [P35 2026-05-22] cross-population 값 collision 검출.
+        # 같은 (indicator, time)에 *다른 population*의 fact가 이미 있고 값이
+        # *완전히 동일*하면, 한쪽 검증이 *잘못 매칭*돼 *다른 지역의 값을 받았을*
+        # 가능성. 예: (의료장비 수, 2023, 서울)=12741이 이미 있는데
+        # (의료장비 수, 2023, 강원도)=12741이 들어오면 누수 의심 → 저장 거부.
+        # 안 그러면 cache hit가 잘못된 값을 다음 trace에 영구 흘려보냄.
+        # 값이 진짜 동일한 케이스(드물지만 0/N/A 같은 특수값)는 stale cache의
+        # 위험 대비 손실이 적어 거부가 안전.
+        if ind and tp and pop and new_val is not None:
+            for f in facts:
+                if (str(f.get("indicator", "") or "").strip() == ind
+                        and str(f.get("time_period", "") or "").strip() == tp):
+                    other_pop = str(f.get("population", "") or "").strip()
+                    other_val = f.get("value")
+                    if (other_pop and other_pop != pop
+                            and other_val is not None and other_val == new_val):
+                        logger.warning(
+                            f"[workspace] verified_fact 저장 거부 — *cross-population 값 collision*: "
+                            f"indicator={ind!r} time={tp!r} 신규 pop={pop!r} value={new_val} "
+                            f"vs 기존 pop={other_pop!r} value={other_val} "
+                            f"(다른 지역인데 값이 같음 → 한쪽이 잘못 매칭됐을 가능성 → 저장 안 함)"
+                        )
+                        return
+
         fact = dict(fact)
         fact.setdefault("recorded_at", datetime.now(timezone.utc).isoformat())
         facts.append(fact)
@@ -385,20 +681,100 @@ class Workspace:
         )
         logger.info(
             f"[workspace] verified_fact 저장: "
-            f"indicator={ind!r} time={tp!r} value={fact.get('value')}"
+            f"indicator={ind!r} time={tp!r} population={pop!r} value={fact.get('value')}"
         )
 
+    # ── [S 패치 2026-05-21] sent_id 기반 sibling evidence 공유 ────────
+    # schema_inductor가 한 문장(sent_id) → N sub-claim 분기할 때, 같은 sent_id의
+    # base/derived sub-claim은 *형제(sibling)* 관계. base가 KOSIS fetch로 얻은
+    # evidence를 derived가 *추가 fetch 없이* 재활용하려면 sent_id로 매핑이 필요.
+    # 기존 verified_facts는 (indicator, time) 키라 base "출생아 수" → derived
+    # "출생아 수 증가율" 매핑이 안 됨. sent_id 기반 별도 캐시.
+    def _sibling_evidence_key(self) -> str:
+        return f"{self._prefix}/sibling_evidence.json"
+
+    def record_sibling_evidence(
+        self,
+        sent_id: str,
+        role: str,
+        evidence: dict,
+    ) -> None:
+        """같은 sent_id의 sibling sub-claim들이 활용할 evidence 기록.
+
+        Args:
+            sent_id: claim의 sent_id (예: "b0002_s0000")
+            role: value_role ("base" / "derived_rate" / "derived_difference")
+            evidence: {indicator, value, unit, time_period, stat_id, claim_id, verdict}
+        """
+        sent_id = (sent_id or "").strip()
+        if not sent_id or not evidence or evidence.get("value") is None:
+            return
+        key = self._sibling_evidence_key()
+        if self.backend.exists(key):
+            try:
+                store = json.loads(self.backend.read_text(key))
+                if not isinstance(store, dict):
+                    store = {}
+            except Exception:
+                store = {}
+        else:
+            store = {}
+        entries = store.setdefault(sent_id, [])
+        # 같은 role 중복 저장 방지 (최초 결과 우선)
+        if any(e.get("role") == role for e in entries):
+            return
+        record = dict(evidence)
+        record["role"] = role
+        record.setdefault("recorded_at", datetime.now(timezone.utc).isoformat())
+        entries.append(record)
+        self.backend.write_text(
+            key,
+            json.dumps(store, ensure_ascii=False, indent=2, default=str),
+        )
+        logger.info(
+            f"[workspace] sibling_evidence 저장: sent_id={sent_id!r} "
+            f"role={role!r} indicator={evidence.get('indicator')!r} "
+            f"value={evidence.get('value')}"
+        )
+
+    def read_sibling_evidence(self, sent_id: str) -> list[dict]:
+        """sent_id의 sibling evidence 목록 (자기 자신 포함, 호출자가 필터).
+
+        Returns: [{role, indicator, value, unit, time_period, stat_id, ...}, ...]
+        """
+        sent_id = (sent_id or "").strip()
+        if not sent_id:
+            return []
+        key = self._sibling_evidence_key()
+        if not self.backend.exists(key):
+            return []
+        try:
+            store = json.loads(self.backend.read_text(key))
+            if isinstance(store, dict):
+                entries = store.get(sent_id) or []
+                return entries if isinstance(entries, list) else []
+        except Exception:
+            pass
+        return []
+
     def lookup_verified_fact(
-        self, indicator: str, time_period: str, unit_hint: str | None = None
+        self,
+        indicator: str,
+        time_period: str,
+        unit_hint: str | None = None,
+        population: str | None = None,
     ) -> dict | None:
-        """(indicator, time_period)로 검증된 사실 조회. 없으면 None.
+        """(indicator, time_period, population)로 검증된 사실 조회. 없으면 None.
 
         [수정 v6.22] 매칭 규칙을 엄격하게 — 잘못된 캐시 재사용 방지.
         [BEFORE 버그] indicator 포함관계('A' in 'A 증가율')만으로 매칭 →
           '출생아 수 증가율'(%) claim이 '출생아 수'(명) 230028을 재사용.
+        [2026-05-21] population 매칭 추가 — 같은 (indicator, time)이라도
+          다른 지역 sub-claim의 캐시 값이 적중하는 버그 차단.
+          population 인자가 주어지면 정확히 일치하는 entry만 반환.
         [AFTER 수정]
-          1) indicator + time_period 정확 일치 (+ unit 호환)
-          2) base indicator(파생 접미사 제거) 일치 + unit 호환
+          1) indicator + time_period + population 정확 일치 (+ unit 호환)
+          2) base indicator(파생 접미사 제거) 일치 + population 일치 + unit 호환
         '증가율'·'차이' 같은 파생 지표는 원지표와 unit이 다르므로
         unit_hint 가드가 자동으로 걸러낸다.
 
@@ -407,6 +783,7 @@ class Workspace:
         """
         ind = str(indicator or "").strip()
         tp = str(time_period or "").strip()
+        pop_req = str(population or "").strip() if population else ""
         if not ind or not tp:
             return None
         facts = self.read_verified_facts()
@@ -421,10 +798,22 @@ class Workspace:
                 return True  # 한쪽이라도 비었으면 판별 불가 → 통과
             return fu == hu
 
-        # 1차: indicator + time_period 정확 일치 (+ unit 호환)
+        def _pop_ok(fact_pop: str) -> bool:
+            """population 일치 검사. 요청 pop이 없거나 fact pop이 없으면 통과 (구버전 entry 호환).
+            요청 pop이 있고 fact pop이 있으면 양방향 substring 매칭 (강원/강원도, 서울/서울특별시)."""
+            if not pop_req:
+                return True  # 호출자가 population 안 넘기면 기존 동작
+            if not fact_pop:
+                return False  # 요청은 구체적인데 fact는 region 미지정 → 다른 sub-claim 데이터 의심
+            fp = fact_pop.strip()
+            return pop_req in fp or fp in pop_req
+
+        # 1차: indicator + time_period + population 정확 일치 (+ unit 호환)
         for f in facts:
             if (str(f.get("indicator", "") or "").strip() == ind
                     and str(f.get("time_period", "") or "").strip() == tp):
+                if not _pop_ok(str(f.get("population", "") or "")):
+                    continue
                 if _unit_ok(str(f.get("unit", "") or "")):
                     return f
                 logger.info(
@@ -434,12 +823,14 @@ class Workspace:
                 )
                 return None
 
-        # 2차: base indicator(파생 접미사 제거) 일치 + unit 호환
+        # 2차: base indicator(파생 접미사 제거) 일치 + population 일치 + unit 호환
         # '증가율'/'차이' 지표는 base가 같아도 unit이 다르므로 _unit_ok가
         # 걸러준다. 즉 안전한 경우(같은 단위·동일 base 지표)만 재사용.
         ind_base = _strip_derived_suffix(ind)
         for f in facts:
             if str(f.get("time_period", "") or "").strip() != tp:
+                continue
+            if not _pop_ok(str(f.get("population", "") or "")):
                 continue
             f_ind = str(f.get("indicator", "") or "").strip()
             f_base = _strip_derived_suffix(f_ind)

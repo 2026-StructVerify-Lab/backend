@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_weather_0009_c02",
+  "elapsed_sec": 232.31057596206665,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "0513129d-9f7d-4339-9a22-4a0d90b73d1c",
+        "claim_text": "2024년 2월 한국의 등표 관측 온도는 평균 3.68°C였습니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "등표 관측 온도",
+          "value": 3.68,
+          "unit": "°C",
+          "time_period": "2024-02",
+          "population": "한국 전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "환경 > 기후 > 온도"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "0513129d-9f7d-4339-9a22-4a0d90b73d1c",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"2024년 2월 한국의 등표 관측 온도는 평균 3.68°C였습니다.\"라는 내용을 입증할 수 있는 공식 통계를 찾을 수 없었습니다. 이와 관련하여, 국가통계포털(KOSIS)에서 '등표 관측 온도'나 '한국 전체', '2024-02' 등 다양한 검색어를 활용해 찾아보았지만 해당 정보를 발견할 수 없었습니다. 따라서 보다 정확한 사실 관계를 파악하기 위해서는 추가적인 조사가 필요하며, 독자분들께서는 직접 KOSIS 사이트를 방문하시어 관련 정보를 탐색해 보시기를 제안 드립니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

@@ -226,8 +226,57 @@ class CatalogSearchTool:
                 _add(cat_recs)
 
             # 3) 전체 embedding (폴백)
-            all_recs = await self._search_pgvector(embedding, category_keywords=None, top_k=5)
+            # [P29' 2026-05-22] top_k 5 → 15. category 필터(2)가 KOSIS 자체 어휘랑
+            # 안 맞으면 (예: LLM이 자유어 '의료기기' 추출했는데 KOSIS category_path는
+            # '보건 > 의료자원 > 의료장비') (2)가 0건이라 정답이 (3)에 의존하는데, 그
+            # (3)이 top_k=5라 cosine 6~15위인 정답 표가 잘림. row-level keyword가
+            # 표 이름에 없는 케이스(예: "체외 충격파 쇄석술 장비")는 점수가 어차피
+            # 0.5~0.7 수준이라 더 많이 받아야 정답 진입.
+            all_recs = await self._search_pgvector(embedding, category_keywords=None, top_k=15)
             _add(all_recs)
+
+            # 4) [2026-05-27 Fix B] time-aware union — 시점 토큰을 쿼리에 추가해 historical 표 boost
+            # 배경: catalog 임베딩에는 *category_path 안의 연도 토큰*만 있고
+            # available_periods 메타데이터는 비어있음. 그래서 historical claim
+            # (예: '1991 수상운송업 수익')에 query='수상운송업 수익 한국 전체 운송업'
+            # 만 보내면 modern 표가 cosine 1~10위 점유 → 정답 historical 표
+            # (DT_1IA2075 — category_path에 "1991:6차산업분류기준" 포함)가 surface
+            # 못 함.
+            # 해결 (4-a): 시점 토큰(YYYY)을 쿼리에 추가한 *두 번째* 임베딩 검색.
+            # 해결 (4-b): category_path ILIKE '%YYYY%' SQL 필터 + 동일 임베딩으로 정렬.
+            #   임베딩 단독으론 historical 표가 rank ~285 (sim 0.55)까지 깊이 묻혀
+            #   surface 못 하지만, category_path에 explicit "1991" 토큰이 있는 표는
+            #   ILIKE로 필터 후 임베딩 sim 정렬 → top K 안에 진입.
+            # 회귀 없음 — 기존 검색 결과는 그대로 살아있고 *추가* 후보만 보강.
+            _tp = getattr(query, "time_period", None) or (
+                (query.extra_params or {}).get("time_period")
+            )
+            if _tp:
+                _year_m = re.search(r"(?:19|20)\d{2}", str(_tp))
+                if _year_m:
+                    _year = _year_m.group(0)
+                    # (4-a) 시점 토큰 augment 후 임베딩 재검색
+                    _time_text = f"{embedding_text} {_year}"
+                    _time_emb = await self._get_embedding(_time_text)
+                    if _time_emb:
+                        _before_cnt = len(results)
+                        _time_recs = await self._search_pgvector(
+                            _time_emb, category_keywords=None, top_k=15,
+                        )
+                        _add(_time_recs)
+                        _added_a = len(results) - _before_cnt
+                        # (4-b) category_path ILIKE '%YYYY%' + 임베딩 sort
+                        _before_cnt = len(results)
+                        _year_recs = await self._search_pgvector(
+                            embedding, category_keywords=[_year], top_k=15,
+                        )
+                        _add(_year_recs)
+                        _added_b = len(results) - _before_cnt
+                        logger.info(
+                            f"CatalogSearch time-aware union (year={_year}): "
+                            f"emb_aug={len(_time_recs)}→{_added_a} new, "
+                            f"path_ilike={len(_year_recs)}→{_added_b} new"
+                        )
 
         # [v6.21] 수록주기 인지 재정렬 — claim이 월/분기 시점이면
         # 월간 데이터가 있는 표를 상위로. 연 단위 표만 상위에 오면
@@ -260,75 +309,97 @@ class CatalogSearchTool:
           · 4자리 연도 제거
           · 공백 정리
         """
-        # 1) schema의 parent_path가 있으면 우선 사용 (LLM 호출 절약)
+        # [2026-05-26 회귀] 옵션 B(parent_path + LLM union)가 LLM 자유 추출의 노이즈
+        # 때문에 catalog 결과 망가뜨림 — 옛 동작(parent_path 우선, LLM은 fallback만)으로
+        # 되돌림. parent_path 있으면 그대로 분해해 사용하고 LLM 호출 안 함.
         parent_path = (query.extra_params or {}).get("parent_path")
         if parent_path:
-            # "노동 > 청년 > 쉬었음 인구" → category=["노동", "청년"], keyword="쉬었음 인구"
             parts = [p.strip() for p in re.split(r"\s*>\s*", parent_path) if p.strip()]
             if parts:
-                # 마지막 노드(소분류)를 검색어로
-                search_kw = parts[-1]
-                # 앞 1-2개 노드를 카테고리로
-                category_kws = parts[:-1] if len(parts) > 1 else parts
-                # 노이즈 정제 (연도 + 마크다운 + 공백)
-                search_kw = _minimal_clean(search_kw)
+                search_kw = _minimal_clean(parts[-1])
+                _raw_cats = parts[:-1] if len(parts) > 1 else parts
                 category_kws = [
-                    _minimal_clean(c) for c in category_kws if _minimal_clean(c)
+                    _minimal_clean(c) for c in _raw_cats if _minimal_clean(c)
                 ]
                 if search_kw:
                     logger.debug(f"parent_path 활용: category={category_kws}, kw={search_kw}")
                     return (category_kws, search_kw)
 
-        # 2) parent_path 없으면 LLM 호출 (fallback)
-        if not self.hcx_key:
-            return ([], _minimal_clean(query.indicator or query.keyword or ""))
+        # parent_path 없을 때만 LLM 호출 (fallback)
+        path_category_kws: list[str] = []
+        path_search_kw = ""
+        llm_category_kws: list[str] = []
+        llm_search_kw = ""
+        if self.hcx_key:
 
-        raw_claim = (query.extra_params or {}).get("raw_claim", "")
-        prompt = _CATEGORY_EXTRACT_PROMPT.format(
-            indicator=query.indicator or "",
-            population=query.population or "",
-            claim_text=raw_claim[:200] or query.keyword,
-        )
+            raw_claim = (query.extra_params or {}).get("raw_claim", "")
+            prompt = _CATEGORY_EXTRACT_PROMPT.format(
+                indicator=query.indicator or "",
+                population=query.population or "",
+                claim_text=raw_claim[:200] or query.keyword,
+            )
+            try:
+                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                    resp = await client.post(
+                        "https://clovastudio.stream.ntruss.com/v3/chat-completions/HCX-DASH-002",
+                        headers={
+                            "Authorization": f"Bearer {self.hcx_key}",
+                            "Content-Type":  "application/json",
+                        },
+                        json={
+                            "messages":    [{"role": "user", "content": prompt}],
+                            "maxTokens":   80,
+                            "temperature": 0,
+                        },
+                    )
+                    content = resp.json()["result"]["message"]["content"].strip()
+                for line in content.split("\n"):
+                    line = line.strip()
+                    if "카테고리" in line and ":" in line:
+                        cats = line.split(":", 1)[1].strip()
+                        llm_category_kws = [
+                            _minimal_clean(c) for c in cats.split(",")
+                            if _minimal_clean(c)
+                        ]
+                    elif "검색어" in line and ":" in line:
+                        kw = line.split(":", 1)[1].strip().strip("\"'")
+                        kw = _minimal_clean(kw)
+                        if kw:
+                            llm_search_kw = kw
+            except Exception as e:
+                logger.debug(f"카테고리 LLM 추출 실패 (path category로 폴백): {e}")
 
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.post(
-                    "https://clovastudio.stream.ntruss.com/v3/chat-completions/HCX-DASH-002",
-                    headers={
-                        "Authorization": f"Bearer {self.hcx_key}",
-                        "Content-Type":  "application/json",
-                    },
-                    json={
-                        "messages":    [{"role": "user", "content": prompt}],
-                        "maxTokens":   80,
-                        "temperature": 0,
-                    },
-                )
-                content = resp.json()["result"]["message"]["content"].strip()
-        except Exception as e:
-            logger.debug(f"카테고리 추출 실패: {e}")
-            return ([], _minimal_clean(query.indicator or query.keyword or ""))
+        # 3) union 결합 — path 우선, LLM은 보강용
+        # [2026-05-26 보정] LLM 자유 추출이 가끔 쉼표 풀어쓴 긴 문자열(예: '체외충격파
+        # 쇄석술장비수, 강원도의료기기현황')을 search_kw로 박거나, KOSIS 분야와 어긋난
+        # 카테고리(예: '의료기기', '지역통계')를 만들어서 catalog 검색이 완전 무관한
+        # 표(장애인 거주시설, 노숙인 시설 등)를 잡아오는 사고 발생. 그래서:
+        #   - search_kw: path_search_kw 우선 (단순 단어), LLM은 fallback 또는 단어 1개
+        #   - category: path + LLM 한 단어짜리만 union (긴 풀어쓰기 거부)
 
-        category_keywords: list[str] = []
-        search_keyword = query.indicator or query.keyword or ""
+        def _is_clean_token(s: str) -> bool:
+            """검색어/카테고리로 안전한 단순 토큰인지. 쉼표/공백 6자 이상 + 너무 길면 거부."""
+            if not s:
+                return False
+            if "," in s or "、" in s:
+                return False  # 쉼표 풀어쓰기는 의도 모호
+            if len(s) > 20:
+                return False  # 너무 긴 자유 텍스트는 검색 노이즈
+            return True
 
-        for line in content.split("\n"):
-            line = line.strip()
-            if "카테고리" in line and ":" in line:
-                cats = line.split(":", 1)[1].strip()
-                category_keywords = [
-                    _minimal_clean(c) for c in cats.split(",")
-                    if _minimal_clean(c)
-                ]
-            elif "검색어" in line and ":" in line:
-                kw = line.split(":", 1)[1].strip().strip("\"'")
-                kw = _minimal_clean(kw)
-                if kw:
-                    search_keyword = kw
+        # category: path가 우선, LLM은 *깨끗한 토큰*만 추가
+        _clean_llm_cats = [c for c in llm_category_kws if _is_clean_token(c)]
+        category_keywords: list[str] = list(dict.fromkeys(
+            [*path_category_kws, *_clean_llm_cats]
+        ))[:5]
 
-        # fallback도 최소 정제
-        search_keyword = _minimal_clean(search_keyword)
-
+        # search_kw: path 우선, LLM은 깨끗할 때만 fallback
+        if path_search_kw and _is_clean_token(path_search_kw):
+            search_keyword = path_search_kw
+        elif llm_search_kw and _is_clean_token(llm_search_kw):
+            search_keyword = llm_search_kw
+        else:
+            search_keyword = _minimal_clean(query.indicator or query.keyword or "")
         return (category_keywords, search_keyword)
 
     # ── HCX 임베딩 생성 ──────────────────────────────────────────────────────

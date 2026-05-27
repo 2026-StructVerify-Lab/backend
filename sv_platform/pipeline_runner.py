@@ -64,12 +64,15 @@ async def run_verification(
     datasources: list[str] | None = None,
 ) -> dict[str, Any]:
     """동기 실행 — verify.py가 호출. 결과 dict 반환."""
-    _check_input(source_type, source_data)
+    _check_input(source_type, source_data, source_uri)
     _inject_env()
 
     from structverify.core.pipeline import VerificationPipeline
+    # 동기 진입점은 API job_id가 없음 — config의 scope이 "job_id"면
+    # 라이브러리가 fresh UUID 발급.
     pipeline = VerificationPipeline()
-    report = await pipeline.run(source_data, source_type)
+    pipeline_source = _resolve_pipeline_source(source_type, source_data, source_uri)
+    report = await pipeline.run(pipeline_source, source_type)
     return _build_response(report)
 
 
@@ -119,19 +122,91 @@ async def run_verification_background(
         sv_logger.addHandler(progress_handler)
 
         # 3) 입력 검증 + 환경 변수
-        _check_input(source_type, source_data)
+        _check_input(source_type, source_data, source_uri)
         _inject_env()
 
         # 4) 라이브러리 실행
+        # [2026-05-21] workspace scope="job_id" 모드에서 사용할 API job_id 주입.
+        # scope="doc_hash"면 라이브러리가 무시. config 로드 → external_job_id 박고
+        # pipeline에 전달.
         from structverify.core.pipeline import VerificationPipeline
-        pipeline = VerificationPipeline()
-        report = await pipeline.run(source_data, source_type)
+        from structverify.core.config_loader import load_config
+        _cfg = load_config()
+        _cfg.setdefault("agent", {}).setdefault("workspace", {})["external_job_id"] = str(job_id)
+        pipeline = VerificationPipeline(config=_cfg)
+        pipeline_source = _resolve_pipeline_source(source_type, source_data, source_uri)
+
+        # [2026-05-21] URL 입력 사전 추출 — 본문을 *pipeline 시작 전*에 추출해
+        # Job.source_data에 즉시 저장. 이유:
+        #   1) 프론트가 /v1/jobs/{id} 폴링할 때 source_data 매칭으로 workspace
+        #      디렉토리(scope=doc_hash 모드)를 찾아 partial 진행상황을 노출.
+        #      source_data=None이면 디렉토리 매칭 실패 → 로딩 화면이 빈 채로 정지.
+        #   2) 추출본을 미리 보여줘 사용자에게 "검증 진행 중" 시각화.
+        # text 입력은 이미 source_data가 채워져 있어 영향 X.
+        pre_extracted_text: str | None = None
+        if source_type == "url" and source_uri:
+            # [2026-05-21] URL 추출 *시작 전* 상태 업데이트 — 프론트가 폴링 시
+            # "본문 추출 중" 상태를 즉시 보여주도록. trafilatura/LLM scraper로
+            # 30초 이상 걸리는 동안 UI가 빈 채로 멈춰 보이는 문제 차단.
+            try:
+                async with _session_factory() as db_extracting:
+                    job_extracting = await db_extracting.get(Job, job_id)
+                    if job_extracting is not None:
+                        job_extracting.current_step = "URL 본문 추출 중"
+                        if job_extracting.progress < 8:
+                            job_extracting.progress = 8
+                        await db_extracting.commit()
+            except Exception as _e:
+                logger.debug(f"URL 추출 시작 상태 업데이트 실패 (무시): {_e}")
+
+            try:
+                from structverify.preprocessing.extractor import extract_text
+                from structverify.core.schemas import SourceType as _SourceType
+                pre_extracted_text = await extract_text(source_uri, _SourceType.URL)
+                if pre_extracted_text:
+                    # 즉시 DB 반영 — 별도 세션 사용 (현재 컨텍스트에서 락 풀린 상태)
+                    async with _session_factory() as db_pre:
+                        job_pre = await db_pre.get(Job, job_id)
+                        if job_pre is not None and not job_pre.source_data:
+                            job_pre.source_data = pre_extracted_text
+                            job_pre.current_step = "본문 추출 완료"
+                            if job_pre.progress < 12:
+                                job_pre.progress = 12
+                            await db_pre.commit()
+                    logger.info(
+                        f"URL 사전 추출 완료: {len(pre_extracted_text)}자 — "
+                        f"Job.source_data 즉시 반영 (실시간 partial 매칭 가능)"
+                    )
+            except Exception as _e:
+                logger.warning(f"URL 사전 추출 실패 (무시, pipeline 재시도): {_e}")
+                pre_extracted_text = None
+
+        # pipeline.run()에 사전 추출 텍스트 전달 — 중복 호출 회피
+        report = await pipeline.run(
+            pipeline_source,
+            source_type,
+            source_text=pre_extracted_text,
+        )
+
+        # [2026-05-21] URL/PDF 입력: pipeline이 추출한 raw_text를 source_data로
+        # 승격. 프론트 "원문" 패널이 Job.source_data만 보고 렌더하기 때문.
+        # text 입력은 source_data가 이미 채워져 있어 영향 X.
+        extracted_text: str | None = pre_extracted_text
+        if extracted_text is None:
+            try:
+                doc = getattr(report, "document", None)
+                extracted_text = getattr(doc, "raw_text", None) if doc else None
+            except Exception:
+                extracted_text = None
+        effective_source_text = source_data or extracted_text
+
         # job_id + source_text를 함께 넘겨, agent_workspace에서 claim별 plan/trace
         # 읽어 합침. source_text는 라이브러리가 자체 doc_id로 워크스페이스를
         # 만든 경우의 fallback 매칭용 (sv_platform job_id로 정확 매칭 실패 시).
-        result = _build_response(report, job_id=str(job_id), source_text=source_data)
+        # URL 입력도 이제 추출된 본문으로 fallback 매칭 가능.
+        result = _build_response(report, job_id=str(job_id), source_text=effective_source_text)
 
-        # 5) job → completed
+        # 5) job → completed (+ URL/PDF면 추출본을 source_data로 저장)
         async with _session_factory() as db:
             job = await db.get(Job, job_id)
             job.status = "completed"
@@ -139,6 +214,10 @@ async def run_verification_background(
             job.progress = 100
             job.current_step = "완료"
             job.completed_at = datetime.now(timezone.utc)
+            # URL 입력은 원래 source_data=None인데 추출된 본문이 있으면 박아서
+            # 프론트가 "원문" 패널 렌더 가능하게 함. text 입력은 그대로.
+            if extracted_text and not job.source_data:
+                job.source_data = extracted_text
             await db.commit()
         logger.info(f"Job {job_id} completed")
 
@@ -230,13 +309,37 @@ class JobProgressLogHandler(logging.Handler):
 
 
 # ── 유틸 ─────────────────────────────────────────────────────────────
-def _check_input(source_type: str, source_data: str | None) -> None:
-    if source_type != "text":
+def _check_input(
+    source_type: str,
+    source_data: str | None,
+    source_uri: str | None = None,
+) -> None:
+    if source_type == "text":
+        if not source_data:
+            raise ValueError("source_data is required for text type")
+    elif source_type == "url":
+        if not source_uri:
+            raise ValueError("source_uri (url) is required for url type")
+    else:
+        # pdf/docx는 multipart 업로드 라우트(Phase 3)에서 처리 예정
         raise NotImplementedError(
-            f"source_type='{source_type}'은 Phase 3에서 지원 예정"
+            f"source_type='{source_type}'은 Phase 3에서 지원 예정 (파일 업로드)"
         )
-    if not source_data:
-        raise ValueError("source_data is required for text type")
+
+
+def _resolve_pipeline_source(
+    source_type: str,
+    source_data: str | None,
+    source_uri: str | None,
+) -> str:
+    """structverify VerificationPipeline.run(source=...) 의 첫 인자 결정.
+
+    - text : 본문 문자열을 그대로
+    - url  : URL 문자열 (라이브러리 내 extract_text가 trafilatura/LLM scraper로 추출)
+    """
+    if source_type == "url":
+        return source_uri or ""
+    return source_data or ""
 
 
 def _inject_env() -> None:
@@ -355,6 +458,16 @@ def _build_response(
         #   - official_value, unit (비교 대상 수치)
         #   - time_period (KOSIS 시점)
         merged["evidence"] = _summarize_evidence(merged.get("evidence"))
+        # [2026-05-21 P7] supporting_evidence도 같은 방식으로 경량화.
+        # derived claim의 prev 시점 fetch 등 보조 데이터 리스트.
+        _supp_raw = merged.get("supporting_evidence") or []
+        if isinstance(_supp_raw, list):
+            merged["supporting_evidence"] = [
+                s for s in (_summarize_evidence(x) for x in _supp_raw)
+                if s is not None
+            ]
+        else:
+            merged["supporting_evidence"] = []
 
         # ── [A-1] plan + trace 합치기 ──
         ws_info = workspace_by_cid.get(str(cid), {}) if cid else {}

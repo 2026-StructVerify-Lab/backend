@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_finance_0004_c01",
+  "elapsed_sec": 112.54826498031616,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "9460e25c-0823-4971-b658-bf3557827e10",
+        "claim_text": "2007년 한국에서 총 13,635,462,684천 원이 연령별 진료비로 지출되었다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "연령별 진료비 총액",
+          "value": 13635462684.0,
+          "unit": "천원",
+          "time_period": "2007",
+          "population": null,
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "보건 > 의료비용 > 진료비"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "9460e25c-0823-4971-b658-bf3557827e10",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"2007년 한국에서 총 13,635,462,684천 원이 연령별 진료비로 지출되었다.\"라는 내용을 검증하고자 했으나, 국가통계포털(KOSIS)에서 해당 정보를 찾을 수 없어 검증이 불가능했습니다. 이와 관련된 통계 자료를 찾고 싶다면, 국가통계포털 사이트 접속 후 '연령별 진료비 총액'이라는 키워드로 검색해 볼 것을 제안 드립니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

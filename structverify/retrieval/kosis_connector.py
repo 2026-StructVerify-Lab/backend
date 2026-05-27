@@ -721,6 +721,7 @@ class KOSISConnector(BaseConnector):
         prd_se_hint: str = "Y",
         start_prd_de: str = "",
         end_prd_de: str = "",
+        dim_overrides: dict[str, str] | None = None,
     ) -> StatData | None:
         """
         prd_se 순회(Y→M→Q) + objL 점진 + newEstPrdCnt 폴백.
@@ -731,6 +732,87 @@ class KOSISConnector(BaseConnector):
         time_ref = query.time_period or ""
         year_m = re.search(r"(\d{4})", start_prd_de or time_ref)
         year = year_m.group(1) if year_m else "2024"
+
+        org_id = (
+            stat_rec.org_id
+            or (stat_rec.metadata or {}).get("ORG_ID")
+            or ""
+        )
+        if not org_id:
+            logger.debug(f"org_id 없음: {stat_id}")
+            return None
+
+        prd_m  = (stat_rec.metadata or {}).get("getMeta_PRD")
+        cmmt_m = (stat_rec.metadata or {}).get("getMeta_CMMT")
+        prd_rows  = _rows_from_kosis_body(prd_m)
+        cmmt_rows = _rows_from_kosis_body(cmmt_m)
+
+        # ── [2026-05-25] PRD_SE-aware: 표가 실제 지원하는 주기로 strategy 좁히기 ──
+        # 기존: hint(Y) + 모든 주기(M/Q/Y) 순회 → 표가 Q만 지원해도 Y/M API 호출 낭비.
+        # 개선: getMeta_PRD에서 표가 지원하는 PRD_SE set 추출, 미지원 주기 제외.
+        # hint가 미지원 주기면 표가 지원하는 주기 중 가장 fine-grained로 변경 (M>Q>Y>A).
+        # prd_rows가 비어있거나 PRD_SE 필드가 없으면 기존 fallback 동작 유지(보수).
+        # KOSIS getMeta(PRD) 응답 필드명이 표마다 다를 수 있어 여러 후보 키 확인.
+        # ★ PRD_SE 값은 한국어('년','분기','월') 또는 영문('Y','Q','M') 둘 다 가능 →
+        #   영문 코드로 정규화 후 비교 (회귀: 한국어 값을 영문 strategy와 비교해 0 strategies가 됨).
+        _PRD_SE_KO_TO_EN = {
+            "월": "M", "MONTH": "M",
+            "분기": "Q", "QUARTER": "Q",
+            "년": "Y", "연": "Y", "연간": "Y", "YEAR": "Y", "ANNUAL": "Y",
+            "반기": "H", "HALF": "H",
+            "부정기": "IR", "IRREGULAR": "IR",
+            # 영문 코드는 그대로 통과
+            "M": "M", "Q": "Q", "Y": "Y", "A": "Y", "H": "H", "IR": "IR",
+        }
+        available_prd_se: set[str] = set()
+        _PRD_SE_KEYS = ("PRD_SE", "PRD_SE_CD", "prdSe", "PRD_SE_NM")
+        for _pr in prd_rows:
+            for _k in _PRD_SE_KEYS:
+                _ps = str(_pr.get(_k) or "").strip().upper()
+                if not _ps:
+                    continue
+                _en = _PRD_SE_KO_TO_EN.get(_ps)
+                if _en:
+                    available_prd_se.add(_en)
+                break
+
+        # 진단 로그 — pruning이 작동했는지 한 번에 추적 (INFO 레벨로 강제)
+        if not prd_rows:
+            logger.info(
+                f"[KOSISConnector] PRD_SE pruning skip: prd_rows 비어있음 "
+                f"(stat_id={stat_id}, meta_PRD={'있음' if prd_m else '없음'}) "
+                f"→ 기존 Y/M/Q 전체 fallback 사용. "
+                f"원인 후보: stat_record 캐시 적중인데 getMeta_PRD enrich 미실행."
+            )
+        elif not available_prd_se:
+            # PRD row는 있는데 PRD_SE를 못 찾음 — 필드명 변형 추적
+            _sample_keys = list(prd_rows[0].keys())[:15] if prd_rows[0] else []
+            logger.warning(
+                f"[KOSISConnector] PRD_SE pruning skip: prd_rows({len(prd_rows)}건)에 "
+                f"PRD_SE 필드 없음 — sample keys: {_sample_keys} "
+                f"(stat_id={stat_id})"
+            )
+        else:
+            logger.info(
+                f"[KOSISConnector] PRD_SE 검출: stat_id={stat_id} → "
+                f"표 지원 주기={sorted(available_prd_se)}"
+            )
+
+        if available_prd_se and prd_se_hint not in available_prd_se:
+            # M > Q > Y > A 우선순위로 best available 선택
+            # [2026-05-26 회귀] start/end 자동 보정 *제거* — 그 보정이 *부분 집합 표*
+            # (예: DT_HIRA4Q '진단방사선·특수의료장비')에서 fetch 성공시켜버려, 사용자가
+            # 원하던 *전체 의료장비* 표(DT_35003_A7)로 fallback 못 가는 부작용. 보정
+            # 없이 두면 Q 단위 표에 Y 포맷 start/end가 가서 빈 응답 → fallback 진행.
+            for _p in ("M", "Q", "Y", "A"):
+                if _p in available_prd_se:
+                    logger.info(
+                        f"[KOSISConnector] prd_se_hint={prd_se_hint!r} 미지원 — "
+                        f"표 지원 주기 {sorted(available_prd_se)} → {_p!r}로 변경 "
+                        f"(stat_id={stat_id})"
+                    )
+                    prd_se_hint = _p
+                    break
 
         # ── [수정 v6.22] prd_se 순회 전략 — claim 시점 단위를 최우선 존중 ──
         # [BEFORE 버그] prd_se_hint가 'M'(월)이어도 아래처럼 'Y'를 맨 앞에
@@ -766,19 +848,18 @@ class KOSISConnector(BaseConnector):
             for p in _fb_order
         ]
 
-        org_id = (
-            stat_rec.org_id
-            or (stat_rec.metadata or {}).get("ORG_ID")
-            or ""
-        )
-        if not org_id:
-            logger.debug(f"org_id 없음: {stat_id}")
-            return None
-
-        prd_m  = (stat_rec.metadata or {}).get("getMeta_PRD")
-        cmmt_m = (stat_rec.metadata or {}).get("getMeta_CMMT")
-        prd_rows  = _rows_from_kosis_body(prd_m)
-        cmmt_rows = _rows_from_kosis_body(cmmt_m)
+        # [2026-05-25] 표가 지원하는 주기만 남기기 — 미지원 주기 호출 차단.
+        # available_prd_se가 비어있으면(meta 없거나 파싱 실패) 기존 전체 strategies 유지.
+        if available_prd_se:
+            _before = len(prd_strategies) + len(fallbacks)
+            prd_strategies = [s for s in prd_strategies if s["prdSe"] in available_prd_se]
+            fallbacks = [s for s in fallbacks if s["prdSe"] in available_prd_se]
+            _after = len(prd_strategies) + len(fallbacks)
+            if _after < _before:
+                logger.info(
+                    f"[KOSISConnector] prdSe pruning: {_before} → {_after} strategies "
+                    f"(stat_id={stat_id}, 지원 주기={sorted(available_prd_se)})"
+                )
 
         obj_l1 = "ALL"
         itm_id = "ALL"
@@ -786,6 +867,22 @@ class KOSISConnector(BaseConnector):
             r0 = cmmt_rows[0]
             obj_l1 = str(r0.get("OBJ_ID") or r0.get("C1") or "ALL").strip() or "ALL"
             itm_id = str(r0.get("ITM_ID") or "ALL").strip() or "ALL"
+
+        # [P34 2026-05-22] dimension_resolver가 결정한 itmId/objL을 *우선* 사용.
+        # cmmt_rows[0]은 보통 합계 코드라 ITM='00' 같은 *전체 묶음 슬라이스*만
+        # 반환 → 세부 항목 row 누락. dim_overrides가 있으면 그것으로 덮어씀.
+        if dim_overrides:
+            _ov_itm = dim_overrides.get("itmId")
+            if _ov_itm:
+                itm_id = _ov_itm
+            _ov_obj1 = dim_overrides.get("objL1")
+            if _ov_obj1:
+                obj_l1 = _ov_obj1
+            logger.info(
+                f"[KOSISConnector] dim_overrides 적용: stat_id={stat_id} "
+                f"itmId={itm_id!r} objL1={obj_l1!r} "
+                f"(objL2+={[(k, v) for k, v in dim_overrides.items() if k.startswith('objL') and k != 'objL1']})"
+            )
 
         base = (self.config.get("base_url") or self.BASE_URL).rstrip("/")
 
@@ -801,6 +898,13 @@ class KOSISConnector(BaseConnector):
                 "itmId":   itm_id,
                 "prdSe":   strategy["prdSe"],
             }
+            # [P34] objL2~objL8도 dim_overrides에서 받음
+            if dim_overrides:
+                for _lv in range(2, 9):
+                    _key = f"objL{_lv}"
+                    _v = dim_overrides.get(_key)
+                    if _v:
+                        base_params[_key] = _v
             if "startPrdDe" in strategy:
                 base_params["startPrdDe"] = strategy["startPrdDe"]
                 base_params["endPrdDe"]   = strategy.get("endPrdDe", strategy["startPrdDe"])
@@ -1156,8 +1260,10 @@ class KOSISConnector(BaseConnector):
             except Exception as e:
                 logger.debug(f"Agent 검색어 재생성 실패: {e}")
             return None
-    async def search(self, query: ConnectorQuery) -> list[StatRecord]:
-        return await self.catalog.search(query)
+    async def search(self, query: ConnectorQuery, top_k: int = 10) -> list[StatRecord]:
+        # [2026-05-27] top_k 전달 — kosis_source가 CatalogSearchTool의 top_k 제어 가능.
+        # 기본 10 유지로 기존 호출 안전.
+        return await self.catalog.search(query, top_k=top_k)
 
     async def fetch(self, stat_id: str, params: dict[str, Any]) -> StatData:
         """BaseConnector 인터페이스 유지 (search_and_fetch 내부에서 직접 사용)"""
@@ -1169,6 +1275,10 @@ class KOSISConnector(BaseConnector):
         sp     = params.get("startPrdDe", "")
         ep     = params.get("endPrdDe", "")
 
+        # [P34 2026-05-22] dim_overrides — params에 들어와 있으면 _fetch_with_retry로 전달.
+        # 호출자(KOSISDataSource)가 dimension_resolver로 결정한 itmId/objL.
+        _dim_ov = params.get("dim_overrides") if isinstance(params.get("dim_overrides"), dict) else None
+
         result = await self._fetch_with_retry(
             stat_id=stat_id,
             stat_rec=stat_rec,
@@ -1176,6 +1286,7 @@ class KOSISConnector(BaseConnector):
             prd_se_hint=prd_se,
             start_prd_de=sp,
             end_prd_de=ep,
+            dim_overrides=_dim_ov,
         )
         return result or StatData(
             stat_id=stat_id, stat_name=stat_id, values={},

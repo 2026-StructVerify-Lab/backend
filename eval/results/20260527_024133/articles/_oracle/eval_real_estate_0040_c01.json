@@ -1,0 +1,41 @@
+{
+  "claim_id": "eval_real_estate_0040_c01",
+  "elapsed_sec": 89.43636107444763,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "032e29df-9d20-4a32-8dd6-3238f7e2fe06",
+        "claim_text": "2024년 하도급거래 실태조사에 따르면, 협력 관계 증진을 위한 지원을 받은 수급사업자는 총 10,189개였습니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "협력 관계 증진 지원 수급사업자 수",
+          "value": 10189.0,
+          "unit": "개",
+          "time_period": "2024",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "정책 > 산업통상 > 공정거래 > 하도급거래"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "032e29df-9d20-4a32-8dd6-3238f7e2fe06",
+        "verdict": "mismatch",
+        "confidence": 0.7,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장은 '2024년 하도급거래 실태조사'에서 협력 관계 증진을 위한 지원을 받은 수급 사업자가 총 10,189개였다는 내용입니다. 그러나 해당 조사의 공식 수치는 56.5개로 확인되어 두 수치 사이에 큰 차이(+10,132.5개, 17933.6%)가 있습니다. 이는 데이터 수집 과정에서의 오류나 해석의 차이 등 다양한 이유로 인해 발생할 수 있으며, 이러한 불일치는 신뢰도를 떨어뜨릴 수 있으므로 주의가 필요합니다. \n\n이 근거 통계는 KOSIS(국가통계포털)에서 제공하며, 자세한 사항은 표 ID DT_152009_B019에서 확인하실 수 있습니다. 다만, 본 자료의 출처 정보가 없어 정확한 사실 여부를 판단하기 어려우므로 추가적인 검증이 필요합니다.",
+        "evidence": {
+          "stat_table_id": "DT_152009_B019",
+          "official_value": 56.5,
+          "unit": "%",
+          "time_period": "2024",
+          "source_name": "KOSIS"
+        }
+      }
+    ]
+  }
+}
