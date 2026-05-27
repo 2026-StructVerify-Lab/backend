@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir c:\\\\JaeYoonCom\\\\Lion\\\\2026-StructVerify-Lab\\\\backend)",
+      "Bash(ls c:/JaeYoonCom/Lion/2026-StructVerify-Lab/backend/articles.jsonl 2>&1 | head -5; ls c:/JaeYoonCom/Lion/2026-StructVerify-Lab/ 2>&1 | head -20)",
+      "Read(//c/JaeYoonCom/Lion/2026-StructVerify-Lab/**)",
+      "Bash(git -C c:/JaeYoonCom/Lion/2026-StructVerify-Lab/backend log --all --oneline -- articles.jsonl)",
+      "Bash(git -C c:/JaeYoonCom/Lion/2026-StructVerify-Lab/backend stash list)",
+      "Bash(git -C c:/JaeYoonCom/Lion/2026-StructVerify-Lab/backend branch -a)",
+      "Bash(git -C c:/JaeYoonCom/Lion/2026-StructVerify-Lab/backend log --all --diff-filter=A --name-only --pretty=format: -- \"*articles*.jsonl\")",
+      "Bash(git -C c:/JaeYoonCom/Lion/2026-StructVerify-Lab/backend ls-files --others --ignored --exclude-standard)",
+      "Bash(xargs -I{} stat {})",
+      "Bash(git -C c:/JaeYoonCom/Lion/2026-StructVerify-Lab/backend log --all --oneline --diff-filter=A -- \"eval/datasets/structverify_eval_v6_detectable/articles.jsonl\")"
+    ]
+  }
+}

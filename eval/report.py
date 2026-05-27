@@ -13,7 +13,12 @@ def render_summary(agg: dict, rows: list[dict]) -> str:
     lines = []
     lines.append("# StructVerify Evaluation Report\n")
 
-    lines.append("## Summary (FEVER-style)\n")
+    mode = agg.get("mode") or "?"
+    mode_desc = {
+        "oracle": "Setting A — gold claim_text 직접 입력 (detection 우회)",
+        "e2e": "Setting B — article 전체 입력 (detection 포함)",
+    }.get(mode, mode)
+    lines.append(f"## Summary (FEVER-style) — mode: `{mode}` ({mode_desc})\n")
     lines.append(f"- Total claims: **{agg['total_claims']}**")
     lines.append(f"- **Label Accuracy**: {agg.get('label_accuracy', agg.get('verdict_accuracy', 0)):.1%}")
     lines.append(f"- **FEVER Score** (strict): {agg.get('fever_score', 0):.1%}")
