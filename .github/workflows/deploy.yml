@@ -1,0 +1,28 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_KEY }}
+          script: |
+            cd ~/backend
+            git pull origin main
+            source .venv/bin/activate
+            pip install -r requirements.txt
+            pip install argon2-cffi psycopg2-binary passlib python-jose pydantic-settings
+            export $(cat .env | xargs)
+            alembic -c sv_platform/alembic.ini upgrade head
+            pm2 restart backend
+
+#--break-system-packages는 venv 에서 pip install 할때만 필요한거고 requierment 할 때는 필요 없음 하지만 있어도 상관없으니 그냥 씀.
+ 
