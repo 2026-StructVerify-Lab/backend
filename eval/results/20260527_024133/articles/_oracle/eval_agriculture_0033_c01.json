@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_agriculture_0033_c01",
+  "elapsed_sec": 790.4791479110718,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "61b6752f-59d8-43cf-9797-8061562dd2b4",
+        "claim_text": "2025년 농업 및 제조업 분야 외국인 임시/일용 근로자 재직 비율이 99.2%로 집계되었습니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "외국인 임시/일용 근로자 재직 비율",
+          "value": 99.2,
+          "unit": "%",
+          "time_period": "2025",
+          "population": "농업 및 제조업 분야",
+          "value_role": "derived_rate",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "고용 > 노동 > 외국인 근로자"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "61b6752f-59d8-43cf-9797-8061562dd2b4",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장에서는 '농업 및 제조업 분야 외국인 임시/일용 근로자 재직 비율'이 2025년 기준 99.2%라고 하였으나, 이와 관련된 공식 통계를 찾을 수 없었습니다. 따라서 해당 주장의 사실 여부를 판단할 수 없습니다. \n\nKOSIS(국가통계포털)에서 시도한 검색어는 '외국인 임시/일용 근로자 재직 비율 농업 및 제조업 분야 2025'이며, 더 자세한 정보를 원하신다면 독자분께서 직접 KOSIS 홈페이지나 국가통계포털 앱을 통해 원하시는 주제와 기간 등을 설정하여 검색해 보시기 바랍니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

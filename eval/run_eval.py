@@ -35,7 +35,7 @@ if str(_ROOT) not in sys.path:
 from structverify.core.config_loader import load_config  # noqa: E402
 from structverify.core.pipeline import VerificationPipeline  # noqa: E402
 
-from eval.metrics import aggregate, compare_claim  # noqa: E402
+from eval.metrics import aggregate, compare_claim, enrich_with_semantic_similarity  # noqa: E402
 from eval.report import compare_to_baseline, write_reports  # noqa: E402
 
 
@@ -476,6 +476,13 @@ async def amain(args: argparse.Namespace) -> int:
             all_rows.extend(rows)
             ok = sum(1 for r in all_rows if r.get("verdict_correct"))
             print(f"  → claims so far: {len(all_rows)}, correct: {ok} ({ok/len(all_rows):.0%})")
+
+    # [Option C] semantic similarity 보강 (HCX embedding API)
+    try:
+        await enrich_with_semantic_similarity(all_rows, threshold=0.65)
+        print("[eval] semantic similarity 계산 완료")
+    except Exception as e:
+        print(f"[eval] semantic 보강 실패 (무시): {e}")
 
     # 집계
     agg = aggregate(all_rows)

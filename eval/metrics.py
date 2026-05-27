@@ -7,15 +7,124 @@ eval.metrics — gold vs actual 비교로 단계별 메트릭 계산.
     "gold_verdict", "actual_verdict", "verdict_correct",
     "gold_stat_id", "actual_stat_id", "stat_id_match",
     "gold_value", "actual_value", "value_match",
-    "gold_indicator", "actual_indicator", "indicator_partial_match",
+    "gold_indicator", "actual_indicator",
+    "indicator_partial_match",           # substring 매칭 (strict)
+    "indicator_semantic_sim",            # cosine similarity (continuous)
+    "indicator_semantic_match",          # bool (sim >= threshold)
     "schema_value_match", "schema_time_match", "schema_pop_match",
     "elapsed_sec", "failure_mode" (if applicable),
   }
+
+semantic similarity는 HCX-EMB-V2 임베딩 기반.
+FactScore (Min et al. 2023, EMNLP), RARR (Gao et al. 2023, ACL) 등에서 사용하는
+soft alignment 방식.
 """
 from __future__ import annotations
 
+import math
+import os
 import re
 from typing import Any
+
+
+# ── Embedding helpers (semantic similarity) ────────────────────────
+# HCX-EMB-V2 API. NCP_API_KEY 환경변수 필요. 미설정 시 semantic 메트릭 None.
+_HCX_EMB_API_URL = "https://clovastudio.stream.ntruss.com/v1/api-tools/embedding/v2"
+_emb_cache: dict[str, list[float]] = {}
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(x * x for x in b))
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
+
+
+async def _get_embedding(text: str) -> list[float] | None:
+    """HCX embedding API 호출, in-memory cache. NCP_API_KEY 없으면 None."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    if text in _emb_cache:
+        return _emb_cache[text]
+    api_key = os.environ.get("NCP_API_KEY")
+    if not api_key:
+        try:
+            from dotenv import load_dotenv
+            from pathlib import Path
+            _env = Path(__file__).resolve().parent.parent / ".env"
+            if _env.exists():
+                load_dotenv(_env)
+            api_key = os.environ.get("NCP_API_KEY")
+        except Exception:
+            pass
+    if not api_key:
+        return None
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(
+                _HCX_EMB_API_URL,
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={"text": text},
+            )
+            d = r.json()
+            emb = (d.get("result") or {}).get("embedding")
+            if isinstance(emb, list):
+                _emb_cache[text] = emb
+                return emb
+    except Exception:
+        pass
+    return None
+
+
+async def enrich_with_semantic_similarity(
+    rows: list[dict],
+    threshold: float = 0.65,
+) -> list[dict]:
+    """rows에 indicator_semantic_sim + indicator_semantic_match 필드 추가.
+
+    FactScore/RARR 등에서 사용하는 *soft alignment* — strict text 매칭을
+    embedding cosine similarity로 대체. 임계값 0.65 (한국어 짧은 phrase 기준).
+
+    HCX embedding API 호출은 *unique text*만 — gold/actual 중복 caching.
+    """
+    # 모든 unique text 수집
+    unique_texts: set[str] = set()
+    for r in rows:
+        for k in ("gold_indicator", "actual_indicator"):
+            t = (r.get(k) or "").strip()
+            if t:
+                unique_texts.add(t)
+
+    if not unique_texts:
+        return rows
+
+    # 일괄 embedding (concurrent)
+    import asyncio
+    text_list = list(unique_texts)
+    results = await asyncio.gather(*[_get_embedding(t) for t in text_list],
+                                     return_exceptions=True)
+    embeddings: dict[str, list[float]] = {}
+    for t, emb in zip(text_list, results):
+        if isinstance(emb, list):
+            embeddings[t] = emb
+
+    # 각 row에 필드 추가
+    for r in rows:
+        g = (r.get("gold_indicator") or "").strip()
+        a = (r.get("actual_indicator") or "").strip()
+        if g and a and g in embeddings and a in embeddings:
+            sim = _cosine(embeddings[g], embeddings[a])
+            r["indicator_semantic_sim"] = round(sim, 4)
+            r["indicator_semantic_match"] = bool(sim >= threshold)
+        else:
+            r["indicator_semantic_sim"] = None
+            r["indicator_semantic_match"] = None
+
+    return rows
 
 
 def _normalize_indicator(s: str | None) -> str:
@@ -232,6 +341,12 @@ def aggregate(rows: list[dict]) -> dict:
     n_stat_match = sum(1 for r in rows if r.get("stat_id_match"))
     n_val_match = sum(1 for r in rows if r.get("value_match"))
     n_ind_partial = sum(1 for r in rows if r.get("indicator_partial_match"))
+    # [2026-05-27 Option C] semantic similarity 기반 indicator 매칭
+    n_ind_semantic = sum(1 for r in rows if r.get("indicator_semantic_match") is True)
+    n_with_sim = sum(1 for r in rows if r.get("indicator_semantic_sim") is not None)
+    sim_values = [r["indicator_semantic_sim"] for r in rows
+                   if r.get("indicator_semantic_sim") is not None]
+    avg_indicator_sim = (sum(sim_values) / len(sim_values)) if sim_values else None
     n_schema_val = sum(1 for r in rows if r.get("schema_value_match"))
     n_schema_time = sum(1 for r in rows if r.get("schema_time_match"))
     n_schema_pop = sum(1 for r in rows if r.get("schema_pop_match"))
@@ -284,6 +399,12 @@ def aggregate(rows: list[dict]) -> dict:
         "value_accuracy": n_val_match / n,
         # Schema slot (ACE/DocRED 스타일)
         "indicator_partial_accuracy": n_ind_partial / n,
+        # [Option C] Semantic indicator metrics (FactScore/RARR 스타일 soft alignment)
+        "indicator_semantic_accuracy": (
+            n_ind_semantic / n_with_sim if n_with_sim else 0.0
+        ),
+        "indicator_semantic_avg_sim": avg_indicator_sim,
+        "indicator_n_with_sim": n_with_sim,
         "schema_value_accuracy": n_schema_val / n,
         "schema_time_accuracy": n_schema_time / n,
         "schema_pop_accuracy": n_schema_pop / n,

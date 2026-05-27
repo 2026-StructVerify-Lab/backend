@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_real_estate_0031_c03",
+  "elapsed_sec": 234.51555275917053,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "f997f20c-a451-4117-91f5-5ca56989b027",
+        "claim_text": "1983 공사규모별/세분공사종류별 계약실적 - 수의계약은(는) 3,821,631,320천원로 나타났다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "공사규모별 세분공사종류별 계약실적",
+          "value": 3821631320.0,
+          "unit": "천원",
+          "time_period": "1983",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "건설 > 공사 > 계약 실적"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "f997f20c-a451-4117-91f5-5ca56989b027",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"1983년 공사 규모별/세분 공사 종류별 계약실적 중 수의계약 금액은 3,821,631,320 천원이다\"라는 내용을 국가통계포털(KOSIS)에서 찾아보았지만, 해당 자료를 찾을 수 없었습니다. 따라서 이 주장의 사실 여부를 판단할 수 없습니다. \n\n국가통계포털에서는 다양한 주제와 연도의 통계자료를 제공하고 있으니, 관심 있는 주제나 연도의 통계자료를 찾아보는 것을 추천드립니다. 또한 필요한 경우에는 담당 기관이나 부서에 문의하여 정확한 정보를 확인하는 것이 좋습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

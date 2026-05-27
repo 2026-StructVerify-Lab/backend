@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_weather_0035_c01",
+  "elapsed_sec": 137.3230791091919,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "bcdf3b10-8ae9-4ccb-9367-c8eef47ef2bd",
+        "claim_text": "전국 기상산업의 매출액은 2024년에 12,910,58백만 원을 기록하였습니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "매출액",
+          "value": 1291058.0,
+          "unit": "백만 원",
+          "time_period": "2024",
+          "population": "전국 기상산업",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "경제 > 산업 > 기상산업"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "bcdf3b10-8ae9-4ccb-9367-c8eef47ef2bd",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"전국 기상산업의 매출액은 2024년에 12,910,58백만 원을 기록하였다\"라는 내용을 검증하고자 국가통계포털(KOSIS)에서 '매출액 전국 기상산업 2024'와 같은 검색어로 찾아보았지만, 관련된 통계 자료를 찾을 수 없었습니다. 따라서 이 주장의 사실 여부를 판단할 수 없습니다. \n\n국가통계포털에서는 국내 다양한 분야의 통계 자료를 제공하고 있으니, 관심 있는 주제가 있다면 해당 사이트에서 검색해 보는 것을 추천드립니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

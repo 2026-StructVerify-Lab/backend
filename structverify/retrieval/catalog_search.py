@@ -235,6 +235,49 @@ class CatalogSearchTool:
             all_recs = await self._search_pgvector(embedding, category_keywords=None, top_k=15)
             _add(all_recs)
 
+            # 4) [2026-05-27 Fix B] time-aware union — 시점 토큰을 쿼리에 추가해 historical 표 boost
+            # 배경: catalog 임베딩에는 *category_path 안의 연도 토큰*만 있고
+            # available_periods 메타데이터는 비어있음. 그래서 historical claim
+            # (예: '1991 수상운송업 수익')에 query='수상운송업 수익 한국 전체 운송업'
+            # 만 보내면 modern 표가 cosine 1~10위 점유 → 정답 historical 표
+            # (DT_1IA2075 — category_path에 "1991:6차산업분류기준" 포함)가 surface
+            # 못 함.
+            # 해결 (4-a): 시점 토큰(YYYY)을 쿼리에 추가한 *두 번째* 임베딩 검색.
+            # 해결 (4-b): category_path ILIKE '%YYYY%' SQL 필터 + 동일 임베딩으로 정렬.
+            #   임베딩 단독으론 historical 표가 rank ~285 (sim 0.55)까지 깊이 묻혀
+            #   surface 못 하지만, category_path에 explicit "1991" 토큰이 있는 표는
+            #   ILIKE로 필터 후 임베딩 sim 정렬 → top K 안에 진입.
+            # 회귀 없음 — 기존 검색 결과는 그대로 살아있고 *추가* 후보만 보강.
+            _tp = getattr(query, "time_period", None) or (
+                (query.extra_params or {}).get("time_period")
+            )
+            if _tp:
+                _year_m = re.search(r"(?:19|20)\d{2}", str(_tp))
+                if _year_m:
+                    _year = _year_m.group(0)
+                    # (4-a) 시점 토큰 augment 후 임베딩 재검색
+                    _time_text = f"{embedding_text} {_year}"
+                    _time_emb = await self._get_embedding(_time_text)
+                    if _time_emb:
+                        _before_cnt = len(results)
+                        _time_recs = await self._search_pgvector(
+                            _time_emb, category_keywords=None, top_k=15,
+                        )
+                        _add(_time_recs)
+                        _added_a = len(results) - _before_cnt
+                        # (4-b) category_path ILIKE '%YYYY%' + 임베딩 sort
+                        _before_cnt = len(results)
+                        _year_recs = await self._search_pgvector(
+                            embedding, category_keywords=[_year], top_k=15,
+                        )
+                        _add(_year_recs)
+                        _added_b = len(results) - _before_cnt
+                        logger.info(
+                            f"CatalogSearch time-aware union (year={_year}): "
+                            f"emb_aug={len(_time_recs)}→{_added_a} new, "
+                            f"path_ilike={len(_year_recs)}→{_added_b} new"
+                        )
+
         # [v6.21] 수록주기 인지 재정렬 — claim이 월/분기 시점이면
         # 월간 데이터가 있는 표를 상위로. 연 단위 표만 상위에 오면
         # fetch가 모두 '표 시점 단위 불일치'로 거부돼 검증 불가가 된다.

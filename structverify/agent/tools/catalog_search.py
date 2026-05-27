@@ -213,7 +213,12 @@ class CatalogSearchTool(ToolBase):
                 _ctx_for_source["raw_claim"] = str(_claim_text)[:200]
             _schema = getattr(_claim, "schema", None)
             if _schema is not None:
-                for _k in ("parent_path", "population", "indicator"):
+                # [2026-05-27 Fix B] time_period 포함 — catalog_search에서 시점 토큰
+                # 기반 union 검색을 발동시키기 위해 schema.time_period를 context에
+                # 실어 보낸다. kosis_source._make_query가 ConnectorQuery.time_period로
+                # 매핑하고 CatalogSearch가 "embedding_text + year"로 추가 pgvector
+                # 검색을 돌려 dedup union.
+                for _k in ("parent_path", "population", "indicator", "time_period"):
                     _v = getattr(_schema, _k, None)
                     if _v:
                         _ctx_for_source[_k] = str(_v)

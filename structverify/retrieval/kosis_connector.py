@@ -1260,8 +1260,10 @@ class KOSISConnector(BaseConnector):
             except Exception as e:
                 logger.debug(f"Agent 검색어 재생성 실패: {e}")
             return None
-    async def search(self, query: ConnectorQuery) -> list[StatRecord]:
-        return await self.catalog.search(query)
+    async def search(self, query: ConnectorQuery, top_k: int = 10) -> list[StatRecord]:
+        # [2026-05-27] top_k 전달 — kosis_source가 CatalogSearchTool의 top_k 제어 가능.
+        # 기본 10 유지로 기존 호출 안전.
+        return await self.catalog.search(query, top_k=top_k)
 
     async def fetch(self, stat_id: str, params: dict[str, Any]) -> StatData:
         """BaseConnector 인터페이스 유지 (search_and_fetch 내부에서 직접 사용)"""

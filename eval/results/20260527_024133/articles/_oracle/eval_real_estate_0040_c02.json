@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_real_estate_0040_c02",
+  "elapsed_sec": 92.93474006652832,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "09e19b0b-30fa-46a3-a7c3-4783c525cef6",
+        "claim_text": "2020년 하도급 관련 정책에 대한 만족도를 조사한 결과, 응답은 총 45,066건이었습니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "응답 건수",
+          "value": 45066.0,
+          "unit": "건",
+          "time_period": "2020",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "정책 > 정책 평가"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "09e19b0b-30fa-46a3-a7c3-4783c525cef6",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"2020년 하도급 관련 정책에 대한 만족도를 조사한 결과, 응답은 총 45,066건이었습니다.\" 에 대한 공식 통계를 찾을 수 없었습니다. 이는 국가통계포털(KOSIS)에서 해당 주제와 관련된 통계표를 발견하지 못했기 때문입니다. 따라서 이를 검증할 수 없습니다. \n\n더 자세한 정보를 원하신다면 독자께서 직접 KOSIS 홈페이지(https://kosis.kr/) 에서 '응답 건수 전체 2020' 을 검색해 보실 것을 제안 드립니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "claim_id": "eval_economy_0006_c01",
+  "elapsed_sec": 95.70329093933105,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "1709ab4f-27ea-4729-acd0-83ec944fa2ef",
+        "claim_text": "한국의 경제 규모는 최근 약 930조 원에 달하는 것으로 나타났다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "경제 규모",
+          "value": 930.0,
+          "unit": "조원",
+          "time_period": "2024",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "경제 > 총량 > GDP"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "1709ab4f-27ea-4729-acd0-83ec944fa2ef",
+        "verdict": "mismatch",
+        "confidence": 0.95,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장은 한국의 경제 규모가 약 930조 원이라는 내용이지만, 이는 실제와는 차이가 있습니다. 2023년 기준 대한민국의 국내총생산(GDP)은 6,828조 1,466억 원으로, 해당 주장과는 큰 차이(-681조 8,846억 원)가 있습니다. 이러한 차이는 신뢰할 수 있는 출처에서 확인되지 않은 기사 수치를 기반으로 한 주장이기 때문일 가능성이 높습니다. 따라서 정확한 사실관계 파악을 위해서는 신뢰할 수 있는 기관이나 정부 발표 등을 참고해야 합니다. 근거 통계는 KOSIS이며, 더 자세한 사항은 해당 사이트에서 확인하실 수 있습니다.",
+        "evidence": {
+          "stat_table_id": "DT_200Y105",
+          "official_value": 682814.6,
+          "unit": "십억원",
+          "time_period": "2024",
+          "source_name": "KOSIS"
+        }
+      }
+    ]
+  }
+}

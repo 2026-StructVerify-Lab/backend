@@ -1,0 +1,41 @@
+{
+  "claim_id": "eval_weather_0011_c03",
+  "elapsed_sec": 69.9173150062561,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "193b4a12-2e21-43b0-bcc0-8614463cfa08",
+        "claim_text": "2024년 기준 한국의 기상산업 사업체는 총 135개입니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "기상산업 사업체 수",
+          "value": 135.0,
+          "unit": "개",
+          "time_period": "2024",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "기타 > 산업 > 기상산업"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "193b4a12-2e21-43b0-bcc0-8614463cfa08",
+        "verdict": "mismatch",
+        "confidence": 1.0,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장은 '2024년 기준 한국의 기상산업 사업체 수'에 대한 것이며, 이에 대한 기사에서는 135개라고 언급했으나, 해당 연도의 실제 공식 수치는 1134개였습니다. 따라서 두 수치 사이에는 999개의 차이가 있으며, 이는 88.1%의 큰 차이이므로 신뢰할 수 없습니다. 이러한 차이는 주로 데이터 수집 및 분석 과정에서의 오류나 누락 등이 원인일 수 있습니다. 본 검증 결과는 대한민국 통계청 KOSIS에서 제공하는 자료를 기반으로 한 것입니다.",
+        "evidence": {
+          "stat_table_id": "DT_424001_037",
+          "official_value": 1134.0,
+          "unit": "개",
+          "time_period": "2024",
+          "source_name": "KOSIS"
+        }
+      }
+    ]
+  }
+}

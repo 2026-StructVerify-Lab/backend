@@ -890,7 +890,12 @@ class KOSISDataSource(BaseDataSource):
         if category:
             _extra["category"] = category
         _ctx = context or {}
-        for _k in ("parent_path", "raw_claim", "population", "indicator"):
+        # [2026-05-27 Fix B] time_period 추가 — catalog_search에서 schema.time_period를
+        # context에 실어 보내면 여기서 _extra에 합치고 _make_query를 통해 ConnectorQuery
+        # .time_period로 매핑된다. CatalogSearch._search_pgvector_with_time_union이
+        # 이 값을 보고 "embedding_text + year" 추가 검색을 돌려 dedup union으로
+        # 합집합 → historical 케이스 (1991 등) 정답 표 surface.
+        for _k in ("parent_path", "raw_claim", "population", "indicator", "time_period"):
             _v = _ctx.get(_k)
             if _v:
                 _extra[_k] = _v
@@ -900,11 +905,17 @@ class KOSISDataSource(BaseDataSource):
             query,
             indicator=_ctx.get("indicator") or query,
             population=_ctx.get("population"),
+            time_period=_ctx.get("time_period"),
             extra_params=_extra,
         )
 
         try:
-            records = await connector.search(cq)
+            # [2026-05-27 Fix A] top_k propagation — kosis_source는 호출자(CatalogSearchTool)
+            # top_k를 받지만 그동안 connector.search에 전달 안 함. 결과 connector가
+            # 기본 10만 리턴 → pgvector top 15가 잘려 historical 케이스 (1991 등)의
+            # 정답 표가 surface 못 함. KOSISConnector.search도 top_k 받도록 시그니처
+            # 보강 (default 10 유지로 다른 호출 영향 없음).
+            records = await connector.search(cq, top_k=top_k)
         except Exception as e:
             logger.warning(f"[KOSISDataSource] search 실패: {type(e).__name__}: {e}")
             return []

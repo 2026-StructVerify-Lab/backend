@@ -1,0 +1,41 @@
+{
+  "claim_id": "eval_population_0002_c12",
+  "elapsed_sec": 102.71223402023315,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "2c9737c1-aa71-4130-9ed3-d667a028bf92",
+        "claim_text": "최근 한국의 인구 규모는 약 619만 명 정도로 파악되고 있다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "인구 규모",
+          "value": 6190000.0,
+          "unit": "명",
+          "time_period": "2024",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "인구 > 총인구"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "2c9737c1-aa71-4130-9ed3-d667a028bf92",
+        "verdict": "mismatch",
+        "confidence": 0.95,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장은 최근 한국의 인구 규모가 약 619만 명이라는 것인데, 이는 기사에서 제시한 수치인 619만 명과 대한민국 통계청 KOSIS에서 제공하는 공식 수치인 54,916,666명과는 차이가 있습니다. \n\n이 차이는 12.7%이며, 이러한 수치는 신뢰도 95% 수준에서 유의미한 차이이므로 해당 주장은 사실과 다르다고 볼 수 있습니다. 따라서 정확한 최신 인구수를 확인하려면 공신력 있는 기관이나 정부기관의 발표를 참고해야 합니다.",
+        "evidence": {
+          "stat_table_id": "DT_1BPA401",
+          "official_value": 5491666.0,
+          "unit": null,
+          "time_period": "2024",
+          "source_name": "KOSIS"
+        }
+      }
+    ]
+  }
+}

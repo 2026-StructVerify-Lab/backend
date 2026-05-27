@@ -1,0 +1,41 @@
+{
+  "claim_id": "eval_education_0028_c06",
+  "elapsed_sec": 74.82253694534302,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "556013c2-ac3e-4e0a-97bb-7a26b6cee232",
+        "claim_text": "2024 전년 대비 당해년 진로교육 예산 변화은(는) 22,7%로 나타났다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "진로교육 예산 변화율",
+          "value": 227.0,
+          "unit": "%",
+          "time_period": "2024",
+          "population": "전체",
+          "value_role": "derived_rate",
+          "prev_value": null,
+          "prev_time_period": "2023",
+          "parent_path": "정책 > 교육 > 진로교육"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "556013c2-ac3e-4e0a-97bb-7a26b6cee232",
+        "verdict": "mismatch",
+        "confidence": 0.7,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장에서는 2024년 전년 대비 당해년 진로교육 예산 변화율이 22.7%라고 했지만, 실제로는 이와 큰 차이가 있는 것으로 확인되었습니다. \n\nKOSIS에서 제공하는 2024년 기준 자료에 따르면, 해당 연도의 진로교육 예산 변화율은 3.6%로 나타났습니다. 따라서 기사에서 제시한 227.0%와는 223.4%p라는 큰 차이를 보입니다. 이러한 차이는 신뢰도에도 영향을 미치며, 근거 통계인 KOSIS에서도 이를 고려하여 70%의 신뢰도를 부여하였습니다.  \n\n따라서 본 주장은 사실과 다르며, 보다 정확한 정보를 위해서는 관련 기관이나 정부 보도자료 등을 참고할 필요가 있습니다.",
+        "evidence": {
+          "stat_table_id": "DT_11216N_30408",
+          "official_value": 3.6,
+          "unit": "%",
+          "time_period": "2024",
+          "source_name": "KOSIS"
+        }
+      }
+    ]
+  }
+}

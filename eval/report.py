@@ -39,7 +39,13 @@ def render_summary(agg: dict, rows: list[dict]) -> str:
     lines.append("## Per-stage Accuracy\n")
     lines.append(f"| Stage | Accuracy |")
     lines.append(f"| --- | --- |")
-    lines.append(f"| schema.indicator (부분 매칭) | {agg['indicator_partial_accuracy']:.1%} |")
+    lines.append(f"| schema.indicator (substring) | {agg['indicator_partial_accuracy']:.1%} |")
+    sem_acc = agg.get("indicator_semantic_accuracy", 0)
+    sem_avg = agg.get("indicator_semantic_avg_sim")
+    sem_n = agg.get("indicator_n_with_sim", 0)
+    if sem_n > 0:
+        sim_str = f"avg sim={sem_avg:.3f}" if sem_avg is not None else "sim=?"
+        lines.append(f"| schema.indicator (semantic τ=0.65) | {sem_acc:.1%} ({sim_str}, n={sem_n}) |")
     lines.append(f"| schema.value | {agg['schema_value_accuracy']:.1%} |")
     lines.append(f"| schema.time_period | {agg['schema_time_accuracy']:.1%} |")
     lines.append(f"| schema.population | {agg['schema_pop_accuracy']:.1%} |")

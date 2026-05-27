@@ -1,0 +1,41 @@
+{
+  "claim_id": "eval_policy_0017_c04",
+  "elapsed_sec": 65.00771999359131,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "9086a421-6be5-4c4b-a07d-8089e277d73f",
+        "claim_text": "최근 한국의 경제 규모는 약 953조 원으로 추정되며, 이는 지속적인 성장을 나타냅니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "경제 규모",
+          "value": 953.0,
+          "unit": "조원",
+          "time_period": "2024",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "경제 > 총량 > GDP"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "9086a421-6be5-4c4b-a07d-8089e277d73f",
+        "verdict": "mismatch",
+        "confidence": 0.9,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장에서는 한국의 경제 규모를 953조 원으로 추정했으나, 실제로는 612조 5336억 원으로 확인됩니다. 두 수치 사이에는 611조 5806억 원이라는 큰 차이가 있으며, 이는 99.8%의 오차율에 해당합니다. 이러한 차이는 '수치 불일치'라는 불일치 유형으로 분류할 수 있습니다. 신뢰도는 90%이며, 근거 통계는 KOSIS에서 제공하는 2024년 기준 데이터입니다. 다만, 정확한 출처 정보가 없어 추가적인 검증이 필요합니다.",
+        "evidence": {
+          "stat_table_id": "DT_200Y106",
+          "official_value": 612533.6,
+          "unit": "십억원",
+          "time_period": "2024",
+          "source_name": "KOSIS"
+        }
+      }
+    ]
+  }
+}

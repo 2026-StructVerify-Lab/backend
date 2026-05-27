@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_real_estate_0007_c01",
+  "elapsed_sec": 214.13132905960083,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "01d1b4c9-96a9-4254-a12f-7ec3e1b2da30",
+        "claim_text": "부동산 관련 데이터 또는 통계 미활용 사유에 대한 주장이 제기됐다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": null,
+          "value": null,
+          "unit": null,
+          "time_period": null,
+          "population": null,
+          "value_role": null,
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": null
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "01d1b4c9-96a9-4254-a12f-7ec3e1b2da30",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 '부동산 관련 데이터 또는 통계 미활용 사유에 대한 주장'에 대한 공식 통계를 찾을 수 없었습니다. 이는 국가통계포털(KOSIS)에서 해당 주제와 관련된 통계표를 발견하지 못했기 때문입니다. 따라서, 이러한 주장이 사실인지 여부를 판단하려면 추가적인 조사가 필요합니다. 독자들은 국가통계포털(KOSIS)에서 원하는 주제나 키워드를 검색하여 다양한 통계 자료를 찾아볼 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

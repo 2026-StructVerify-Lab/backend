@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_employment_0025_c06",
+  "elapsed_sec": 82.9402973651886,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "cb30003e-4975-4ee2-b8bc-f64c0a70a865",
+        "claim_text": "2025년에 발달장애인을 둔 보호자 중 208,477.1명이 발달장애인의 취업을 희망하였다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "발달장애인 보호자의 취업 희망자 수",
+          "value": 208477.1,
+          "unit": "명",
+          "time_period": "2025",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "사회 > 복지 > 장애인"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "cb30003e-4975-4ee2-b8bc-f64c0a70a865",
+        "verdict": "unverifiable",
+        "confidence": 0.0,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장에서는 '발달장애인을 둔 보호자 중 208,477.1명이 발달장애인의 취업을 희망하였다'고 밝히고 있습니다. 그러나 이와 관련된 공식 통계를 찾을 수 없어 검증이 불가능했습니다. \n\n통계청 국가통계포털(KOSIS)에서 해당 정보를 찾기 위해 '발달장애인 보호자의 취업 희망자 수 전체 2025'라는 검색어를 사용하였으나 적절한 통계표를 발견하지 못했습니다. 따라서 보다 정확한 검증을 위해서는 추가적인 조사가 필요해 보입니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

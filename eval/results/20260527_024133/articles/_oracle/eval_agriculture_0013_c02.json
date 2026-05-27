@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_agriculture_0013_c02",
+  "elapsed_sec": 81.51834321022034,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "ffc8dbe1-240c-43f8-b424-9dea9bf848b8",
+        "claim_text": "2015년에는 전국 농어업인 마을에서 3,920명이 마을 안전 시설/설비에 대해 긍정적인 인식을 가지고 있었습니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "마을 안전 시설 설비 긍정 인식 인구 수",
+          "value": 3920.0,
+          "unit": "명",
+          "time_period": "2015",
+          "population": "전국 농어업인 마을",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "사회 > 복지 > 지역사회개발"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "ffc8dbe1-240c-43f8-b424-9dea9bf848b8",
+        "verdict": "unverifiable",
+        "confidence": 0.0,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장에서는 2015년 전국 농어업인 마을에서 3,920명이 마을 안전 시설 및 설비에 대해 긍정적인 인식을 가지고 있었다고 합니다. 그러나 이와 관련된 공식 통계를 찾을 수 없어 검증이 불가능했습니다. 해당 정보를 확인하려면 국가통계포털(KOSIS)에서 '마을 안전 시설 설비 긍정 인식 인구 수 전국 농어업인 마을 2015'라는 검색어를 활용해 찾아볼 것을 제안 드립니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

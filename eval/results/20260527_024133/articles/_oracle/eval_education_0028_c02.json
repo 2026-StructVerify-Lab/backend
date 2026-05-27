@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_education_0028_c02",
+  "elapsed_sec": 89.789555311203,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "f0ead279-d372-4e11-98cf-719de67a2537",
+        "claim_text": "2025년 전국 학교의 진로교육협의회 운영 비율은 6.6%이다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "진로교육협의회 운영 비율",
+          "value": 6.6,
+          "unit": "%",
+          "time_period": "2025",
+          "population": "전국 학교",
+          "value_role": "derived_rate",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "교육 > 교육정책 > 진로교육"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "f0ead279-d372-4e11-98cf-719de67a2537",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장인 \"2025년 전국 학교의 진로교육협의회 운영 비율은 6.6%이다\"라는 것을 검증하고자 했으나, 국가통계포털(KOSIS)에서 관련 통계 자료를 찾을 수 없어 검증이 불가능했습니다. 이와 관련된 정보를 확인하시려면 해당 기관이나 단체에 문의하시는 것도 좋은 방법일 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}
