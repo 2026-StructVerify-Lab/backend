@@ -30,9 +30,11 @@ async def main() -> None:
     cfg = load_yaml(ROOT / args.config)
     builder = OutcomeDatasetBuilder(cfg)
     manifest = await builder.build()
+    holdout = len(manifest.holdout_case_ids or [])
     print(
         f"Done: {manifest.dataset_id} cases={manifest.case_count} "
         f"match={manifest.match_count} mismatch={manifest.mismatch_count} "
+        f"holdout={holdout} schema_version={manifest.schema_version} "
         f"status={manifest.status}"
     )
 

@@ -70,6 +70,32 @@ def dataset_dir(datasets_root: Path, dataset_id: str) -> Path:
     return datasets_root / dataset_id
 
 
+def load_outcome_manifest(datasets_root: Path, dataset_id: str) -> Any | None:
+    from structverify.eval.schemas import OutcomeManifest
+
+    path = dataset_dir(datasets_root, dataset_id) / "manifest.json"
+    if not path.exists():
+        return None
+    with open(path, encoding="utf-8") as f:
+        return OutcomeManifest.model_validate(json.load(f))
+
+
+def filter_cases_by_split(
+    cases: list[Any],
+    *,
+    holdout_ids: set[str] | None,
+    split: str,
+) -> list[Any]:
+    """split: train | holdout | all."""
+    if split == "all" or not holdout_ids:
+        return cases
+    if split == "holdout":
+        return [c for c in cases if c.case_id in holdout_ids]
+    if split == "train":
+        return [c for c in cases if c.case_id not in holdout_ids]
+    raise ValueError(f"unknown split: {split}")
+
+
 def make_run_id(dataset_id: str, prefix: str = "eval") -> str:
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"{prefix}_{dataset_id}_{ts}"

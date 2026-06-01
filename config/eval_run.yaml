@@ -1,16 +1,19 @@
-# 3-axis eval harness
+# 3-axis eval harness (v2 dataset + dual schema modes)
 datasets_root: eval/datasets
 runs_root: eval/runs
 
-dataset_id: structverify_outcome_v1
-component_dataset_id: structverify_components_v1
+dataset_id: structverify_outcome_v2
+component_dataset_id: structverify_components_v2
 
-# Outcome harness
 eval:
   domain_oracle: true
+  schema_modes:
+    - oracle
+    - induce
+  primary_schema_mode: oracle
+  workspace_scope: per_case
   value_tolerance_relative: 0.005
   value_tolerance_absolute: 0.1
-  one_claim_per_job: true
+  split: train
 
-# Merge with production pipeline settings (see config/default.yaml + .env)
 enable_feedback: false

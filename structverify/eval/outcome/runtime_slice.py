@@ -31,14 +31,35 @@ from structverify.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+def _apply_workspace_scope(config: dict[str, Any], case_id: str) -> dict[str, Any]:
+    """Per-case workspace isolation (avoid cross-case verified_facts cache)."""
+    cfg = dict(config)
+    eval_cfg = dict(cfg.get("eval") or {})
+    if eval_cfg.get("workspace_scope") == "per_case":
+        agent_cfg = dict(cfg.get("agent") or {})
+        ws_cfg = dict(agent_cfg.get("workspace") or {})
+        ws_cfg["scope"] = "job_id"
+        ws_cfg["external_job_id"] = case_id
+        agent_cfg["workspace"] = ws_cfg
+        cfg["agent"] = agent_cfg
+    return cfg
+
+
 async def run_outcome_slice(
     sir_doc: SIRDocument,
     oracle_claims: list[Claim],
     config: dict[str, Any],
+    *,
+    schema_mode: str = "induce",
+    case_id: str | None = None,
 ) -> tuple[list[Claim], list[VerificationResult]]:
     """Run domain → schema → verify for oracle claims (no detect_claims)."""
     eval_cfg = config.get("eval") or {}
-    agent = RuntimeAgent(config=config)
+    workspace_case_id = case_id or (
+        str(oracle_claims[0].claim_id) if oracle_claims else "eval"
+    )
+    slice_config = _apply_workspace_scope(config, workspace_case_id)
+    agent = RuntimeAgent(config=slice_config)
     memory = DocumentWorkingMemory(
         doc_id=str(sir_doc.doc_id),
         run_id=str(uuid4())[:8],
@@ -81,7 +102,10 @@ async def run_outcome_slice(
     except Exception as e:
         logger.warning(f"[eval] temporal graph failed: {e}")
 
-    claims = await induce_schemas(claims, config, graph=temporal_graph)
+    if schema_mode == "oracle":
+        logger.info(f"[eval] schema_mode=oracle — skip induce_schemas ({len(claims)} claims)")
+    else:
+        claims = await induce_schemas(claims, config, graph=temporal_graph)
     memory.record_claims(claims)
 
     all_nodes: list[GraphNode] = []
@@ -89,7 +113,10 @@ async def run_outcome_slice(
     all_nodes, all_edges = build_claim_graph(claims, sir_doc=sir_doc)
 
     agent_enabled = bool((config.get("agent") or {}).get("enabled", False))
-    source_text = agent._get_source_text(sir_doc)
+    source_text = (
+        getattr(sir_doc, "raw_text", None)
+        or agent._get_source_text(sir_doc)
+    )
     anchor_year = temporal_graph.get_anchor_year() if temporal_graph else None
 
     sem = asyncio.Semaphore(3)
@@ -113,7 +140,7 @@ async def run_outcome_slice(
                 agent.kosis, query, claim_nid
             )
             result = verify_claim(
-                claim, evidence, config, graph=temporal_graph
+                claim, evidence, slice_config, graph=temporal_graph
             )
             _ev_cat = None
             if evidence is not None:

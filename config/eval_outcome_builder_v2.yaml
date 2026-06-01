@@ -1,0 +1,43 @@
+# Outcome eval dataset builder v2 — KOSIS-first, natural-language claim text
+dataset_id: structverify_outcome_v2
+datasets_root: eval/datasets
+
+registry_path: domain-packs/registry.yaml
+exclude_domains:
+  - general
+
+target_cases: 50
+seed: 42
+holdout_fraction: 0.1
+
+match_ratio: 0.55
+mismatch_ratio: 0.45
+
+value_tolerance_relative: 0.005
+value_tolerance_absolute: 0.1
+
+max_domain_retries: 8
+max_probe_attempts_per_slot: 3
+catalog_top_k: 10
+
+probe_unit_skip_substrings:
+  - "명 %"
+  - "명 % 점"
+  - "개%"
+
+domain_keywords:
+  healthcare: ["의료", "건강", "병원"]
+  employment: ["고용", "취업", "실업"]
+  economy: ["경제", "GDP", "성장"]
+  population: ["인구", "출생", "사망"]
+  finance: ["금융", "금리", "대출"]
+  education: ["교육", "학생", "학교"]
+  environment: ["환경", "에너지", "탄소"]
+  agriculture: ["농업", "농가", "수확"]
+  real_estate: ["부동산", "주택", "아파트"]
+  weather: ["기온", "강수", "기상"]
+
+emit_component_fixtures: true
+component_dataset_id: structverify_components_v2
+
+schema_version: 2

@@ -1,5 +1,6 @@
 from structverify.eval.build.claim_templates import (
     build_match_claim_text,
+    float_to_claim_str,
     perturb_stated_value,
 )
 
@@ -25,3 +26,31 @@ def test_perturb_mismatch():
 def test_perturb_absolute():
     bad = perturb_stated_value(1000.0, "명")
     assert abs(bad - 1000.0) / bad > 0.30
+
+
+def test_float_to_claim_str_no_scientific():
+    s = float_to_claim_str(1865404.9)
+    assert "e" not in s.lower()
+    assert "E" not in s
+
+
+def test_large_value_claim_text():
+    t = build_match_claim_text(
+        indicator="GDP",
+        time_period="2022",
+        value=1865404.9,
+        unit="십억원",
+    )
+    assert "e+" not in t.lower()
+    assert "e-" not in t.lower()
+
+
+def test_compound_unit_claim():
+    t = build_match_claim_text(
+        indicator="에너지소비",
+        time_period="2021",
+        value=455970.0,
+        unit="천TOE",
+    )
+    assert "천TOE" in t or "TOE" in t
+    assert "e" not in t.lower()

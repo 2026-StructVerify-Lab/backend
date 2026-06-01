@@ -56,6 +56,15 @@ def _verdict_aligned(components: dict[str, Any]) -> float | None:
     return _rate(v, "aligned", "accuracy")
 
 
+def _outcome_mode_block(outcome: dict[str, Any], mode: str) -> dict[str, Any]:
+    block = outcome.get(mode)
+    if isinstance(block, dict) and "verdict_accuracy" in block:
+        return block
+    if mode == outcome.get("primary_schema_mode", "oracle"):
+        return outcome
+    return {}
+
+
 def collect_metrics(report: dict[str, Any]) -> list[tuple[str, float | None, str]]:
     """Label, value in [0,1], group name."""
     out: list[tuple[str, float | None, str]] = []
@@ -63,8 +72,44 @@ def collect_metrics(report: dict[str, Any]) -> list[tuple[str, float | None, str
     audit = report.get("audit") or {}
     comp = report.get("components") or {}
 
-    out.append(("Outcome · verdict", _rate(outcome, "verdict_accuracy"), "primary"))
-    out.append(("Outcome · value tol.", _rate(outcome, "value_tolerance_rate"), "primary"))
+    primary = outcome.get("primary_schema_mode", "oracle")
+    oracle_blk = _outcome_mode_block(outcome, "oracle")
+    induce_blk = _outcome_mode_block(outcome, "induce")
+    if oracle_blk or induce_blk:
+        out.append(
+            (
+                "Outcome · verdict (oracle)",
+                _rate(oracle_blk, "verdict_accuracy"),
+                "primary",
+            )
+        )
+        out.append(
+            (
+                "Outcome · verdict (induce)",
+                _rate(induce_blk, "verdict_accuracy"),
+                "primary",
+            )
+        )
+        out.append(
+            (
+                "Outcome · value tol. (oracle)",
+                _rate(oracle_blk, "value_tolerance_rate"),
+                "primary",
+            )
+        )
+        out.append(
+            (
+                "Outcome · value OK / verdict NG (oracle)",
+                _rate(oracle_blk, "value_ok_verdict_wrong_rate"),
+                "primary",
+            )
+        )
+    else:
+        out.append(("Outcome · verdict", _rate(outcome, "verdict_accuracy"), "primary"))
+        out.append(
+            ("Outcome · value tol.", _rate(outcome, "value_tolerance_rate"), "primary")
+        )
+    _ = primary  # used implicitly via blocks above
     out.append(("Audit · KOSIS grounding", _rate(audit, "kosis_grounding_rate"), "primary"))
     cv = _rate(audit, "constraint_violation_rate")
     out.append(
@@ -116,7 +161,10 @@ def render_report_card(
         else:
             colors.append("#64748b")
 
-    outcome_n = (report.get("outcome") or {}).get("n", "?")
+    oc = report.get("outcome") or {}
+    primary_mode = oc.get("primary_schema_mode", "oracle")
+    primary_blk = _outcome_mode_block(oc, str(primary_mode))
+    outcome_n = primary_blk.get("n", oc.get("n", "?"))
     run_id = report.get("run_id", "unknown")
     dataset_id = report.get("dataset_id", "")
 

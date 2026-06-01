@@ -36,6 +36,12 @@ def parse_args() -> argparse.Namespace:
         help="Predictions jsonl for audit-only run",
     )
     p.add_argument("--run-id", default=None)
+    p.add_argument(
+        "--split",
+        choices=["train", "holdout", "all"],
+        default=None,
+        help="Outcome case split (default from config eval.split)",
+    )
     return p.parse_args()
 
 
@@ -44,8 +50,11 @@ async def main() -> None:
     cfg = load_yaml(ROOT / args.config)
     if args.dataset:
         cfg["dataset_id"] = args.dataset
+    if args.split:
+        cfg.setdefault("eval", {})["split"] = args.split
 
     runs_root = Path(cfg.get("runs_root", "eval/runs"))
+    split = (cfg.get("eval") or {}).get("split", "train")
     outcome_report: dict = {}
     audit_summary: dict = {}
     components_summary: dict = {}
@@ -55,14 +64,22 @@ async def main() -> None:
     out_dir = ensure_run_dir(runs_root, run_id)
 
     if args.axis in ("outcome", "all"):
-        runner = OutcomeEvalRunner(cfg)
+        runner = OutcomeEvalRunner(cfg, split=split)
         outcome_report = await runner.run(limit=args.limit, run_id=run_id)
         predictions = read_jsonl(Path(outcome_report["predictions_path"]))
+        primary_mode = (cfg.get("eval") or {}).get(
+            "primary_schema_mode", "oracle"
+        )
+        audit_predictions = [
+            p
+            for p in predictions
+            if p.get("schema_mode", "induce") == primary_mode
+        ]
 
         if args.axis == "all":
             cases = {c.case_id: c for c in runner.load_cases(limit=args.limit)}
             audit_rows, audit_summary = await run_audit_on_predictions(
-                predictions, cases, runner.config
+                audit_predictions, cases, runner.config
             )
             from structverify.eval.io import append_jsonl
 
@@ -103,6 +120,7 @@ async def main() -> None:
         outcome=outcome_report.get("outcome") or outcome_report,
         audit=audit_summary,
         components=components_summary,
+        split=split if args.axis in ("outcome", "all") else None,
     )
     write_json(out_dir / "report.json", full)
     print(f"Report: {out_dir / 'report.json'}")

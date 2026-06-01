@@ -15,6 +15,7 @@ from structverify.eval.build.claim_templates import (
     build_match_claim_text,
     perturb_stated_value,
 )
+from structverify.eval.build.claim_validator import validate_outcome_case
 from structverify.eval.build.outcome_builder import _emit_component_fixtures
 from structverify.eval.io import load_models, load_yaml, sha256_file, write_json
 from structverify.eval.schemas import OutcomeCase, OutcomeManifest
@@ -24,6 +25,11 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Refresh outcome claims perturbation + component fixtures")
     p.add_argument("--config", default="config/eval_outcome_builder.yaml")
     p.add_argument("--dataset", default=None)
+    p.add_argument(
+        "--validate",
+        action="store_true",
+        help="Re-run claim_validator on all cases after refresh",
+    )
     return p.parse_args()
 
 
@@ -68,6 +74,18 @@ def main() -> None:
 
     comp_id = cfg.get("component_dataset_id", "structverify_components_v1")
     _emit_component_fixtures(cases, datasets_root, comp_id)
+
+    if args.validate:
+        bad = [
+            (c.case_id, validate_outcome_case(c).errors)
+            for c in cases
+            if not validate_outcome_case(c).ok
+        ]
+        if bad:
+            raise SystemExit(
+                f"Validation failed for {len(bad)} case(s): {bad[:3]}..."
+            )
+
     print(
         f"Updated {updated} mismatch claims in {claims_path}\n"
         f"Regenerated component fixtures under {datasets_root / comp_id}"

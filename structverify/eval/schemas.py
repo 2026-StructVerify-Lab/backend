@@ -39,6 +39,8 @@ class OutcomeManifest(BaseModel):
     mismatch_count: int = 0
     builder_config_hash: str | None = None
     claims_sha256: str | None = None
+    schema_version: int = 1
+    holdout_case_ids: list[str] = Field(default_factory=list)
 
 
 class ComponentDetectionRow(BaseModel):
@@ -85,11 +87,14 @@ class ComponentVerdictRow(BaseModel):
 class OutcomePredictionRecord(BaseModel):
     case_id: str
     expected_verdict: str
+    schema_mode: str = "induce"
     predicted_verdict: str | None = None
     verdict_correct: bool | None = None
     value_within_tolerance: bool | None = None
     predicted_official_value: float | None = None
     reference_stat_id: str | None = None
     predicted_stat_id: str | None = None
+    stat_id_match: bool | None = None
+    value_ok_verdict_wrong: bool = False
     error: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
