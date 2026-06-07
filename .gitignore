@@ -72,3 +72,18 @@ agent_workspace/
 
 # 테스트용 article 데이터 (검증 입력, 사용자 로컬에서만 유지)
 articles.jsonl
+
+# ── 블로그 글 (티스토리 발행용 초안 — 코드 아님, 버전 관리 제외) ──
+blog/
+
+# ── Claude Code / 에이전트 세션 데이터 ──
+.claude/
+
+# ── pytest 캐시 ──
+.pytest_cache/
+
+# ── 테스트 산출물 (생성물) ──
+test_outputs/
+
+# ── 개인 메모 (태그 정리 등 — 로컬에서만) ──
+태그
