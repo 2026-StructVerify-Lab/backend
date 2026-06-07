@@ -118,7 +118,7 @@ class AppConfig(BaseSettings):
     storage: StorageConfig = Field(default_factory=StorageConfig)
 
     # ── CORS (UI 도메인 허용) ──
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: list[str] = ["http://localhost:3000","http://structverify.cloud","http://structverify.cloud:3000","http://13.62.231.66","http://13.62.231.66:3000"]
 
 
 # 싱글톤 인스턴스 — 앱 전역에서 `from sv_platform.config import settings`
