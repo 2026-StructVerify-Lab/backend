@@ -1685,7 +1685,25 @@ async def agent_loop(
             logger.warning(f"[loop] memory 기록 실패: {e}")
 
         # ★ Phase E: observation을 workspace에 저장 (runtime_agent가 Evidence 빌드용으로 read)
+        # [2026-05-27] reflect LLM의 thought(자연어 사고)·confidence·proposed_verdict를
+        # observation에 함께 보존 → 프론트 실시간 카드/콘솔이 "왜 이 action을 골랐는지"를
+        # 표시할 수 있게. decision은 reflect 모드에서 LLM이 반환한 ReflectDecision이고,
+        # deterministic 모드(plan 그대로)에선 None — 그 경우 next_step.rationale(=planner가
+        # 적은 rationale)이라도 노출.
         try:
+            _thought = None
+            _conf_so_far = None
+            _proposed_verdict = None
+            if 'decision' in locals() and decision is not None:
+                _thought = getattr(decision, "thought", None) or None
+                _conf_raw = getattr(decision, "confidence_so_far", None)
+                if isinstance(_conf_raw, (int, float)):
+                    _conf_so_far = float(_conf_raw)
+                _pv = getattr(decision, "proposed_verdict", None)
+                if _pv is not None:
+                    _proposed_verdict = getattr(_pv, "value", str(_pv))
+            # reflect가 thought를 안 줬으면 planner가 짠 step.rationale을 fallback으로
+            _thought = _thought or (next_step.rationale or None)
             obs_dict = {
                 "iter_num": iter_num,
                 "action": next_step.action.value,
@@ -1694,6 +1712,10 @@ async def agent_loop(
                 "summary": last_result.summary,
                 "success": last_result.success,
                 "error": last_result.error,
+                # ↓ LLM 자연어 사고 (프론트가 "LLM 생각" 라인으로 노출)
+                "thought": _thought,
+                "confidence_so_far": _conf_so_far,
+                "proposed_verdict": _proposed_verdict,
             }
             workspace.write_observation(
                 claim_id,

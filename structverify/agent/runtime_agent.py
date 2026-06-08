@@ -44,10 +44,32 @@ Thought → Action(Tool Call) → Observation 순환을 통해 파이프라인 �
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from structverify.core.schemas import (
     Claim, SIRDocument, VerificationResult, GraphNode, GraphEdge, Evidence,
     GraphNodeType, GraphEdgeType,
 )
+
+
+def _cap_text(s: str, max_chars: int) -> str:
+    """긴 텍스트를 head/tail로 잘라 안전한 크기로 반환.
+
+    LLM prompt가 수십 KB 넘는 경우가 흔해 raw 저장 시 디스크 폭발 방지.
+    중간을 잘라 head 70% + truncation 표시 + tail 30%로 유지 (디버깅엔
+    양끝이 가장 유용).
+    """
+    if not s or len(s) <= max_chars:
+        return s or ""
+    head_len = int(max_chars * 0.7)
+    tail_len = max_chars - head_len - 80
+    if tail_len <= 0:
+        return s[:max_chars]
+    return (
+        s[:head_len]
+        + f"\n\n... [{len(s) - max_chars}자 truncated] ...\n\n"
+        + s[-tail_len:]
+    )
 from structverify.detection.domain_classifier import classify_domain
 from structverify.detection.claim_detector import detect_claims
 from structverify.detection.schema_inductor import induce_schemas
@@ -713,11 +735,34 @@ class RuntimeAgent:
             from structverify.utils.llm_client import LLMClient
             plan_llm = LLMClient(config=llm_cfg)
 
+            # [2026-05-27] LLM 원본 입출력을 workspace에 영구 저장 → 프론트가
+            # "AI 콘솔" 탭에서 lazy fetch. 한 LLM 호출당 1 JSON 파일.
+            # 사이즈 안전망: prompt/response 각각 60KB로 head/tail cap.
+            def _save_llm_trace(name: str, prompt: str, response: str) -> None:
+                try:
+                    payload = {
+                        "name": name,
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "prompt": _cap_text(prompt, 60_000),
+                        "response": _cap_text(response, 60_000),
+                        "prompt_chars": len(prompt or ""),
+                        "response_chars": len(response or ""),
+                    }
+                    workspace.write_observation(
+                        claim.claim_id,
+                        name=f"llm_traces/{name}",
+                        data=payload,
+                    )
+                except Exception as _e:
+                    logger.debug(f"[runtime_agent] llm_trace 저장 실패 ({name}): {_e}")
+
             async def llm_call_for_plan(prompt: str) -> str:
-                return await plan_llm.generate(
+                _resp = await plan_llm.generate(
                     prompt=prompt,
                     system_prompt="검증 계획 수립 전문가. JSON으로만 답하세요.",
                 )
+                _save_llm_trace("planner", prompt, _resp or "")
+                return _resp
 
             planner = Planner(
                 llm_call=llm_call_for_plan,
@@ -751,8 +796,13 @@ class RuntimeAgent:
             #   mode='deterministic'이면 reflect_fn=None (기존 동작 유지).
             reflect_fn = None
             if loop_mode == "reflect":
+                # iter별로 파일명이 겹치지 않게 counter — Reflect는 매 iter 호출됨.
+                _reflect_call_counter = {"n": 0}
+
                 async def llm_call_for_reflect(prompt: str) -> str:
-                    return await plan_llm.generate(
+                    _reflect_call_counter["n"] += 1
+                    _n = _reflect_call_counter["n"]
+                    _resp = await plan_llm.generate(
                         prompt=prompt,
                         system_prompt=(
                             "당신은 사실검증 ReAct 에이전트입니다. "
@@ -760,6 +810,8 @@ class RuntimeAgent:
                             "JSON으로만 답하세요."
                         ),
                     )
+                    _save_llm_trace(f"reflect_call_{_n:02d}", prompt, _resp or "")
+                    return _resp
 
                 reflect_fn = ReflectAgent(
                     llm_call=llm_call_for_reflect,

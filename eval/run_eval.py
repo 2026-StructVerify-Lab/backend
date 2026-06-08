@@ -519,6 +519,14 @@ async def amain(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    # Windows 기본 콘솔(cp949)에서 em-dash 등 비-cp949 문자 print 시 UnicodeEncodeError 방지.
+    # Python 3.7+ TextIOWrapper.reconfigure 사용. 이미 UTF-8이면 no-op.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8")
+        except (AttributeError, OSError):
+            pass
+
     p = argparse.ArgumentParser(description="StructVerify evaluation harness")
     p.add_argument("--mode", choices=["oracle", "e2e"], default="oracle",
                    help="oracle = Setting A (gold claim_text 직접 입력, FEVER-style), "

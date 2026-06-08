@@ -254,20 +254,32 @@ pip install -r sv_platform/requirements.txt      # FastAPI + DB
 
 ### 2. 환경변수 (`.env`)
 
+`sv_platform.config.AppConfig`는 [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/) 기반.
+중첩 필드는 `__` 구분자(예: `AUTH__JWT_SECRET`).
+
 ```env
-# DB
-SV_DATABASE_URL=postgresql+asyncpg://structverify:svpass123@localhost:5432/structverify
+# ── sv_platform 자체 ──
+POSTGRES_DSN=postgresql+asyncpg://structverify:svpass123@localhost:5432/structverify
+REDIS_URL=redis://localhost:6379/0
+APP_ENV=dev                                # dev | staging | prod
+DEBUG=false
 
-# JWT
-SV_JWT_SECRET=change-me
-SV_JWT_ALG=HS256
-SV_JWT_EXP_HOURS=24
+# 인증 (중첩 필드 — AUTH__ prefix)
+AUTH__JWT_SECRET=change-me-in-production
+AUTH__JWT_ALGORITHM=HS256
+AUTH__JWT_ACCESS_TOKEN_TTL_MINUTES=1440    # 1일
+AUTH__API_KEY_PEPPER=change-me-in-production
 
-# LLM / KOSIS (structverify 라이브러리용)
-NCP_API_KEY=sk-...
-KOSIS_API_KEY=...
+# CORS (배포 시 frontend 도메인 추가)
+CORS_ORIGINS=["http://localhost:3000","https://structverify.cloud"]
+
+# ── structverify 라이브러리용 ──
+NCP_API_KEY=<NCP CLOVA Studio key>         # HCX-003/007/DASH-002/EMB-V2/RERANKER 공용
+KOSIS_API_KEY=<KOSIS Open API key>
 PGVECTOR_DSN=postgresql://structverify:svpass123@localhost:5432/structverify
 ```
+
+> ⚠️ `POSTGRES_DSN`은 ORM(async)용 — `+asyncpg` 드라이버. `PGVECTOR_DSN`은 catalog 임베딩 검색용 — 일반 sync driver. 보통 같은 DB지만 connection string은 다름.
 
 ### 3. DB 마이그레이션
 

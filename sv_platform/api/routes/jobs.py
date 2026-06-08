@@ -113,6 +113,42 @@ def _estimate_progress_from_partial(
     return 40, "스키마 유도"
 
 
+@router.get("/{job_id}/llm-trace")
+async def get_job_llm_trace(
+    job_id: UUID,
+    ctx: AuthContext = Depends(get_auth),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    """잡의 LLM raw prompt/response trace (개발자 콘솔용 lazy fetch).
+
+    /v1/jobs/{id} 응답에는 무거워서 안 포함됨 — 프론트가 "AI 콘솔" 탭을
+    열 때만 호출.
+
+    Returns: {"entries": [{claim_id, name, ts, prompt, response, ...}, ...]}
+    시간순 정렬. 잡이 진행 중이어도 그 시점까지의 trace 반환.
+    """
+    job = await db.get(Job, job_id)
+    if job is None or job.tenant_id != ctx.tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job not found",
+        )
+
+    try:
+        from sv_platform.loaders.workspace_reader import read_job_llm_traces
+        created_after_ts = (
+            job.created_at.timestamp() if job.created_at else None
+        )
+        entries = read_job_llm_traces(
+            str(job_id),
+            source_text=job.source_data,
+            created_after=created_after_ts,
+        )
+    except Exception:
+        entries = []
+    return {"entries": entries, "count": len(entries)}
+
+
 @router.get("", response_model=list[JobOut])
 async def list_jobs(
     limit: int = Query(20, ge=1, le=100),

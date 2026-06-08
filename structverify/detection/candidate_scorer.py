@@ -102,7 +102,7 @@ async def score_candidate(
     config = config or {}
     cd_cfg = config.get("candidate_detection", {})
     use_llm = cd_cfg.get("teacher_llm_fallback", True)
-    threshold = float(cd_cfg.get("threshold", 0.65))
+    threshold = float(cd_cfg.get("threshold", 0.1))
 
     if use_llm:
         try:

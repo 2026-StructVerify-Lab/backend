@@ -378,6 +378,10 @@ def aggregate(rows: list[dict]) -> dict:
     elapsed = [r.get("elapsed_sec") for r in rows if r.get("elapsed_sec") is not None]
     avg_elapsed = sum(elapsed) / len(elapsed) if elapsed else None
 
+    # mode (oracle/e2e) — row마다 박혀 있음. 보통 한 run에 하나지만 섞일 수도.
+    modes = sorted({(r.get("mode") or "?") for r in rows})
+    mode_str = modes[0] if len(modes) == 1 else "+".join(modes)
+
     # ── 논문 표준 metrics ────────────────────────────────────────
     labels = ["match", "mismatch", "unverifiable"]
     macro = _macro_f1(rows, labels)
@@ -385,6 +389,7 @@ def aggregate(rows: list[dict]) -> dict:
 
     return {
         "total_claims": n,
+        "mode": mode_str,
         # FEVER-style (논문 main metrics)
         "label_accuracy": n_verdict_correct / n,        # = Label Accuracy
         "fever_score": fever["fever_score"],            # FEVER Score (strict)
