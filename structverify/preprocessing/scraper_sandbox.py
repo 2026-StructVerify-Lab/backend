@@ -168,7 +168,7 @@ class DockerSandbox:
                 err_msg = stderr.decode(errors="replace").strip()
                 logger.warning(
                     f"Docker 샌드박스 오류 (returncode={proc.returncode}): "
-                    f"{err_msg[:1000]}" 
+                    f"{err_msg[:1000]}"
                 )
                 return "", err_msg  # [v3] 에러 메시지 반환
 

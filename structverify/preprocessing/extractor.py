@@ -3,53 +3,12 @@ preprocessing/extractor.py — 소스 유형별 텍스트 추출기 (디스패�
 
 세부 구현은 유형별 하위 모듈에 위임:
   * PDF  → `preprocessing.pdf`  (PyMuPDF + Docling + OCR 파이프라인, Markdown 반환)
-  * URL  → Trafilatura (TODO)
+  * URL  → Trafilatura (실패 시 LLMScraper 폴백)
   * DOCX → python-docx (TODO) << 우선순위 후순위
 
 [참고] Trafilatura (Barbaresi, ACL 2021) — https://github.com/adbar/trafilatura
-  논문: Barbaresi, A. (2021). Trafilatura: A Web Scraping Library and
-  Command-Line Tool for Text Discovery and Extraction. ACL 2021.
-  URL 입력 시 광고/네비게이션 제거 후 본문만 추출
-
-[참고] Docling (IBM Research, 2024) — https://github.com/DS4SD/docling
-  PDF/DOCX를 통합 DoclingDocument JSON으로 변환. TableFormer로 테이블 구조 인식.
-
-[참고] PyMuPDF — https://github.com/pymupdf/PyMuPDF
-  PDF 텍스트/테이블 페이지 단위 추출
-
-[참고] python-docx — https://github.com/python-openxml/python-docx
-  DOCX XML 구조 파싱
-  
-[0422(수) 진행 내용 관련 참고 논문]
-[참고] TableFormer (Nassar et al., IBM Research, CVPR 2022) — https://arxiv.org/abs/2203.01017
-  논문: Nassar, A., Livathinos, N., Lysak, M., & Staar, P. (2022).
-  TableFormer: Table Structure Understanding with Transformers. CVPR 2022.
-  Docling 내부의 테이블 인식 모델. HTML 표 구조 보존의 근거.
-
-[참고] Docling Technical Report (Livathinos et al., IBM Research, 2024) — https://arxiv.org/abs/2408.09869
-  논문: Auer, C., Lysak, M., Nassar, A., Dolfi, M., Livathinos, N., et al. (2024).
-  Docling Technical Report. arXiv:2408.09869.
-  PDF→DoclingDocument 변환 파이프라인 전체 구조. JSON/HTML export 의 기반.
-
-[참고] CRAFT (Baek et al., NAVER, CVPR 2019) — https://arxiv.org/abs/1904.01941
-  논문: Baek, Y., Lee, B., Han, D., Yun, S., & Lee, H. (2019).
-  Character Region Awareness for Text Detection. CVPR 2019.
-  EasyOCR 의 텍스트 영역 검출(detector) 모듈 백본.
-
-[참고] CRNN (Shi et al., TPAMI 2017) — https://arxiv.org/abs/1507.05717
-  논문: Shi, B., Bai, X., & Yao, C. (2017).
-  An End-to-End Trainable Neural Network for Image-based Sequence Recognition
-  and its Application to Scene Text Recognition. IEEE TPAMI.
-  EasyOCR 의 텍스트 인식(recognizer) 모듈 백본 (CNN+RNN+CTC).
-
-[참고] Tesseract OCR (Smith, Google, ICDAR 2007) — https://github.com/tesseract-ocr/tesseract
-  논문: Smith, R. (2007). An Overview of the Tesseract OCR Engine. ICDAR 2007.
-  한국어 성능은 EasyOCR 에 밀리지만 영문·속도 기준 벤치 기준점으로 포함.
-
-[참고] PP-OCR (Du et al., Baidu, 2020) — https://arxiv.org/abs/2009.09941
-  논문: Du, Y., Li, C., Guo, R., Yin, X., Liu, W., et al. (2020).
-  PP-OCR: A Practical Ultra Lightweight OCR System. arXiv:2009.09941.
-  PaddleOCR 백엔드의 기반 모델. `OCR_BACKEND=paddle` 로 활성화 가능.
+  URL 입력 시 광고/네비게이션 제거 후 본문만 추출 (이 파일에서 직접 사용).
+  PDF/OCR 관련 라이브러리(Docling·PyMuPDF·EasyOCR 등) 세부는 `preprocessing/pdf/` 참고.
 
 [김예슬 - 2026-04-28 / v3]
 - LLMScraper 클래스 추가 (trafilatura 실패 시 LLM 동적 스크래핑)
@@ -75,7 +34,6 @@ from __future__ import annotations
 
 # [v3 김예슬] 추가 import
 import re
-from typing import Any
 from urllib.parse import urlparse
 import httpx
 import trafilatura, json
@@ -87,11 +45,6 @@ from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-
-
-_DOMAIN_SCRAPERS = {
-    "chosun.com": "_scrape_chosun_fixed",
-}
 
 # ── [v3 김예슬] 도메인별 스크래핑 코드 캐시 ──────────────────────────────────
 # key: domain (예: "chosun.com"), value: 실행 가능한 Python 코드 문자열
@@ -195,16 +148,7 @@ async def _extract_from_url(url: str) -> str:
 
 def _try_trafilatura(url: str) -> str:
     """
-    [v3 김예슬] v2 trafilatura 로직을 별도 함수로 분리.
-    실패 시 빈 문자열 반환 (예외 발생 안 함).
-
-    v2 원본 코드 (주석 보존):
-        downloaded = trafilatura.fetch_url(url)
-        result = trafilatura.extract(downloaded, output_format="json", ...)
-        parsed_result = json.loads(result)
-        markdown = f"# {parsed_result.get('title', '')}\\n\\n{parsed_result.get('text', '')}"
-        logger.info(f"URL extracted successfully: {url}")
-        return markdown
+    [v3 김예슬] trafilatura로 URL 본문 추출. 실패 시 빈 문자열 반환 (예외 발생 안 함).
     """
     try:
         downloaded = trafilatura.fetch_url(url)
@@ -279,9 +223,9 @@ class LLMScraper:
         self.config    = config or {}
         self.max_retry = 2
         self.timeout   = 30
-        
-        
-   
+
+
+
     async def _refine_scraper_code(
         self, url: str, domain: str, failed_code: str, error: str,
         html: str = "",
@@ -358,11 +302,11 @@ class LLMScraper:
         except Exception as e:
             logger.error(f"LLM 코드 생성 실패: {e}")
             return ""
-          
+
     async def scrape(self, url: str) -> str:
         """URL → MD 형식 텍스트 (캐시 히트 또는 LLM 생성 코드 실행)"""
         domain = _extract_domain(url)
-        
+
         fixed_result = await _run_domain_scraper(domain, url)
         if fixed_result and len(fixed_result.strip()) > 200:
             logger.info(f"도메인 고정 스크래퍼 성공: {domain}")
@@ -500,8 +444,8 @@ async def _scrape_chosun_fixed(url: str) -> str:
 
     logger.warning("[chosun] section.article-body / Fusion.globalContent 본문 추출 실패")
     return ""
-  
-  
+
+
 def _extract_chosun_fusion_body(html: str) -> tuple[str, str]:
     """
     조선일보 원본 HTML의 Fusion.globalContent.content_elements에서
@@ -553,7 +497,7 @@ def _html_to_plain_text(fragment: str) -> str:
     soup = BeautifulSoup(fragment, "html.parser")
     text = soup.get_text(separator=" ", strip=True)
     return text.strip()
-  
+
 def _clean_article_text(text: str) -> str:
     """기사 본문 텍스트 정리"""
     if not text:
