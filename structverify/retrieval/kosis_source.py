@@ -1303,7 +1303,7 @@ class KOSISDataSource(BaseDataSource):
         # catalog top 후보를 무조건 fetch하면 "합계출산율 - 동북·중앙아시아"
         # 같은 엉뚱한 표를 한국 claim에 가져오게 됨. claim의 indicator/population이
         # 표 이름과 같은 분야인지 검사해서, 무관하면 fetch 거부 (None 반환).
-        from structverify.retrieval.kosis_connector import _is_table_relevant
+        from structverify.retrieval.kosis_relevance import is_table_relevant
         claim_indicator = (params.get("indicator") or "").strip()
         claim_population = (params.get("population") or "").strip()
         # indicator + population 합쳐서 검사 (지역명이 population에 있을 수 있음)
@@ -1369,7 +1369,7 @@ class KOSISDataSource(BaseDataSource):
                 f"[KOSISDataSource] relevance_guard.enabled=false → "
                 f"테이블 관련성 가드 전체 우회: [{stat_id_str}]"
             )
-        elif relevance_query and not _is_table_relevant(relevance_query, stat_name_str):
+        elif relevance_query and not is_table_relevant(relevance_query, stat_name_str):
             if _indicator_in_rows(rows, claim_indicator):
                 logger.info(
                     f"[KOSISDataSource] 표 이름엔 지표 없으나 행 데이터에 "
