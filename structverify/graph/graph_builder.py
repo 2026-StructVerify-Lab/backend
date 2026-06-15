@@ -3,31 +3,13 @@ graph/graph_builder.py — Claim/Evidence Graph 조립 (Step 6)
 
 유도된 스키마와 클레임 정보를 바탕으로 그래프 노드/엣지를 생성한다.
 
-[참고] GraphRAG (arXiv 2501.00309)
-  텍스트에서 엔티티/관계를 추출하여 그래프를 구성하고 검색에 활용하는 패턴.
-
-[참고] AutoSchemaKG (arXiv 2505.23628) — https://github.com/NousResearch/AutoSchemaKG
-  LLM이 유도한 schema_candidates를 그래프 노드/엣지로 변환하는 구조.
-
-[참고] Fact Verification on KG (EMNLP Findings 2025)
-  지식 그래프 위에서 프로그래밍적 추론으로 사실을 검증하는 방법론.
-
-[0424(금) 진행 내용 관련 참고 논문] - 이수민
-[참고] FEVER (Thorne et al., NAACL 2018) — https://fever.ai/
-  Fact Extraction and VERification 벤치마크. Claim을 검증의 최소 단위로 다루고
-  SUPPORTS / REFUTES / NOT ENOUGH INFO 3-class verdict 체계를 정립.
-  본 모듈의 ClaimNode를 일급 노드로 두는 모델링과 schemas.py의 VerdictType이
-  이 체계를 따른다.
-
-[참고] HOVER (Jiang et al., EMNLP 2020) — https://hover-nlp.github.io/
-  다중 hop 사실 검증 데이터셋. 한 claim을 판정하려면 여러 증거 노드를 연결한
-  서브그래프 추론이 필요함을 실증. Claim을 중심에 두고 Metric/Time/Entity를
-  주변 노드로 잇는 본 모듈의 구조적 동기.
-
-[참고] TabFact (Chen et al., ICLR 2020) — https://tabfact.github.io/
-  표(통계표) 기반 수치 사실 검증 벤치마크. (indicator, time_period, value)
-  형태의 통계 클레임 검증 시나리오에 직접 대응되며, KOSIS 같은 통계표 소스를
-  Evidence로 사용하는 본 파이프라인의 근거 모델.
+[참고] 설계 근거 논문:
+  - GraphRAG (arXiv 2501.00309) — 텍스트→그래프 구성·검색 패턴
+  - AutoSchemaKG (arXiv 2505.23628) — LLM schema → 그래프 노드/엣지 변환
+  - Fact Verification on KG (EMNLP Findings 2025) — KG 위 프로그래밍적 사실 검증
+  - FEVER (Thorne et al., NAACL 2018) — Claim 단위 검증, VerdictType 3-class 근거
+  - HOVER (Jiang et al., EMNLP 2020) — 멀티홉 서브그래프 추론 (Claim 중심 구조)
+  - TabFact (Chen et al., ICLR 2020) — 통계표 수치 검증 (KOSIS Evidence 모델)
 
 [Step 6 — 담당: 이수민]
   Claim + ClaimSchema
