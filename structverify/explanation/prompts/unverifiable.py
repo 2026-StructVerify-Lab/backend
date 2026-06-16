@@ -1,3 +1,4 @@
+# [리팩] explainer.UNVERIFIABLE_PROMPT → prompts/unverifiable.py
 UNVERIFIABLE_PROMPT = """당신은 팩트체크 전문 작가입니다.
 아래 검증 결과를 독자가 이해하기 쉽게 한국어로 설명하세요.
 

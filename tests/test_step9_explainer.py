@@ -123,7 +123,7 @@ def unverifiable_result(sample_claim):
 
 def test_unit_mismatch_reason_text():
     """_mismatch_reason_text: MismatchType별 설명 문구 확인"""
-    from structverify.explanation.explainer import _mismatch_reason_text
+    from structverify.explanation.formatters import _mismatch_reason_text
     from structverify.core.schemas import MismatchType
 
     assert "시점" in _mismatch_reason_text(MismatchType.TIME_PERIOD)
@@ -135,7 +135,7 @@ def test_unit_mismatch_reason_text():
 
 def test_unit_calc_diff_pct():
     """_calc_diff_pct: 차이 비율 계산"""
-    from structverify.explanation.explainer import _calc_diff_pct
+    from structverify.explanation.formatters import _calc_diff_pct
     assert _calc_diff_pct(64.2, 58.3) == pytest.approx(10.12, abs=0.1)
     assert _calc_diff_pct("N/A", 58.3) == 0.0
     assert _calc_diff_pct(64.2, 0) == 0.0
@@ -143,7 +143,7 @@ def test_unit_calc_diff_pct():
 
 def test_unit_calc_diff():
     """_calc_diff: 실제 차이값 계산"""
-    from structverify.explanation.explainer import _calc_diff
+    from structverify.explanation.formatters import _calc_diff
     assert _calc_diff(64.2, 58.3) == "+5.9"
     assert _calc_diff(58.3, 64.2) == "-5.9"
     assert _calc_diff("N/A", 58.3) == "N/A"
@@ -151,7 +151,7 @@ def test_unit_calc_diff():
 
 def test_unit_format_stat_source_full():
     """_format_stat_source: Evidence에서 출처 텍스트 생성"""
-    from structverify.explanation.explainer import _format_stat_source
+    from structverify.explanation.formatters import _format_stat_source
     from structverify.core.schemas import Evidence
     ev = Evidence(
         source_name="KOSIS 농림어업총조사",
@@ -166,13 +166,13 @@ def test_unit_format_stat_source_full():
 
 def test_unit_format_stat_source_none():
     """_format_stat_source: Evidence 없으면 N/A"""
-    from structverify.explanation.explainer import _format_stat_source
+    from structverify.explanation.formatters import _format_stat_source
     assert _format_stat_source(None) == "N/A"
 
 
 def test_unit_format_search_hint():
     """_format_search_hint: 독자용 검색 힌트 생성"""
-    from structverify.explanation.explainer import _format_search_hint
+    from structverify.explanation.formatters import _format_search_hint
     from structverify.core.schemas import Claim, ClaimSchema
     claim = Claim(
         doc_id=uuid4(), block_id="b0", sent_id="s0",
