@@ -49,6 +49,8 @@ def sample_claim():
             unit="%",
             population="과수 농가",
             value=64.2,
+            parent_path=None,
+            modifier=None,
         ),
     )
 
@@ -176,7 +178,11 @@ def test_unit_format_search_hint():
         doc_id=uuid4(), block_id="b0", sent_id="s0",
         claim_text="65세 이상 과수 농가 64.2%",
         schema=ClaimSchema(
-            indicator="고령화비율", population="과수 농가", time_period="2023"
+            indicator="고령화비율",
+            population="과수 농가",
+            time_period="2023",
+            parent_path=None,
+            modifier=None,
         ),
     )
     hint = _format_search_hint(claim)

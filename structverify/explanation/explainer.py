@@ -19,95 +19,15 @@ from __future__ import annotations
 from structverify.core.schemas import (
     Claim, Evidence, MismatchType, VerdictType, VerificationResult,
 )
+from .prompts.match import MATCH_PROMPT
+from .prompts.mismatch import MISMATCH_PROMPT
+from .prompts.multihop import MULTIHOP_PROMPT
+from .prompts.unverifiable import UNVERIFIABLE_PROMPT
 from structverify.graph.provenance import render_provenance_text
 from structverify.utils.llm_client import LLMClient
 from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-
-# ── verdict별 전용 프롬프트 ────────────────────────────────────────────────
-
-MATCH_PROMPT = """당신은 팩트체크 전문 작가입니다.
-아래 검증 결과를 독자가 이해하기 쉽게 한국어로 설명하세요.
-
-[판정: ✅ 일치 (MATCH) — 이 판정은 확정입니다. 절대 "사실이 아니다"라고 쓰지 마세요.]
-주장: "{claim_text}"
-기사 수치: {claimed_value} {unit}
-공식 수치: {official_value} {unit}
-오차: {diff_pct:.1f}%
-신뢰도: {confidence:.0%}
-근거 통계: {stat_source}
-출처: {provenance}
-
-[작성 규칙]
-- 2~3문장으로 간결하게
-- 판정이 "일치"이므로 "사실입니다", "확인됩니다" 등 긍정적 표현 사용
-- "KOSIS {{통계명}}에 따르면" 형식으로 출처 명시
-- 기사 수치와 공식 수치를 나란히 비교
-- 통계표 ID 포함
-- ⚠️ "사실이 아닙니다", "틀렸습니다" 등 부정 표현 절대 금지
-
-[⚠️ 주의 — 설명 전 반드시 확인]
-- 공식 통계 출처({stat_source})가 indicator({indicator})와 
-  *같은 국가/지역*의 통계인지 확인하세요.
-- 시점({claim_time} vs {evidence_time})이 다르면 
-  "같은 연도 데이터가 아님"을 반드시 명시하세요.
-"""
-
-MULTIHOP_PROMPT = """당신은 팩트체크 전문 작가입니다.
-아래 검증 결과를 독자가 이해하기 쉽게 한국어로 설명하세요.
-
-[판정: {verdict_label} — 멀티홉 검증으로 판정했습니다.]
-주장: "{claim_text}"
-주장한 비율/배수: {claimed_ratio}배
-계산된 비율/배수: {computed_ratio}배
-근거: 원천 수치 {largest_value} / {smallest_value} = {computed_ratio}배
-신뢰도: {confidence:.0%}
-
-[작성 규칙]
-- 이 주장은 KOSIS에서 직접 찾을 수 없는 "파생 주장"(비율/배수)입니다
-- 대신 같은 지표의 원천 수치 2개를 KOSIS에서 찾아 비율을 직접 계산했습니다
-- 2~3문장으로, 어떻게 계산했는지 설명: "원천 수치 {largest_value}와 {smallest_value}를 비교하면 약 {computed_ratio}배"
-- 위에 적힌 수치만 사용하세요. 새 수치를 만들지 마세요."""
-
-
-MISMATCH_PROMPT = """당신은 팩트체크 전문 작가입니다.
-아래 검증 결과를 독자가 이해하기 쉽게 한국어로 설명하세요.
-
-[판정: 불일치 (MISMATCH) — 기사 수치와 공식 수치가 다릅니다.]
-주장: "{claim_text}"
-기사 수치: {claimed_value} {unit}
-공식 수치: {official_value} {unit}
-차이: {diff} {unit} ({diff_pct:.1f}%)
-불일치 유형: {mismatch_reason}
-신뢰도: {confidence:.0%}
-근거 통계: {stat_source}
-출처: {provenance}
-
-[작성 규칙]
-- 3~4문장으로 작성
-- 기사 수치({claimed_value})와 공식 수치({official_value})를 반드시 정확히 인용
-- 위에 적힌 수치만 사용하세요. 새로운 수치를 만들어내지 마세요.
-- 불일치 유형({mismatch_reason})에 맞는 원인 설명 포함
-- KOSIS 출처 포함"""
-
-UNVERIFIABLE_PROMPT = """당신은 팩트체크 전문 작가입니다.
-아래 검증 결과를 독자가 이해하기 쉽게 한국어로 설명하세요.
-
-[판정: 검증 불가 (UNVERIFIABLE) — 공식 통계를 찾지 못했습니다.]
-주장: "{claim_text}"
-검증 불가 이유: {reason}
-시도한 통계표: {stat_source} 
-시도한 검색어: {search_hint}
-
-[작성 규칙]
-- 2~3문장으로 작성
-- "사실입니다" 또는 "사실이 아닙니다"라고 단정하지 마세요
-- 왜 공식 통계를 찾지 못했는지만 설명
-- 독자가 직접 KOSIS에서 확인할 방법 제시
-- 수치를 새로 만들어내지 마세요. 위에 명시된 수치만 사용.
-"""
 
 
 # ── 메인 함수 ─────────────────────────────────────────────────────────────
