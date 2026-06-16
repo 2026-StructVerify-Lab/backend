@@ -18,6 +18,7 @@ explanation/explainer.py — LLM 기반 설명 생성 + Provenance 렌더링 (St
 - verdict별 프롬프트 문자열 → prompts/ 로 분리 (import만 유지, 동작 동일)
 - 수치·출처 포맷 헬퍼 → formatters.py 로 분리
 - LLM 실패 fallback 문구 → fallback.py 로 분리
+- LLM 호출 → _llm.py 로 분리
 """
 from __future__ import annotations
 
@@ -40,8 +41,9 @@ from .prompts.multihop import MULTIHOP_PROMPT
 from .prompts.unverifiable import UNVERIFIABLE_PROMPT
 # [리팩] LLM 실패 시 fallback 문구 → fallback.py (explainer에서 re-export)
 from .fallback import _fallback_explanation
+# [리팩] LLMClient 직접 호출 → _llm.py
+from ._llm import generate_explanation_text
 from structverify.graph.provenance import render_provenance_text
-from structverify.utils.llm_client import LLMClient
 from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -71,7 +73,6 @@ async def generate_explanation(
         자연어 설명 문자열
     """
     config = config or {}
-    llm = LLMClient(config=config.get("llm", {}))
 
     # Provenance 텍스트 렌더링
     prov_text = "출처 정보 없음"
@@ -82,11 +83,7 @@ async def generate_explanation(
     prompt = _build_prompt(claim, result, prov_text)
 
     try:
-        explanation = await llm.generate(
-            prompt=prompt,
-            system_prompt="팩트체크 전문 작가. 명확하고 간결한 한국어로 작성하세요.",
-            model_tier="heavy",  # HCX-003 — 설명 품질이 중요
-        )
+        explanation = await generate_explanation_text(prompt, config)
         logger.info(f"[Step 9] 설명 생성 완료: {claim.sent_id} ({result.verdict.value})")
         return explanation
 
