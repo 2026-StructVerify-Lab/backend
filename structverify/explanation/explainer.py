@@ -17,6 +17,7 @@ explanation/explainer.py — LLM 기반 설명 생성 + Provenance 렌더링 (St
 [리팩 2026-06 / refactor/v1/js/explanation]
 - verdict별 프롬프트 문자열 → prompts/ 로 분리 (import만 유지, 동작 동일)
 - 수치·출처 포맷 헬퍼 → formatters.py 로 분리
+- LLM 실패 fallback 문구 → fallback.py 로 분리
 """
 from __future__ import annotations
 
@@ -37,6 +38,8 @@ from .prompts.match import MATCH_PROMPT
 from .prompts.mismatch import MISMATCH_PROMPT
 from .prompts.multihop import MULTIHOP_PROMPT
 from .prompts.unverifiable import UNVERIFIABLE_PROMPT
+# [리팩] LLM 실패 시 fallback 문구 → fallback.py (explainer에서 re-export)
+from .fallback import _fallback_explanation
 from structverify.graph.provenance import render_provenance_text
 from structverify.utils.llm_client import LLMClient
 from structverify.utils.logger import get_logger
@@ -180,27 +183,3 @@ def _build_prompt(
             search_hint=search_hint,
         )
 
-
-def _fallback_explanation(claim: Claim, result: VerificationResult) -> str:
-    """LLM 실패 시 기본 텍스트로 fallback."""
-    verdict_kr = {
-        VerdictType.MATCH: "일치",
-        VerdictType.MISMATCH: "불일치",
-        VerdictType.UNVERIFIABLE: "검증 불가",
-    }.get(result.verdict, result.verdict.value)
-
-    base = f'"{claim.claim_text[:40]}..." — 판정: {verdict_kr}'
-
-    if result.verdict == VerdictType.MISMATCH and result.evidence:
-        ev = result.evidence
-        schema = claim.schema
-        if schema and schema.value and ev.official_value:
-            base += (
-                f" | 기사: {schema.value}{schema.unit or ''}"
-                f" / 공식: {ev.official_value}{ev.unit or ''}"
-            )
-
-    if result.provenance_summary:
-        base += f" | {result.provenance_summary}"
-
-    return base
