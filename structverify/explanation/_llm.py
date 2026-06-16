@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from structverify.utils.llm_client import LLMClient
 
+from ._config import get_explanation_settings
+
 _EXPLANATION_SYSTEM_PROMPT = (
     "팩트체크 전문 작가. 명확하고 간결한 한국어로 작성하세요."
 )
@@ -11,10 +13,10 @@ _EXPLANATION_SYSTEM_PROMPT = (
 async def generate_explanation_text(
     prompt: str,
     config: dict | None = None,
-    *,
-    model_tier: str = "heavy",
 ) -> str:
-    """검증 설명용 LLM 텍스트 생성 (model_tier 기본 heavy — HCX-003, 설명 품질 우선)."""
+    """검증 설명용 LLM 텍스트 생성."""
+    expl_cfg = get_explanation_settings(config)
+    model_tier = expl_cfg.get("model_tier", "heavy")
     llm = LLMClient(config=(config or {}).get("llm", {}))
     return await llm.generate(
         prompt=prompt,

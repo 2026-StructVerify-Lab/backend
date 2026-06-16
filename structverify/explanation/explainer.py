@@ -19,6 +19,7 @@ explanation/explainer.py — LLM 기반 설명 생성 + Provenance 렌더링 (St
 - 수치·출처 포맷 헬퍼 → formatters.py 로 분리
 - LLM 실패 fallback 문구 → fallback.py 로 분리
 - LLM 호출 → _llm.py 로 분리
+- model_tier 등 모듈 설정 → explanation/config.yaml (default.yaml 미수정)
 """
 from __future__ import annotations
 
