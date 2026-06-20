@@ -34,3 +34,21 @@ def test_unit_fallback_threshold_high_unverifiable():
     v, _, need_m = classify_error_rate_fallback(0.95)
     assert v == VerdictType.UNVERIFIABLE
     assert need_m is False
+
+
+def test_unit_normalize_period_formats():
+    from structverify.verification.row_match import normalize_period
+
+    assert normalize_period("202504") == "202504"
+    assert normalize_period("2025-04") == "202504"
+    assert normalize_period("2025M04") == "202504"
+    assert normalize_period("2025") == "2025"
+    assert normalize_period("2025Q1") == "2025"
+
+
+def test_unit_period_matches_ym():
+    from structverify.verification.row_match import period_matches_ym
+
+    assert period_matches_ym("2025-04", "202504") is True
+    assert period_matches_ym("2025", "202504") is False
+    assert period_matches_ym("202503", "202504") is False
