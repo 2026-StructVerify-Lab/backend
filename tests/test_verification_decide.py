@@ -71,3 +71,34 @@ def test_unit_adapter_from_evidence_no_evidence():
     assert normalized is None
     assert early is not None
     assert early.verdict == VerdictType.UNVERIFIABLE
+
+
+def test_unit_agent_atomic_threshold_match():
+    from structverify.verification.verdict_thresholds import classify_atomic_ratio_agent
+
+    v, conf = classify_atomic_ratio_agent(0.04)
+    assert v == VerdictType.MATCH
+    assert conf == 0.85
+
+
+def test_unit_agent_growth_rate_pp_match():
+    from structverify.verification.verdict_thresholds import classify_growth_rate_pp_agent
+
+    v, _ = classify_growth_rate_pp_agent(1.0)
+    assert v == VerdictType.MATCH
+
+
+def test_unit_agent_difference_gap_match():
+    from structverify.verification.verdict_thresholds import classify_difference_gap_agent
+
+    v, _ = classify_difference_gap_agent(0.01, 0.06)
+    assert v == VerdictType.MATCH
+
+
+def test_unit_row_match_find_value_for_time():
+    from structverify.verification.row_match import find_value_for_time_with_criteria
+
+    rows = [{"PRD_DE": "202504", "DT": "20171", "ITM_NM": "출생아수"}]
+    hit = find_value_for_time_with_criteria(rows, "2025-04", {"ITM_NM": "출생아수"})
+    assert hit is not None
+    assert hit[0] == 20171.0

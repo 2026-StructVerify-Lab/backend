@@ -177,3 +177,121 @@ def find_best_match(
         logger.info("[verifier] best_match: 없음 (단위/연도 필터 통과 row 없음)")
 
     return best_match, best_error
+
+
+# ── agent 프로필 row pool (loop.py에서 추출 — loop는 후속 커밋에서 위임) ─────
+
+INDICATOR_CRITERIA_FIELDS = ("ITM_NM", "C1_NM", "C2_NM", "C3_NM", "C4_NM")
+
+
+def parse_row_dt(raw) -> float | None:
+    """KOSIS row DT → float."""
+    if raw is None:
+        return None
+    try:
+        return float(str(raw).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def find_row_value_for_time(rows: list, target_time: str) -> float | None:
+    """특정 PRD_DE 행의 DT 값 (loop._find_row_value_for_time)."""
+    if not rows or not target_time:
+        return None
+    norm = str(target_time).replace("-", "").strip()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        prd = str(row.get("PRD_DE", "") or "").strip()
+        if prd == norm:
+            v = parse_row_dt(row.get("DT"))
+            if v is not None:
+                return v
+    year = norm[:4]
+    if year and year != norm:
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            prd = str(row.get("PRD_DE", "") or "").strip()
+            if prd == year:
+                v = parse_row_dt(row.get("DT"))
+                if v is not None:
+                    return v
+    return None
+
+
+def extract_criteria_from_row(row: dict) -> dict:
+    """matched_row에서 지표 식별 컬럼만 추출."""
+    if not isinstance(row, dict):
+        return {}
+    return {
+        k: row[k]
+        for k in INDICATOR_CRITERIA_FIELDS
+        if k in row and row[k] is not None and str(row[k]).strip() != ""
+    }
+
+
+def find_value_for_time_with_criteria(
+    all_rows: list[dict],
+    target_time: str,
+    criteria: dict | None,
+) -> tuple[float, dict] | None:
+    """target_time + criteria 일치 row → (DT, row)."""
+    if not all_rows or not target_time:
+        return None
+    norm = str(target_time).replace("-", "").strip()
+
+    def _row_matches_criteria(row: dict) -> bool:
+        if not criteria:
+            return True
+        for k, v in criteria.items():
+            if str(row.get(k, "")).strip() != str(v).strip():
+                return False
+        return True
+
+    for row in all_rows:
+        if not isinstance(row, dict):
+            continue
+        prd = str(row.get("PRD_DE", "") or "").strip()
+        if prd != norm:
+            continue
+        if not _row_matches_criteria(row):
+            continue
+        v = parse_row_dt(row.get("DT"))
+        if v is not None:
+            return (v, row)
+
+    year = norm[:4]
+    if year and year != norm:
+        for row in all_rows:
+            if not isinstance(row, dict):
+                continue
+            prd = str(row.get("PRD_DE", "") or "").strip()
+            if prd != year:
+                continue
+            if not _row_matches_criteria(row):
+                continue
+            v = parse_row_dt(row.get("DT"))
+            if v is not None:
+                return (v, row)
+    return None
+
+
+def aggregate_rows_from_fetches(fetch_observations: list) -> list[dict]:
+    """여러 fetch observation rows[] 평탄화 (loop._aggregate_rows_from_fetches)."""
+    out: list[dict] = []
+    if not fetch_observations:
+        return out
+    seen_ids: set[int] = set()
+    for obs in fetch_observations:
+        ev = (getattr(obs, "output", None) or {}).get("evidence") or {}
+        rs = ev.get("rows") or []
+        for r in rs:
+            if not isinstance(r, dict):
+                continue
+            rid = id(r)
+            if rid in seen_ids:
+                continue
+            seen_ids.add(rid)
+            out.append(r)
+    return out

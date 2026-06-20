@@ -17,6 +17,119 @@ from ._config import get_verification_settings
 
 logger = get_logger(__name__)
 
+_THRESHOLD_GTE_KEYWORDS = (
+    "넘기", "넘어", "넘는", "넘은", "넘었", "돌파", "초과",
+    "이상", "웃돌", "상회", "넘게",
+)
+_THRESHOLD_LTE_KEYWORDS = (
+    "미만", "이하", "밑돌", "하회", "못 미", "못미", "안 되", "안되",
+)
+_INCREASE_SFX = ("증가율", "상승률")
+_DECREASE_SFX = ("감소율", "하락률")
+
+
+def _agent_thresholds(config: dict | None) -> dict[str, float]:
+    settings = get_verification_settings(config, "agent")
+    return {
+        "value_match_tolerance": float(settings.get("value_match_tolerance", 0.05)),
+        "growth_rate_match_pp": float(settings.get("growth_rate_match_pp", 1.5)),
+        "growth_rate_unverifiable_pp": float(
+            settings.get("growth_rate_unverifiable_pp", 5.0)
+        ),
+        "difference_rel_tolerance": float(
+            settings.get("difference_rel_tolerance", 0.10)
+        ),
+        "difference_min_tolerance": float(
+            settings.get("difference_min_tolerance", 0.02)
+        ),
+        "difference_unverifiable_multiplier": float(
+            settings.get("difference_unverifiable_multiplier", 3.0)
+        ),
+        "calculate_simple_tolerance": float(
+            settings.get("calculate_simple_tolerance", 0.01)
+        ),
+    }
+
+
+def classify_atomic_ratio_agent(
+    diff_ratio: float,
+    config: dict | None = None,
+) -> tuple[VerdictType, float]:
+    """loop 일반 수치 비교 — value_match_tolerance (기본 5%)."""
+    tol = _agent_thresholds(config)["value_match_tolerance"]
+    if diff_ratio < tol:
+        return VerdictType.MATCH, 0.85
+    return VerdictType.MISMATCH, 0.7
+
+
+def classify_growth_rate_pp_agent(
+    diff_pp: float,
+    config: dict | None = None,
+) -> tuple[VerdictType, float]:
+    """loop 증가율 %p 구간 — ≤1.5 MATCH, ≤5 UNVERIFIABLE."""
+    t = _agent_thresholds(config)
+    if diff_pp <= t["growth_rate_match_pp"]:
+        return VerdictType.MATCH, 0.8
+    if diff_pp <= t["growth_rate_unverifiable_pp"]:
+        return VerdictType.UNVERIFIABLE, 0.4
+    return VerdictType.MISMATCH, 0.7
+
+
+def classify_difference_gap_agent(
+    gap: float,
+    claimed_diff: float,
+    config: dict | None = None,
+) -> tuple[VerdictType, float]:
+    """loop 차이값 — tol=max(|claimed|×10%, min_tol)."""
+    t = _agent_thresholds(config)
+    tol = max(abs(claimed_diff) * t["difference_rel_tolerance"], t["difference_min_tolerance"])
+    if gap <= tol:
+        return VerdictType.MATCH, 0.8
+    if gap <= tol * t["difference_unverifiable_multiplier"]:
+        return VerdictType.UNVERIFIABLE, 0.4
+    return VerdictType.MISMATCH, 0.7
+
+
+def classify_calculate_simple_agent(
+    diff_ratio: float,
+    config: dict | None = None,
+) -> tuple[VerdictType, float]:
+    """loop calculate 일반 수치 — 기본 1% (5%와 별도 유지)."""
+    tol = _agent_thresholds(config)["calculate_simple_tolerance"]
+    if diff_ratio < tol:
+        return VerdictType.MATCH, 0.8
+    return VerdictType.MISMATCH, 0.7
+
+
+def detect_threshold_direction(claim: Claim) -> str | None:
+    """부등식 주장 방향 — gte / lte / None (loop._detect_threshold_direction)."""
+    text = claim.claim_text or ""
+    modifier = ""
+    if claim.schema is not None:
+        modifier = (claim.schema.modifier or "")
+    haystack = f"{text} {modifier}"
+
+    has_gte = any(kw in haystack for kw in _THRESHOLD_GTE_KEYWORDS)
+    has_lte = any(kw in haystack for kw in _THRESHOLD_LTE_KEYWORDS)
+    if has_gte and has_lte:
+        return None
+    if has_gte:
+        return "gte"
+    if has_lte:
+        return "lte"
+    return None
+
+
+def growth_rate_direction_mismatch(
+    indicator: str,
+    calc_rate: float,
+) -> bool:
+    """증가/감소 방향 불일치 — loop 부호 가드."""
+    ind = (indicator or "").strip()
+    expects_inc = any(ind.endswith(s) for s in _INCREASE_SFX)
+    expects_dec = any(ind.endswith(s) for s in _DECREASE_SFX)
+    return (expects_inc and calc_rate < 0) or (expects_dec and calc_rate > 0)
+
 
 def _fallback_thresholds(config: dict | None) -> dict[str, float]:
     settings = get_verification_settings(config, "fallback")
