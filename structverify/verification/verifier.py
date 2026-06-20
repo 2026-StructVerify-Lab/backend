@@ -50,6 +50,8 @@ from typing import TYPE_CHECKING
 from structverify.core.schemas import (
     Claim, Evidence, VerificationResult, VerdictType, MismatchType)
 from structverify.utils.logger import get_logger
+# [리팩] fallback 오차 구간 판정 → verdict_thresholds.py
+from .verdict_thresholds import verdict_from_error as _verdict_from_error_impl
 
 if TYPE_CHECKING:
     from structverify.memory.working_memory import DocumentWorkingMemory
@@ -573,69 +575,10 @@ def _verdict_from_error(
     best_match: dict | None,
     config: dict,
 ) -> VerificationResult:
-    """
-    오차율 → 판정 결과.
-
-    [v3] factcheck_test.py v7 구간:
-      ≤10%   → MATCH
-      10~30% → UNVERIFIABLE (LLM 재판정 구간 — Step 8에서는 판단 보류)
-      30~90% → MISMATCH
-      >90%   → UNVERIFIABLE (테이블 매칭 오류)
-
-    [v6.15] 시점 미상 가드:
-      claim에 연도가 없고(claim.schema.time_period 비어있음),
-      best_match가 tier3(±2년 폴백, 시점 매칭 실패)인 경우 →
-      숫자만 우연히 가까운 가짜 매칭일 위험이 큼.
-      이때는 MATCH/MISMATCH를 내리지 않고 UNVERIFIABLE로 강등.
-    """
-    diff_pct = error_rate * 100
-
-    # [v6.15] 시점 미상 + 시점 매칭 실패 → 신뢰 불가
-    schema_tp = (claim.schema.time_period if claim.schema and claim.schema.time_period else "")
-    has_year = bool(re.search(r"\d{4}", schema_tp))
-    matched_tier3 = bool(best_match and best_match.get("_tier") == 3)
-    if not has_year and matched_tier3:
-        logger.info(
-            f"검증 결과: unverifiable "
-            f"(오차: {diff_pct:.1f}% — 시점 미상 + 시점 매칭 실패, 가짜 매칭 위험) "
-            f"→ 엉뚱한 evidence 제거"
-        )
-        # [v6.16] 시점 매칭 실패로 신뢰 불가 → 엉뚱한 KOSIS 출처를 화면에 남기지 않음
-        #   (예: 공시가격 4.5% claim에 '매매가격지수 102.2'가 출처로 표시되던 문제)
-        return VerificationResult(
-            claim_id=claim.claim_id, verdict=VerdictType.UNVERIFIABLE,
-            confidence=0.25, evidence=None)
-
-    if error_rate <= 0.10:
-        verdict = VerdictType.MATCH
-        conf = min(0.95, 1.0 - error_rate)
-        mtype = None
-        logger.info(f"검증 결과: match (오차: {diff_pct:.1f}%)")
-
-    elif error_rate <= 0.30:
-        # 유사하나 확신 없음 — LLM 재판정 구간이지만 Step 8은 LLM 미사용
-        verdict = VerdictType.UNVERIFIABLE
-        conf = 0.4
-        mtype = None
-        logger.info(f"검증 결과: unverifiable (오차: {diff_pct:.1f}% — 유사하나 확신 없음)")
-
-    elif error_rate > 0.90:
-        # 테이블 매칭 오류
-        verdict = VerdictType.UNVERIFIABLE
-        conf = 0.3
-        mtype = None
-        logger.info(f"검증 결과: unverifiable (오차: {diff_pct:.1f}% — 테이블 매칭 오류 의심)")
-
-    else:
-        # 30~90% → 불일치
-        verdict = VerdictType.MISMATCH
-        conf = min(0.9, error_rate)
-        mtype = _classify_mismatch(claim, evidence, diff_pct, config)
-        logger.info(f"검증 결과: mismatch (오차: {diff_pct:.1f}%)")
-
-    return VerificationResult(
-        claim_id=claim.claim_id, verdict=verdict, confidence=conf,
-        evidence=evidence, mismatch_type=mtype)
+    """[리팩] 오차율 → 판정 — verdict_thresholds.verdict_from_error 위임."""
+    return _verdict_from_error_impl(
+        claim, evidence, error_rate, best_match, config, _classify_mismatch,
+    )
 
 
 # ── 불일치 세분화 (신준수) ─────────────────────────────────────────────────────
