@@ -102,3 +102,59 @@ def test_unit_row_match_find_value_for_time():
     hit = find_value_for_time_with_criteria(rows, "2025-04", {"ITM_NM": "출생아수"})
     assert hit is not None
     assert hit[0] == 20171.0
+
+
+def test_unit_infer_claim_type_absolute():
+    from uuid import uuid4
+
+    from structverify.agent.schemas import ClaimType
+    from structverify.core.schemas import Claim, ClaimSchema, SourceOffset
+    from structverify.verification.adapters import infer_claim_type
+
+    claim = Claim(
+        doc_id=uuid4(),
+        block_id="b0",
+        sent_id="s0",
+        claim_text="농가 166558가구",
+        schema=ClaimSchema(value=166558.0, parent_path="", modifier=""),
+        source_offset=SourceOffset(),
+    )
+    assert infer_claim_type(claim) == ClaimType.ABSOLUTE
+
+
+def test_unit_decide_verdict_agent_fetch_match():
+    from uuid import uuid4
+
+    from structverify.agent.schemas import ClaimType
+    from structverify.core.schemas import Claim, ClaimSchema, SourceOffset, VerdictType
+    from structverify.verification.adapters import AgentFetchInput
+    from structverify.verification.decide_verdict import decide_verdict
+
+    claim = Claim(
+        doc_id=uuid4(),
+        block_id="b0",
+        sent_id="s0",
+        claim_text="고령화 64.2%",
+        schema=ClaimSchema(
+            value=64.2,
+            time_period="2025-04",
+            parent_path="",
+            modifier="",
+        ),
+        source_offset=SourceOffset(),
+    )
+    normalized = AgentFetchInput(
+        claim_id=str(claim.claim_id),
+        evidence={
+            "value": 64.2,
+            "unit": "%",
+            "time_period": "202504",
+            "stat_table_id": "DT_TEST",
+        },
+        claim_actual_type=ClaimType.ABSOLUTE,
+        plan_claim_type=ClaimType.ABSOLUTE,
+        tolerance=0.05,
+    )
+    result = decide_verdict(claim, normalized, profile="agent")
+    assert result.verdict == VerdictType.MATCH
+    assert result.confidence == 0.85

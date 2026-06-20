@@ -13,7 +13,16 @@ from structverify.core.schemas import (
 from structverify.utils.logger import get_logger
 
 from ._config import VerificationProfile
-from .adapters import NormalizedInput
+from .adapters import (
+    AgentCalculateInput,
+    AgentFetchInput,
+    NormalizedInput,
+    VerdictDecision,
+)
+from .decide_verdict_agent import (
+    decide_verdict_agent_calculate,
+    decide_verdict_agent_fetch,
+)
 from .growth_diff import verify_growth_or_diff
 from .row_match import extract_numeric_values, find_best_match
 from .units import is_same_unit_type, normalize_value
@@ -24,14 +33,23 @@ logger = get_logger(__name__)
 
 def decide_verdict(
     claim: Claim,
-    normalized: NormalizedInput,
+    normalized: NormalizedInput | AgentFetchInput | AgentCalculateInput,
     config: dict | None = None,
     profile: VerificationProfile = "fallback",
-) -> VerificationResult:
-    """claim + 정규화된 입력 → VerificationResult."""
+) -> VerificationResult | VerdictDecision:
+    """claim + 정규화된 입력 → VerificationResult(fallback) 또는 VerdictDecision(agent)."""
+    config = config or {}
     if profile == "fallback":
-        return _decide_verdict_fallback(claim, normalized, config or {})
-    raise NotImplementedError(f"profile={profile!r} — agent 프로필은 후속 커밋")
+        if not isinstance(normalized, NormalizedInput):
+            raise TypeError("profile='fallback' requires NormalizedInput")
+        return _decide_verdict_fallback(claim, normalized, config)
+    if profile == "agent":
+        if isinstance(normalized, AgentFetchInput):
+            return decide_verdict_agent_fetch(claim, normalized, config)
+        if isinstance(normalized, AgentCalculateInput):
+            return decide_verdict_agent_calculate(claim, normalized, config)
+        raise TypeError("profile='agent' requires AgentFetchInput or AgentCalculateInput")
+    raise NotImplementedError(f"profile={profile!r}")
 
 
 def _decide_verdict_fallback(
