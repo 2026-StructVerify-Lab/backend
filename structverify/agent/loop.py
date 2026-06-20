@@ -21,6 +21,13 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Protocol
 
 from structverify.utils.logger import get_logger
+# [리팩] Step 8 판정 → verification.decide_verdict(agent)
+from structverify.verification.adapters import (
+    VerdictDecision,
+    from_agent_calculate,
+    from_agent_fetch,
+)
+from structverify.verification.decide_verdict import decide_verdict
 from .schemas import (
     ActionType,
     AgentVerdict,
@@ -139,99 +146,11 @@ def _interpolate_step_input(
     ]
     if fallback_ids:
         new_input["_candidate_fallbacks"] = fallback_ids
-    logger.info(
-        f"[loop] candidate_id placeholder 보간: {cid!r} → {top_id!r} "
-        f"(fallback 후보 {len(fallback_ids)}개)"
-    )
-    return PlanStep(action=step.action, input=new_input, rationale=step.rationale)
 
-
-# ── Claim type 추론 (Planner LLM 분류 보정) ──────────────────────
-
-# growth_rate 표현 키워드 (indicator에 들어있으면 growth_rate로 추론)
-_GROWTH_INDICATOR_KEYWORDS = ("증가율", "증감률", "증감율", "성장률", "비율", "퍼센트", "%")
-# difference 표현 키워드
-_DIFF_INDICATOR_KEYWORDS = ("차이", "증감", "감소", "증가분", "감소분", "변화량", "격차")
-# ranking 표현 키워드
-_RANK_INDICATOR_KEYWORDS = ("순위", "1위", "최고", "최대", "최저", "최소", "가장 높")
-# growth_rate 단위
-_GROWTH_UNITS = ("%", "%p", "퍼센트", "%P", "pp")
-
-# [v6.20] threshold(부등식) 표현 키워드.
-# "14도를 넘기다/돌파하다" 같은 주장은 value=14를 *등호*로 비교하면
-# 실측 14.5와 안 맞아 가짜 mismatch가 난다. 사실은 14.5 >= 14 → 충족.
-# claim 문장에 아래 표현이 있으면 등호가 아니라 부등식으로 판정한다.
-_THRESHOLD_GTE_KEYWORDS = (  # 실측 >= value 면 충족 (이상/초과/돌파)
-    "넘기", "넘어", "넘는", "넘은", "넘었", "돌파", "초과",
-    "이상", "웃돌", "상회", "넘게",
-)
-_THRESHOLD_LTE_KEYWORDS = (  # 실측 <= value 면 충족 (이하/미만)
-    "미만", "이하", "밑돌", "하회", "못 미", "못미", "안 되", "안되",
-)
-
-
-def _infer_claim_type(claim: Any) -> ClaimType | None:
-    """Claim의 *실제* 유형을 schema에서 추론.
-
-    Planner LLM이 source_text 전체 의미로 일괄 분류하기 때문에,
-    같은 문장에서 추출된 absolute / growth_rate claim들이 모두 growth_rate로
-    뭉뚱그려지는 문제가 있음. claim.schema의 indicator/unit/prev_value를 보면
-    정확하게 알 수 있으므로 그것으로 보정.
-
-    우선순위 (v6.17 수정 — prev_value를 unit보다 먼저 체크):
-      1. ClaimSchema.comparison_type (명시되어 있으면)
-      2. Claim.canonical_type
-      3. indicator 키워드 매칭 (순위/차이 → ranking/difference)
-      4. prev_value 있음 + unit % → growth_rate (두 시점 비교 비율)
-      5. prev_value 있음 (unit % 아님) → comparison/difference
-      6. prev_value 없음 → unit 무관하게 ABSOLUTE
-         · "공시가격 변동률 6.8%" 처럼 unit이 %여도 비교 기준값이
-           문장에 없으면 단일 시점 절대값(ABSOLUTE)으로 봐야 함.
-           이전엔 unit=% 만으로 growth_rate라 단정 → planner의
-           ranking/comparison 판정과 충돌 → 전부 unverifiable 되던 버그.
-    """
-    schema = getattr(claim, "schema", None)
-    if schema is None:
-        return None
-
-    # 1. schema.comparison_type 명시
-    comp = getattr(schema, "comparison_type", None)
-    if isinstance(comp, ClaimType):
-        return comp
-
-    # 2. claim.canonical_type
-    canon = getattr(claim, "canonical_type", None)
-    if isinstance(canon, ClaimType):
-        return canon
-
-    indicator = (getattr(schema, "indicator", None) or "").strip()
-    unit = (getattr(schema, "unit", None) or "").strip()
-    prev_value = getattr(schema, "prev_value", None)
-
-    # 3. indicator 키워드 — 순위/차이는 unit과 무관하게 먼저 판정
-    if any(kw in indicator for kw in _RANK_INDICATOR_KEYWORDS):
-        return ClaimType.RANKING
-    if any(kw in indicator for kw in _DIFF_INDICATOR_KEYWORDS):
-        return ClaimType.DIFFERENCE
-    if any(kw in indicator for kw in _GROWTH_INDICATOR_KEYWORDS):
-        # 증가율/성장률 키워드 → growth_rate (비교 기준 필요)
-        return ClaimType.GROWTH_RATE
-
-    # 4. prev_value 있음 → 두 시점 비교 claim
-    if prev_value is not None:
-        if unit in _GROWTH_UNITS:
-            return ClaimType.GROWTH_RATE
-        return ClaimType.COMPARISON
-
-    # 5. prev_value 없음 → 단일 시점 절대값
-    #    unit이 %여도 비교 기준이 없으면 growth_rate가 아님.
-    return ClaimType.ABSOLUTE
-
-
-# ── Auto verdict synthesis (Phase D deterministic) ───────────────
+# ── Auto verdict synthesis → verification.decide_verdict(agent) ─────────
 
 def _evidence_to_data_points(evidence: dict, claim: Any) -> list[DataPointSpec]:
-    """fetch observation의 evidence dict → DataPointSpec 리스트.
+    """fetch observation evidence dict → DataPointSpec 리스트.
 
     [v6.17] agent 경로가 검증에 쓴 KOSIS 데이터를 verdict에 담아야
     runtime_agent가 그걸 VerificationResult.evidence로 복원해서 UI에 표시함.
@@ -245,7 +164,7 @@ def _evidence_to_data_points(evidence: dict, claim: Any) -> list[DataPointSpec]:
         return []
     schema = getattr(claim, "schema", None)
     indicator = (getattr(schema, "indicator", "") or "") if schema else ""
-    population = (getattr(schema, "population", None)) if schema else None
+    population = getattr(schema, "population", None) if schema else None
     stat_id = evidence.get("stat_table_id", "") or ""
     try:
         rv = float(fetched_value)
@@ -286,21 +205,22 @@ def _save_verified_facts(
         dps = getattr(verdict, "data_points", None) or []
 
         # sibling_evidence용 sent_id / value_role 추출
-        _sent_id = ""
-        _role = ""
+        sent_id = ""
+        role = ""
         if claim is not None:
-            _sent_id = str(getattr(claim, "sent_id", "") or "").strip()
-            _schema = getattr(claim, "schema", None)
-            _role = (getattr(_schema, "value_role", None) or "") if _schema else ""
+            sent_id = str(getattr(claim, "sent_id", "") or "").strip()
+            schema = getattr(claim, "schema", None)
+            role = (getattr(schema, "value_role", None) or "") if schema else ""
 
         for dp in dps:
             val = getattr(dp, "resolved_value", None)
             if val is None:
                 continue
-            _fact = {
+            fact = {
                 "indicator": getattr(dp, "indicator", "") or "",
-                "time_period": (getattr(dp, "source_time", None)
-                                or getattr(dp, "time", "") or ""),
+                "time_period": (
+                    getattr(dp, "source_time", None) or getattr(dp, "time", "") or ""
+                ),
                 # [2026-05-21] population 추가 — sub-claim별 격리 위해 캐시 키에 포함
                 "population": (getattr(dp, "population", None) or ""),
                 "value": val,
@@ -309,336 +229,32 @@ def _save_verified_facts(
                 "claim_id": str(claim_id),
                 "verdict": v_type,
             }
-            workspace.append_verified_fact(_fact)
-            # [S] sent_id 매핑에도 저장 — base 결과를 sibling derived가 활용
-            if _sent_id and _role:
+            workspace.append_verified_fact(fact)
+            if sent_id and role:
                 workspace.record_sibling_evidence(
-                    sent_id=_sent_id, role=_role, evidence=_fact,
+                    sent_id=sent_id, role=role, evidence=fact,
                 )
     except Exception as e:
         logger.debug(f"[loop] verified_fact 저장 실패 (무시): {e}")
 
 
-def _find_row_value_for_time(rows: list, target_time: str) -> float | None:
-    """[v6.17] KOSIS 표 rows에서 특정 시점(PRD_DE) 행의 값(DT)을 찾는다.
-
-    growth_rate 직접 계산용 — 같은 표에서 1년 전(prev) 값을 추출한다.
-    target_time: 'YYYY' 또는 'YYYY-MM'. PRD_DE는 'YYYY' 또는 'YYYYMM' 형식.
-    """
-    if not rows or not target_time:
-        return None
-    # 'YYYY-MM' → 'YYYYMM' 정규화
-    norm = str(target_time).replace("-", "").strip()
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        prd = str(row.get("PRD_DE", "") or "").strip()
-        if prd == norm:
-            v = _parse_row_dt(row.get("DT"))
-            if v is not None:
-                return v
-    # 연도만으로 재시도 (target이 'YYYY-MM'인데 표는 연 단위인 경우)
-    year = norm[:4]
-    if year and year != norm:
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            prd = str(row.get("PRD_DE", "") or "").strip()
-            if prd == year:
-                v = _parse_row_dt(row.get("DT"))
-                if v is not None:
-                    return v
-    return None
-
-
-def _parse_row_dt(raw: Any) -> float | None:
-    """KOSIS row의 DT 필드를 float로 파싱 (콤마/공백 제거)."""
-    if raw is None:
-        return None
-    try:
-        return float(str(raw).replace(",", "").strip())
-    except (TypeError, ValueError):
-        return None
-
-
-# ── [패치 H-3] 지표/시점 동시 매칭 row 찾기 helper ─────────────────────
-# matched_row의 ITM_NM·C1_NM~C4_NM 컬럼을 criteria로 추출해, aggregated rows
-# 풀에서 같은 지표(criteria)에 다른 시점(target_time)의 row를 찾는다.
-# 여러 fetch observation의 rows[]를 합친 풀에서 시점만 가지고 row를 잡으면
-# 다른 지표 row(예: 출생아 수와 혼인 건수가 같은 PRD_DE 공유)를 잘못 잡아
-# 가짜 prev/current 비교를 만든다 — 그 버그를 차단.
-
-_INDICATOR_CRITERIA_FIELDS = ("ITM_NM", "C1_NM", "C2_NM", "C3_NM", "C4_NM")
-
-
-def _extract_criteria_from_row(row: dict) -> dict:
-    """matched_row에서 지표 식별 컬럼만 추출."""
-    if not isinstance(row, dict):
-        return {}
-    return {
-        k: row[k]
-        for k in _INDICATOR_CRITERIA_FIELDS
-        if k in row and row[k] is not None and str(row[k]).strip() != ""
-    }
-
-
-def _find_value_for_time_with_criteria(
-    all_rows: list[dict],
-    target_time: str,
-    criteria: dict | None,
-) -> tuple[float, dict] | None:
-    """rows[]에서 target_time 매칭 + criteria 컬럼 값 일치하는 row 찾기.
-
-    criteria가 비면 _find_row_value_for_time과 동일 동작.
-    찾으면 (DT 값, 매칭한 row) 반환.
-    """
-    if not all_rows or not target_time:
-        return None
-    norm = str(target_time).replace("-", "").strip()
-
-    def _row_matches_criteria(row: dict) -> bool:
-        if not criteria:
-            return True
-        for k, v in criteria.items():
-            if str(row.get(k, "")).strip() != str(v).strip():
-                return False
-        return True
-
-    # 1차: PRD_DE 완전 일치 + criteria 일치
-    for row in all_rows:
-        if not isinstance(row, dict):
-            continue
-        prd = str(row.get("PRD_DE", "") or "").strip()
-        if prd != norm:
-            continue
-        if not _row_matches_criteria(row):
-            continue
-        v = _parse_row_dt(row.get("DT"))
-        if v is not None:
-            return (v, row)
-
-    # 2차: 연 단위 fallback (PRD_DE='YYYY')
-    year = norm[:4]
-    if year and year != norm:
-        for row in all_rows:
-            if not isinstance(row, dict):
-                continue
-            prd = str(row.get("PRD_DE", "") or "").strip()
-            if prd != year:
-                continue
-            if not _row_matches_criteria(row):
-                continue
-            v = _parse_row_dt(row.get("DT"))
-            if v is not None:
-                return (v, row)
-    return None
-
-
-def _aggregate_rows_from_fetches(
-    fetch_observations: list,
-) -> list[dict]:
-    """여러 fetch observation의 rows[]를 평탄화해 합친 리스트."""
-    out: list[dict] = []
-    if not fetch_observations:
-        return out
-    seen_ids: set[int] = set()
-    for obs in fetch_observations:
-        ev = (getattr(obs, "output", None) or {}).get("evidence") or {}
-        rs = ev.get("rows") or []
-        for r in rs:
-            if not isinstance(r, dict):
-                continue
-            rid = id(r)
-            if rid in seen_ids:
-                continue
-            seen_ids.add(rid)
-            out.append(r)
-    return out
-
-
-def _try_growth_rate_from_rows(
+def _verdict_decision_to_agent_verdict(
+    decision: VerdictDecision,
     evidence: dict,
-    schema: Any,
-    claim_id: str,
-    all_fetch_observations: list | None = None,
-) -> tuple[float, float, float, str] | None:
-    """[v6.17] growth_rate claim을 같은 표 rows로 직접 계산.
-
-    KOSIS에 '증가율' 통계표가 따로 없을 때, fetch한 표(현재값 표)의 rows에서
-    prev_time_period 시점의 행을 찾아 (current-prev)/prev*100 을 직접 계산한다.
-    추가 API 호출 불필요 — evidence dict에 rows 전체가 들어있음.
-
-    [패치 H-3] all_fetch_observations가 주어지면 pool로 사용. evidence.value를
-    무조건 current로 쓰지 않고 claim_time(현재 시점) row를 풀에서 다시 찾음.
-    이렇게 해야 last fetch가 prev_time이었던 경우에 current_val이 prev's value로
-    엉뚱하게 잡히는 버그를 막는다. 또 prev row도 matched_row의 지표 criteria로
-    필터해 다른 지표 row(예: 출생아 수 vs 혼인 건수)가 잘못 매칭되는 걸 차단.
-
-    반환: (계산된_증가율, current_value, prev_value, 설명) 또는 None.
-    """
-    prev_time = getattr(schema, "prev_time_period", None) if schema else None
-    if not prev_time:
-        return None  # 비교 시점 없음 → 계산 불가
-
-    cur_time = getattr(schema, "time_period", None) if schema else None
-
-    # rows pool: last fetch + 모든 fetch observation rows 합집합
-    rows = list(evidence.get("rows") or [])
-    pool_rows: list[dict] = []
-    if all_fetch_observations:
-        pool_rows = _aggregate_rows_from_fetches(all_fetch_observations)
-    for r in rows:
-        if isinstance(r, dict) and r not in pool_rows:
-            pool_rows.append(r)
-    if not pool_rows:
-        return None
-
-    # matched_row criteria로 같은 지표 row만 후보 추리기
-    matched_row = evidence.get("matched_row") or {}
-    criteria = _extract_criteria_from_row(matched_row)
-
-    # current_val: claim_time(현재) row를 풀에서 다시 찾음. 못 찾으면 evidence.value 사용
-    current_val: float | None = None
-    if cur_time:
-        cur_hit = _find_value_for_time_with_criteria(pool_rows, cur_time, criteria)
-        if cur_hit is not None:
-            current_val, _ = cur_hit
-    if current_val is None:
-        current_val = _parse_row_dt(evidence.get("value"))
-        if current_val is None and matched_row:
-            current_val = _parse_row_dt(matched_row.get("DT"))
-    if current_val is None:
-        return None
-
-    # prev_val: 같은 지표 criteria로 prev_time 시점 row 탐색
-    prev_hit = _find_value_for_time_with_criteria(pool_rows, prev_time, criteria)
-    if prev_hit is None:
-        # criteria 너무 좁아서 못 찾았으면 criteria 없이 한 번 더 (안전망)
-        # 다만 이건 마지막 수단 — log로 명시
-        logger.info(
-            f"[loop] {claim_id}: growth_rate 직접계산 — criteria 매칭 prev row "
-            f"{prev_time!r} 못 찾음. 지표 무관 시점 매칭으로 fallback "
-            f"(pool={len(pool_rows)} rows, criteria={list(criteria.keys()) or '없음'})"
-        )
-        prev_val_legacy = _find_row_value_for_time(pool_rows, prev_time)
-        if prev_val_legacy is None:
-            return None
-        prev_val = prev_val_legacy
-    else:
-        prev_val, _ = prev_hit
-
-    if prev_val == 0:
-        return None  # 0으로 나눗셈 방지
-
-    calc_rate = (current_val - prev_val) / prev_val * 100.0
-    desc = (
-        f"표에서 직접 계산: 현재값({cur_time or '?'}) {current_val} - "
-        f"이전값({prev_time}) {prev_val} "
-        f"→ 증가율 ({current_val}-{prev_val})/{prev_val}×100 = {calc_rate:.2f}%"
+    claim: Any,
+    iter_num: int,
+    stop_reason: StopReason = StopReason.COMPLETED,
+) -> AgentVerdict:
+    """VerdictDecision → AgentVerdict (data_points·iter 메타 포장)."""
+    return AgentVerdict(
+        claim_id=decision.claim_id,
+        verdict=decision.verdict,
+        confidence=decision.confidence,
+        explanation=decision.explanation,
+        data_points=_evidence_to_data_points(evidence, claim),
+        iterations_used=iter_num,
+        stop_reason=stop_reason,
     )
-    logger.info(f"[loop] {claim_id}: growth_rate 직접계산 성공 — {desc}")
-    return (calc_rate, current_val, prev_val, desc)
-
-
-def _try_difference_from_rows(
-    evidence: dict,
-    schema: Any,
-    claim_id: str,
-    all_fetch_observations: list | None = None,
-) -> tuple[float, float, float, str] | None:
-    """[수정 v6.23] difference claim을 같은 표 rows로 직접 계산.
-
-    growth_rate와 동일한 원리 — fetch한 표의 rows에서 prev_time_period
-    시점 행을 찾아 (current - prev) 차이를 직접 계산한다.
-
-    [패치 H-3] aggregated pool + criteria 필터로 current/prev row를 올바르게
-    잡는다. evidence.value 무조건 사용 안 함.
-
-    반환: (계산된_차이, current_value, prev_value, 설명) 또는 None.
-    """
-    prev_time = getattr(schema, "prev_time_period", None) if schema else None
-    if not prev_time:
-        return None  # 비교 시점 없음 → 계산 불가
-
-    cur_time = getattr(schema, "time_period", None) if schema else None
-
-    rows = list(evidence.get("rows") or [])
-    pool_rows: list[dict] = []
-    if all_fetch_observations:
-        pool_rows = _aggregate_rows_from_fetches(all_fetch_observations)
-    for r in rows:
-        if isinstance(r, dict) and r not in pool_rows:
-            pool_rows.append(r)
-    if not pool_rows:
-        return None
-
-    matched_row = evidence.get("matched_row") or {}
-    criteria = _extract_criteria_from_row(matched_row)
-
-    current_val: float | None = None
-    if cur_time:
-        cur_hit = _find_value_for_time_with_criteria(pool_rows, cur_time, criteria)
-        if cur_hit is not None:
-            current_val, _ = cur_hit
-    if current_val is None:
-        current_val = _parse_row_dt(evidence.get("value"))
-        if current_val is None and matched_row:
-            current_val = _parse_row_dt(matched_row.get("DT"))
-    if current_val is None:
-        return None
-
-    prev_hit = _find_value_for_time_with_criteria(pool_rows, prev_time, criteria)
-    if prev_hit is None:
-        logger.info(
-            f"[loop] {claim_id}: difference 직접계산 — criteria 매칭 prev row "
-            f"{prev_time!r} 못 찾음. 지표 무관 fallback "
-            f"(pool={len(pool_rows)} rows, criteria={list(criteria.keys()) or '없음'})"
-        )
-        prev_val_legacy = _find_row_value_for_time(pool_rows, prev_time)
-        if prev_val_legacy is None:
-            return None
-        prev_val = prev_val_legacy
-    else:
-        prev_val, _ = prev_hit
-
-    calc_diff = current_val - prev_val
-    desc = (
-        f"표에서 직접 계산: 현재값({cur_time or '?'}) {current_val} - "
-        f"이전값({prev_time}) {prev_val} → 차이 {current_val}-{prev_val} = {calc_diff:.4f}"
-    )
-    logger.info(f"[loop] {claim_id}: difference 직접계산 성공 — {desc}")
-    return (calc_diff, current_val, prev_val, desc)
-
-
-def _detect_threshold_direction(claim: Any) -> str | None:
-    """[v6.20] claim 문장이 부등식(threshold) 주장인지 판정.
-
-    Returns:
-        "gte"  — "14도를 넘기다/돌파/이상" → 실측 >= value 면 충족
-        "lte"  — "14도 미만/이하/밑돌다"  → 실측 <= value 면 충족
-        None   — 부등식 표현 없음 (일반 등호 비교)
-
-    claim_text와 schema.modifier 양쪽을 본다. schema_inductor가
-    "이상" 등을 modifier로 떼어내므로 거기도 확인.
-    """
-    text = (getattr(claim, "claim_text", "") or "")
-    schema = getattr(claim, "schema", None)
-    modifier = ""
-    if schema is not None:
-        modifier = (getattr(schema, "modifier", "") or "")
-    haystack = f"{text} {modifier}"
-
-    has_gte = any(kw in haystack for kw in _THRESHOLD_GTE_KEYWORDS)
-    has_lte = any(kw in haystack for kw in _THRESHOLD_LTE_KEYWORDS)
-
-    # 양쪽 다 잡히면 모호 → 등호 비교로 폴백 (안전)
-    if has_gte and has_lte:
-        return None
-    if has_gte:
-        return "gte"
-    if has_lte:
-        return "lte"
-    return None
 
 
 def _synthesize_verdict_from_observation(
@@ -649,389 +265,33 @@ def _synthesize_verdict_from_observation(
     iter_num: int,
     tolerance: float,
     all_fetch_observations: list | None = None,
+    config: dict | None = None,
 ) -> AgentVerdict | None:
     """Plan steps 소진 시 fetch observation 보고 deterministic verdict 합성.
 
     Phase D의 임시 verdict 결정 로직. Phase E에서 LLM 기반 verdict로 교체 예정.
-
-    합성 규칙:
-      - last_observation이 fetch_evidence 성공 + claim에 값 있음 → 값 비교 (1% 오차)
-        · 일치 → MATCH (conf 0.85)
-        · 불일치 → MISMATCH (conf 0.7)
-      - growth_rate/difference/ranking → 두 시점 비교 필요인데 단일 fetch 뿐 → UNVERIFIABLE
-      - fetch 실패 또는 값 없음 → UNVERIFIABLE
-      - last_observation 없거나 fetch 아니면 → None (호출자가 default unverifiable)
+    [리팩] 판정 본문은 verification.decide_verdict(profile=agent)에 위임.
     """
     if last_observation is None:
         return None
     if last_observation.action != ActionType.FETCH_EVIDENCE:
         return None
 
-    # fetch 실패 케이스
-    if not last_observation.success:
-        return AgentVerdict(
-            claim_id=claim_id,
-            verdict=VerdictType.UNVERIFIABLE,
-            confidence=0.25,
-            explanation=f"데이터 조회 실패: {(last_observation.summary or '')[:200]}",
-            data_points=[],
-            iterations_used=iter_num,
-            stop_reason=StopReason.COMPLETED,
-        )
+    normalized, early = from_agent_fetch(
+        claim,
+        last_observation,
+        plan,
+        tolerance=tolerance,
+        all_fetch_observations=all_fetch_observations,
+    )
+    if early is not None:
+        return _verdict_decision_to_agent_verdict(early, {}, claim, iter_num)
+    if normalized is None:
+        return None
 
-    evidence = (last_observation.output or {}).get("evidence") or {}
-    fetched_value = evidence.get("value")
-    fetched_unit = evidence.get("unit", "") or ""
-    fetched_time = evidence.get("time_period", "") or ""
-    stat_table_id = evidence.get("stat_table_id", "") or ""
-    stat_name = evidence.get("stat_name", "") or ""
-
-    schema = getattr(claim, "schema", None)
-    claim_value = getattr(schema, "value", None) if schema is not None else None
-    claim_unit = getattr(schema, "unit", "") or "" if schema is not None else ""
-    claim_time = getattr(schema, "time_period", "") or "" if schema is not None else ""
-    claim_indicator = getattr(schema, "indicator", "") or "" if schema is not None else ""
-
-    # ── [패치 H-3] aggregated rows에서 claim_time + 지표 criteria 매칭 row 찾기 ──
-    # 시나리오: LLM이 current(2025-04) fetch → prev(2024-04) fetch 순으로 호출하면
-    # last_fetch_observation은 prev 시점만 들어있고 그 fetch의 rows[]에는 2025-04
-    # row가 아예 없다. 단일 fetch만 보면 claim_time row 못 찾아 unverifiable.
-    # → 같은 claim의 모든 fetch observation rows를 합쳐서 풀을 만들고,
-    #   matched_row의 ITM_NM·C1_NM~C4_NM을 criteria로 같은 지표의 다른 시점 row를
-    #   찾는다. 시점만 보고 row 잡으면 출생아 수/혼인 건수 같이 PRD_DE 공유하는
-    #   다른 지표가 잘못 매칭됨 — criteria 필터로 차단.
-    matched_row_from_last = evidence.get("matched_row") or {}
-    criteria = _extract_criteria_from_row(matched_row_from_last)
-    pool_rows = _aggregate_rows_from_fetches(all_fetch_observations or [])
-    # last fetch의 rows도 합집합에 포함 (보통은 이미 포함됐을 것이나 안전)
-    last_evidence_rows = evidence.get("rows") or []
-    for r in last_evidence_rows:
-        if isinstance(r, dict) and r not in pool_rows:
-            pool_rows.append(r)
-
-    if claim_time and pool_rows:
-        hit = _find_value_for_time_with_criteria(pool_rows, claim_time, criteria)
-        if hit is not None:
-            row_val_for_claim_time, _picked_row = hit
-            claim_time_norm = str(claim_time).replace("-", "")
-            fetched_time_norm = str(fetched_time).replace("-", "")
-            # 마지막 fetch가 이미 claim_time이면 그대로, 아니면 덮어씀
-            if claim_time_norm not in fetched_time_norm:
-                logger.info(
-                    f"[loop] {claim_id}: aggregated rows에서 claim_time={claim_time} + "
-                    f"criteria={list(criteria.keys()) or '없음'} row 매칭 "
-                    f"→ value={row_val_for_claim_time} "
-                    f"(마지막 fetch 시점={fetched_time}/value={fetched_value} → 덮어씀)"
-                )
-                fetched_value = row_val_for_claim_time
-                fetched_time = claim_time_norm
-
-    # 복합 claim type: 두 시점 비교 필요인데 plan은 단일 fetch
-    # ★ plan.claim_type은 Planner LLM이 source_text 의미로 일괄 분류해서 부정확함
-    #   → claim.schema에서 직접 추론한 type을 더 신뢰
-    complex_types = {ClaimType.GROWTH_RATE, ClaimType.DIFFERENCE, ClaimType.RANKING}
-    claim_actual_type = _infer_claim_type(claim) or plan.claim_type
-    if isinstance(claim_actual_type, ClaimType) and claim_actual_type in complex_types:
-        # ── [v6.17] GROWTH_RATE 직접 계산 시도 ──────────────────────────
-        # KOSIS에 '증가율' 통계표가 따로 없어도, fetch한 표(현재값 표)의
-        # rows에서 prev_time_period 시점 행을 찾아 증가율을 직접 계산한다.
-        # "출생아 수 23만 명으로 1년 전보다 7.7% 줄었다" 같은 claim 대응.
-        if claim_actual_type == ClaimType.GROWTH_RATE:
-            calc = _try_growth_rate_from_rows(
-                evidence, schema, claim_id,
-                all_fetch_observations=all_fetch_observations,
-            )
-            if calc is not None and claim_value is not None:
-                calc_rate, cur_v, prev_v, calc_desc = calc
-                try:
-                    claimed_rate = float(claim_value)
-                except (TypeError, ValueError):
-                    claimed_rate = None
-                if claimed_rate is not None:
-                    # ── [패치 J] 증가율/감소율 부호 방향 가드 ─────────────
-                    # 기사 "혼인 건수 증가율 4.9%"는 양의 방향(증가) 주장.
-                    # 시스템 계산 -5.25% (감소)는 정반대 방향이지만, 기존엔
-                    # abs(abs(-5.25)-abs(4.9))=0.35 ≤ 1.5 로 MATCH 통과시켰음.
-                    # 가짜 일치를 만들어 데이터 신뢰성을 깨므로, indicator의
-                    # 방향 단서(증가율/상승률 vs 감소율/하락률)와 calc_rate
-                    # 부호가 어긋나면 즉시 MISMATCH로 떨어트린다.
-                    _INCREASE_SFX = ("증가율", "상승률")
-                    _DECREASE_SFX = ("감소율", "하락률")
-                    _ind = (claim_indicator or "").strip()
-                    _expects_inc = any(_ind.endswith(s) for s in _INCREASE_SFX)
-                    _expects_dec = any(_ind.endswith(s) for s in _DECREASE_SFX)
-                    _direction_mismatch = (
-                        (_expects_inc and calc_rate < 0)
-                        or (_expects_dec and calc_rate > 0)
-                    )
-                    if _direction_mismatch:
-                        diff = abs(abs(calc_rate) - abs(claimed_rate))
-                        logger.warning(
-                            f"[loop] {claim_id}: growth_rate 부호 방향 불일치 "
-                            f"(indicator={_ind!r}, 기사 {claimed_rate:+.2f}% 방향, "
-                            f"계산 {calc_rate:+.2f}% 반대 방향) → MISMATCH 강제"
-                        )
-                        return AgentVerdict(
-                            claim_id=claim_id,
-                            verdict=VerdictType.MISMATCH,
-                            confidence=0.75,
-                            explanation=(
-                                f"증가율 방향 불일치: 기사는 '{_ind}' "
-                                f"{claimed_rate}% (양의 방향), "
-                                f"KOSIS({stat_table_id}) 표 계산값 "
-                                f"{calc_rate:.2f}% ({'감소' if calc_rate < 0 else '증가'} 방향). "
-                                f"{calc_desc}"
-                            ),
-                            data_points=_evidence_to_data_points(evidence, claim),
-                            iterations_used=iter_num,
-                            stop_reason=StopReason.COMPLETED,
-                        )
-                    # 부호 일치 — 부호 무시하고 절대 크기 비교
-                    # (기사 "7.7% 줄었다"=감소를 7.7로 표기, 계산값은 -7.69)
-                    diff = abs(abs(calc_rate) - abs(claimed_rate))
-                    # 증가율은 %p 차이로 판정 (1.5%p 이내 일치)
-                    if diff <= 1.5:
-                        verdict_t = VerdictType.MATCH
-                        conf = 0.8
-                        v_label = "일치"
-                    elif diff <= 5.0:
-                        verdict_t = VerdictType.UNVERIFIABLE
-                        conf = 0.4
-                        v_label = "오차 큼"
-                    else:
-                        verdict_t = VerdictType.MISMATCH
-                        conf = 0.7
-                        v_label = "불일치"
-                    logger.info(
-                        f"[loop] {claim_id}: growth_rate 직접계산 판정={v_label} "
-                        f"(기사 {claimed_rate}% vs 계산 {calc_rate:.2f}%, "
-                        f"차이 {diff:.2f}%p)"
-                    )
-                    return AgentVerdict(
-                        claim_id=claim_id,
-                        verdict=verdict_t,
-                        confidence=conf,
-                        explanation=(
-                            f"증가율 직접 검증: 기사 주장 {claimed_rate}%, "
-                            f"KOSIS({stat_table_id}) 표에서 계산한 값 "
-                            f"{calc_rate:.2f}% (차이 {diff:.2f}%p). {calc_desc}"
-                        ),
-                        data_points=_evidence_to_data_points(evidence, claim),
-                        iterations_used=iter_num,
-                        stop_reason=StopReason.COMPLETED,
-                    )
-
-        # ── [수정 v6.23] DIFFERENCE 직접 계산 시도 ──────────────────────
-        # growth_rate와 동일 — 같은 표 rows에서 prev_time_period 행을 찾아
-        # (current - prev) 차이를 직접 계산. "합계출산율 0.79명으로 지난해
-        # 같은 달보다 0.06명 증가" 같은 claim 대응.
-        if claim_actual_type == ClaimType.DIFFERENCE:
-            calc = _try_difference_from_rows(
-                evidence, schema, claim_id,
-                all_fetch_observations=all_fetch_observations,
-            )
-            if calc is not None and claim_value is not None:
-                calc_diff, cur_v, prev_v, calc_desc = calc
-                try:
-                    claimed_diff = float(claim_value)
-                except (TypeError, ValueError):
-                    claimed_diff = None
-                if claimed_diff is not None:
-                    # 차이값 비교 — 부호 무시하고 절대 크기 비교
-                    # (기사 "0.06명 증가"=0.06, 계산값도 +0.06 방향)
-                    gap = abs(abs(calc_diff) - abs(claimed_diff))
-                    # 차이값 자체의 크기에 비례한 허용 오차 (10%) 또는
-                    # 최소 절대 허용치 중 큰 쪽 — 작은 값(0.06 등)도 견딤.
-                    tol = max(abs(claimed_diff) * 0.10, 0.02)
-                    if gap <= tol:
-                        verdict_t = VerdictType.MATCH
-                        conf = 0.8
-                        v_label = "일치"
-                    elif gap <= tol * 3:
-                        verdict_t = VerdictType.UNVERIFIABLE
-                        conf = 0.4
-                        v_label = "오차 큼"
-                    else:
-                        verdict_t = VerdictType.MISMATCH
-                        conf = 0.7
-                        v_label = "불일치"
-                    logger.info(
-                        f"[loop] {claim_id}: difference 직접계산 판정={v_label} "
-                        f"(기사 {claimed_diff} vs 계산 {calc_diff:.4f}, "
-                        f"차이 {gap:.4f}, 허용 {tol:.4f})"
-                    )
-                    return AgentVerdict(
-                        claim_id=claim_id,
-                        verdict=verdict_t,
-                        confidence=conf,
-                        explanation=(
-                            f"차이값 직접 검증: 기사 주장 {claimed_diff}, "
-                            f"KOSIS({stat_table_id}) 표에서 계산한 값 "
-                            f"{calc_diff:.4f} (차이 {gap:.4f}). {calc_desc}"
-                        ),
-                        data_points=_evidence_to_data_points(evidence, claim),
-                        iterations_used=iter_num,
-                        stop_reason=StopReason.COMPLETED,
-                    )
-
-        # 직접 계산 불가 (prev 시점 없음 / 표에 prev 행 없음) → 검증 불가
-        logger.info(
-            f"[loop] {claim_id}: claim type={claim_actual_type.value} "
-            f"(planner type={plan.claim_type.value}) — 단일 fetch로 검증 불가"
-        )
-        return AgentVerdict(
-            claim_id=claim_id,
-            verdict=VerdictType.UNVERIFIABLE,
-            confidence=0.3,
-            explanation=(
-                f"{claim_actual_type.value} 유형은 두 시점 비교 필요. "
-                f"KOSIS({stat_table_id}) 현재값 {fetched_value!r}{fetched_unit} "
-                f"(시점 {fetched_time}) 확보. "
-                f"이전 시점 데이터 부재로 검증 불가."
-            ),
-            data_points=_evidence_to_data_points(evidence, claim),
-            iterations_used=iter_num,
-            stop_reason=StopReason.COMPLETED,
-        )
-
-    # 값 둘 다 있어야 비교 가능
-    if fetched_value is None or claim_value is None:
-        return AgentVerdict(
-            claim_id=claim_id,
-            verdict=VerdictType.UNVERIFIABLE,
-            confidence=0.3,
-            explanation=(
-                f"비교 불가: 주장값={claim_value!r}{claim_unit}, "
-                f"KOSIS({stat_table_id}) 조회값={fetched_value!r}{fetched_unit}."
-            ),
-            data_points=_evidence_to_data_points(evidence, claim),
-            iterations_used=iter_num,
-            stop_reason=StopReason.COMPLETED,
-        )
-
-    # 숫자 변환
-    try:
-        fv = float(fetched_value)
-        cv = float(claim_value)
-    except (TypeError, ValueError):
-        return AgentVerdict(
-            claim_id=claim_id,
-            verdict=VerdictType.UNVERIFIABLE,
-            confidence=0.3,
-            explanation=(
-                f"값 숫자 변환 실패 — 주장값={claim_value!r}, 조회값={fetched_value!r}."
-            ),
-            data_points=_evidence_to_data_points(evidence, claim),
-            iterations_used=iter_num,
-            stop_reason=StopReason.COMPLETED,
-        )
-
-    # 오차율 계산
-    if abs(cv) < 1e-9:
-        diff_ratio = 0.0 if abs(fv) < 1e-9 else 1.0
-    else:
-        diff_ratio = abs(fv - cv) / abs(cv)
-
-    # 시점 일치 여부 (단순 substring 매칭)
-    time_aligned = True
-    if claim_time and fetched_time:
-        ct_norm = str(claim_time).replace("-", "").replace(".", "")
-        ft_norm = str(fetched_time).replace("-", "").replace(".", "")
-        # claim "2025-04" → "202504", fetched "202504" 또는 "2025"
-        # claim이 월별이고 fetched가 연간이면 비매칭
-        time_aligned = (ct_norm in ft_norm) or (ft_norm in ct_norm)
-
-    src_label = f"KOSIS({stat_table_id})" + (f" {stat_name}" if stat_name else "")
-
-    # [v6.20] threshold(부등식) 주장 처리 — "14도를 넘기다/돌파" 등.
-    # value를 등호로 비교하면 (14 vs 실측 14.5) 가짜 mismatch가 난다.
-    # 부등식이 충족되면 MATCH, 어긋나면 MISMATCH로 판정.
-    # 시점이 안 맞으면 아래 일반 로직과 동일하게 unverifiable이 맞으므로
-    # time_aligned일 때만 부등식 판정을 적용한다.
-    _thr_dir = _detect_threshold_direction(claim)
-    if _thr_dir is not None and time_aligned:
-        if _thr_dir == "gte":
-            satisfied = fv >= cv
-            rel_txt = "이상"
-        else:  # lte
-            satisfied = fv <= cv
-            rel_txt = "이하"
-        logger.info(
-            f"[loop] {claim_id}: threshold 판정 dir={_thr_dir} "
-            f"기준값={cv:.4g} 실측={fv:.4g} → {'충족' if satisfied else '미충족'}"
-        )
-        if satisfied:
-            return AgentVerdict(
-                claim_id=claim_id,
-                verdict=VerdictType.MATCH,
-                confidence=0.8,
-                explanation=(
-                    f"주장은 '{cv:.4g}{claim_unit} {rel_txt}'(부등식)이고, "
-                    f"{src_label} 조회값은 {fv:.4g}{fetched_unit} "
-                    f"(시점 {fetched_time or claim_time})이므로 주장이 성립합니다."
-                ),
-                data_points=_evidence_to_data_points(evidence, claim),
-                iterations_used=iter_num,
-                stop_reason=StopReason.COMPLETED,
-            )
-        return AgentVerdict(
-            claim_id=claim_id,
-            verdict=VerdictType.MISMATCH,
-            confidence=0.7,
-            explanation=(
-                f"주장은 '{cv:.4g}{claim_unit} {rel_txt}'(부등식)이지만, "
-                f"{src_label} 조회값은 {fv:.4g}{fetched_unit} "
-                f"(시점 {fetched_time or claim_time})이므로 주장이 성립하지 않습니다."
-            ),
-            data_points=_evidence_to_data_points(evidence, claim),
-            iterations_used=iter_num,
-            stop_reason=StopReason.COMPLETED,
-        )
-
-    if diff_ratio < tolerance and time_aligned:
-        return AgentVerdict(
-            claim_id=claim_id,
-            verdict=VerdictType.MATCH,
-            confidence=0.85,
-            explanation=(
-                f"주장값 {cv:.4g}{claim_unit}과 {src_label} 조회값 "
-                f"{fv:.4g}{fetched_unit}이 일치 (오차 {diff_ratio*100:.2f}%, "
-                f"시점 주장={claim_time or '?'}, 조회={fetched_time or '?'})."
-            ),
-            data_points=_evidence_to_data_points(evidence, claim),
-            iterations_used=iter_num,
-            stop_reason=StopReason.COMPLETED,
-        )
-
-    # 시점 불일치인 경우 mismatch보다 unverifiable이 안전 (잘못된 row일 가능성)
-    if not time_aligned:
-        return AgentVerdict(
-            claim_id=claim_id,
-            verdict=VerdictType.UNVERIFIABLE,
-            confidence=0.35,
-            explanation=(
-                f"시점 불일치 — 주장은 {claim_time}, {src_label} 조회는 {fetched_time}. "
-                f"동일 시점 데이터 미확보로 검증 불가 "
-                f"(조회값 {fv:.4g}{fetched_unit}, 주장값 {cv:.4g}{claim_unit})."
-            ),
-            data_points=_evidence_to_data_points(evidence, claim),
-            iterations_used=iter_num,
-            stop_reason=StopReason.COMPLETED,
-        )
-
-    # 시점은 맞는데 값이 다름 → mismatch
-    return AgentVerdict(
-        claim_id=claim_id,
-        verdict=VerdictType.MISMATCH,
-        confidence=0.7,
-        explanation=(
-            f"주장값 {cv:.4g}{claim_unit}과 {src_label} 조회값 "
-            f"{fv:.4g}{fetched_unit}이 {diff_ratio*100:.1f}% 차이 "
-            f"(시점 {fetched_time or claim_time})."
-        ),
-        data_points=_evidence_to_data_points(evidence, claim),
-        iterations_used=iter_num,
-        stop_reason=StopReason.COMPLETED,
+    decision = decide_verdict(claim, normalized, config or {}, profile="agent")
+    return _verdict_decision_to_agent_verdict(
+        decision, normalized.evidence, claim, iter_num,
     )
 
 
@@ -1043,169 +303,26 @@ def _synthesize_verdict_from_calculate(
     iter_num: int,
     last_fetch_observation: Observation | None = None,
     workspace: Any = None,
+    config: dict | None = None,
 ) -> AgentVerdict | None:
     """[패치] Plan 소진 + 마지막 성공한 관측이 CALCULATE인 경우 verdict 합성.
 
     LLM이 prev/current를 계산했지만 finish를 안 부르고 다시 같은 액션 반복
-    → 중복차단 → 강제 unverifiable로 죽는 케이스(2026-05-20 진단). calculate
-    output의 result 값을 claim.schema.value와 비교해 자동 verdict 생성한다.
-
-    growth_rate/difference claim에서 LLM이 계산 결과를 8.6993로 얻었는데
-    기사 주장 8.7%와 일치해도 finish를 못 부르면 그동안 unverifiable로 끝났음.
-
-    [안전장치] last_fetch_observation이 없으면 calculate 결과를 신뢰하지
-    않는다. fetch 0건 상태에서 LLM이 prev/current를 임의로 박아 계산한
-    값(예: prev=18123 같이 출처 불명 값)이 우연히 article과 비슷하다고
-    MATCH로 만들어 환각을 통과시키는 걸 차단.
-
-    [P22 2026-05-22] sibling base evidence가 있으면 fetch 0건이어도 합성 시도.
-    derived claim이 같은 문장 base sub-claim의 KOSIS 값을 cache로 활용하는
-    경로(혼인 건수 base 18919 → 증가율 claim이 fetch 없이 calc) 회복. 단,
-    calc.input.current가 sibling base value와 *크게 다르면(>2%)* 환각으로 거부.
+    → 중복차단 → 강제 unverifiable로 죽는 케이스 회복.
+    [리팩] 판정 본문은 verification.decide_verdict(profile=agent)에 위임.
     """
-    if last_calc_observation is None or not last_calc_observation.success:
-        return None
-    if last_calc_observation.action != ActionType.CALCULATE:
-        return None
-    if last_fetch_observation is None:
-        # [P22] sibling 검증으로 fetch 0건 케이스 구제 시도
-        _sib_current: float | None = None
-        try:
-            _sent_id = str(getattr(claim, "sent_id", "") or "").strip()
-            if workspace is not None and _sent_id and hasattr(workspace, "read_sibling_evidence"):
-                _sibs = workspace.read_sibling_evidence(_sent_id) or []
-                # 같은 시점의 base sibling 찾기
-                _schema = getattr(claim, "schema", None)
-                _tp = (getattr(_schema, "time_period", None) or "") if _schema else ""
-                _tp_norm = str(_tp).replace("-", "")
-                for _s in _sibs:
-                    if _s.get("role") != "base":
-                        continue
-                    _s_tp = str(_s.get("time_period") or "").replace("-", "")
-                    if _s_tp == _tp_norm and _s.get("value") is not None:
-                        _sib_current = float(_s.get("value"))
-                        break
-        except Exception:
-            _sib_current = None
-
-        if _sib_current is None:
-            logger.info(
-                f"[loop] {claim_id}: calculate 합성 가드 — fetch evidence 0건 + "
-                f"sibling base도 없음 → calculate 결과 신뢰 X (LLM 환각 차단)"
-            )
-            return None
-
-        # calc input의 current와 sibling base value 비교
-        _calc_input = last_calc_observation.input or {}
-        _calc_current = _calc_input.get("current")
-        try:
-            _cc = float(_calc_current) if _calc_current is not None else None
-        except (TypeError, ValueError):
-            _cc = None
-        if _cc is not None:
-            _gap_ratio = abs(_cc - _sib_current) / max(abs(_sib_current), 1e-9)
-            if _gap_ratio > 0.02:
-                logger.warning(
-                    f"[loop] {claim_id}: calculate 합성 거부 — calc.input.current="
-                    f"{_cc} vs sibling base={_sib_current} (gap {_gap_ratio*100:.1f}%) "
-                    f"→ LLM이 sibling 무시하고 환각 가능성 (혼인 건수 4.9% 케이스 회귀)"
-                )
-                return None
-            logger.info(
-                f"[loop] {claim_id}: calculate 합성 — fetch 0건이지만 sibling base"
-                f"({_sib_current}) ≈ calc.current({_cc}) → calc 결과 신뢰"
-            )
-        # else: calc input에 current 없음 — sibling 있으면 그래도 시도
-
-    # [패치 2026-05-20] base claim은 calculate 합성 거부.
-    # planner가 base claim(예: '출생아 수 20717명')에 plan.type=GROWTH_RATE로
-    # 잘못 분류한 경우, calculate 결과(8.825%)와 claim value(20717명)를 강제
-    # 비교해 오차 99.96% MISMATCH로 잘못 떨어지는 걸 차단. derived suffix가
-    # 명시된 claim(~증가율, ~감소율 등)에만 calculate 합성 적용.
-    _schema = getattr(claim, "schema", None)
-    _schema_indicator = (
-        (getattr(_schema, "indicator", "") or "").strip() if _schema else ""
+    normalized, _early = from_agent_calculate(
+        claim,
+        last_calc_observation,
+        plan,
+        last_fetch_observation=last_fetch_observation,
+        workspace=workspace,
     )
-    _DERIVED_SUFFIXES = (
-        "증가율", "감소율", "증감률", "변화율", "상승률", "하락률",
-    )
-    if not any(_schema_indicator.endswith(s) for s in _DERIVED_SUFFIXES):
-        logger.info(
-            f"[loop] {claim_id}: calculate 합성 가드 — base indicator "
-            f"'{_schema_indicator}' (derived 아님) → calculate 결과는 "
-            f"단위가 다르므로 합성 거부"
-        )
+    if normalized is None:
         return None
 
-    raw_result = (last_calc_observation.output or {}).get("result")
-    if raw_result is None:
-        return None
-    try:
-        calc_value = float(raw_result)
-    except (TypeError, ValueError):
-        return None
-
-    schema = getattr(claim, "schema", None)
-    claim_value = getattr(schema, "value", None) if schema is not None else None
-    claim_unit = (getattr(schema, "unit", "") or "") if schema is not None else ""
-    if claim_value is None:
-        return None
-    try:
-        cv = float(claim_value)
-    except (TypeError, ValueError):
-        return None
-
-    claim_actual_type = _infer_claim_type(claim) or plan.claim_type
-
-    # claim type별 비교 — growth_rate/difference는 부호 무시 절댓값 비교
-    if isinstance(claim_actual_type, ClaimType) and claim_actual_type == ClaimType.GROWTH_RATE:
-        diff = abs(abs(calc_value) - abs(cv))
-        if diff <= 1.5:
-            verdict_t, conf, label = VerdictType.MATCH, 0.8, "일치"
-        elif diff <= 5.0:
-            verdict_t, conf, label = VerdictType.UNVERIFIABLE, 0.4, "오차 큼"
-        else:
-            verdict_t, conf, label = VerdictType.MISMATCH, 0.7, "불일치"
-        diff_desc = f"차이 {diff:.2f}%p"
-    elif isinstance(claim_actual_type, ClaimType) and claim_actual_type == ClaimType.DIFFERENCE:
-        gap = abs(abs(calc_value) - abs(cv))
-        tol = max(abs(cv) * 0.10, 0.02)
-        if gap <= tol:
-            verdict_t, conf, label = VerdictType.MATCH, 0.8, "일치"
-        elif gap <= tol * 3:
-            verdict_t, conf, label = VerdictType.UNVERIFIABLE, 0.4, "오차 큼"
-        else:
-            verdict_t, conf, label = VerdictType.MISMATCH, 0.7, "불일치"
-        diff_desc = f"차이 {gap:.4f}, 허용 {tol:.4f}"
-    else:
-        # 일반 비교 — 1% 오차
-        if abs(cv) < 1e-9:
-            diff_ratio = 0.0 if abs(calc_value) < 1e-9 else 1.0
-        else:
-            diff_ratio = abs(calc_value - cv) / abs(cv)
-        if diff_ratio < 0.01:
-            verdict_t, conf, label = VerdictType.MATCH, 0.8, "일치"
-        else:
-            verdict_t, conf, label = VerdictType.MISMATCH, 0.7, "불일치"
-        diff_desc = f"오차 {diff_ratio*100:.2f}%"
-
-    logger.info(
-        f"[loop] {claim_id}: calculate 합성 판정={label} "
-        f"(기사 {cv}{claim_unit} vs 계산 {calc_value:.4g}, {diff_desc})"
-    )
-    return AgentVerdict(
-        claim_id=claim_id,
-        verdict=verdict_t,
-        confidence=conf,
-        explanation=(
-            f"Agent가 직접 계산한 결과로 검증: 기사 주장 {cv}{claim_unit}, "
-            f"산출된 값 {calc_value:.4g} ({diff_desc}). "
-            f"계산식: {(last_calc_observation.summary or '')[:200]}"
-        ),
-        data_points=[],
-        iterations_used=iter_num,
-        stop_reason=StopReason.COMPLETED,
-    )
+    decision = decide_verdict(claim, normalized, config or {}, profile="agent")
+    return _verdict_decision_to_agent_verdict(decision, {}, claim, iter_num)
 
 
 # ── Agent Loop 본체 ──────────────────────────────────────────────
@@ -1790,6 +907,7 @@ async def agent_loop(
                 iter_num=iter_num,
                 last_fetch_observation=last_fetch_observation,
                 workspace=workspace,
+                config=config,
             )
             if (
                 early_verdict is not None
@@ -1846,6 +964,7 @@ async def agent_loop(
             iter_num=iter_num,
             tolerance=loop_config.value_match_tolerance,
             all_fetch_observations=all_fetch_observations,
+            config=config,
         )
         # [패치] fetch 기반 합성이 None이거나 UNVERIFIABLE인데 LLM이 계산을
         # 끝낸 케이스면 calculate 결과로 다시 합성 시도. calculate 결과가
@@ -1864,6 +983,7 @@ async def agent_loop(
                 iter_num=iter_num,
                 last_fetch_observation=last_fetch_observation,
                 workspace=workspace,
+                config=config,
             )
             if calc_verdict is not None and (
                 calc_verdict.verdict != VerdictType.UNVERIFIABLE
@@ -1947,6 +1067,7 @@ async def agent_loop(
             iter_num=iter_num,
             tolerance=loop_config.value_match_tolerance,
             all_fetch_observations=all_fetch_observations,
+            config=config,
         )
         if synth is not None and synth.verdict == VerdictType.MISMATCH:
             logger.warning(
@@ -1993,6 +1114,7 @@ async def agent_loop(
             iter_num=iter_num,
             tolerance=loop_config.value_match_tolerance,
             all_fetch_observations=all_fetch_observations,
+            config=config,
         )
         if synth is not None and synth.verdict == VerdictType.MATCH:
             _orig_v = verdict.verdict.value
