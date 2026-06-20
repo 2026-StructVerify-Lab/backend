@@ -119,3 +119,24 @@ def is_table_relevant(indicator: str, table_name: str) -> bool:
             return True
 
     return False
+
+
+_OVERSEAS_MARKERS = (
+    "동북·중앙아시아", "남부·동남아시아", "중앙아시아", "동남아시아",
+    "북아메리카", "남아메리카", "유럽", "아프리카", "오세아니아",
+    "oecd", "g20", "세계", "국제", "해외",
+)
+_SPECIALIZED_MARKERS = (
+    "해양기상", "항공기상", "고층기상", "등표", "레윈존데",
+    "공항기상", "부이", "방재기상",
+)
+
+def is_overseas_mismatch(table_name: str, claim_query: str) -> bool:
+    stat_lower = table_name.lower()
+    claim_lower = claim_query.lower()
+    return any(kw in stat_lower and kw not in claim_lower for kw in _OVERSEAS_MARKERS)
+
+def is_specialized_mismatch(table_name: str, claim_query: str) -> bool:
+    stat_lower = table_name.lower()
+    claim_lower = claim_query.lower()
+    return any(kw in stat_lower and kw not in claim_lower for kw in _SPECIALIZED_MARKERS)
