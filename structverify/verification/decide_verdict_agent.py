@@ -222,7 +222,10 @@ def decide_verdict_agent_calculate(
 
     if isinstance(claim_actual_type, ClaimType) and claim_actual_type == ClaimType.GROWTH_RATE:
         diff = abs(abs(calc_value) - abs(cv))
-        verdict_t, conf, label = classify_growth_rate_pp_agent(diff, config)
+        verdict_t, conf = classify_growth_rate_pp_agent(diff, config)
+        label = "일치" if verdict_t == VerdictType.MATCH else (
+            "오차 큼" if verdict_t == VerdictType.UNVERIFIABLE else "불일치"
+        )
         diff_desc = f"차이 {diff:.2f}%p"
     elif isinstance(claim_actual_type, ClaimType) and claim_actual_type == ClaimType.DIFFERENCE:
         gap = abs(abs(calc_value) - abs(cv))

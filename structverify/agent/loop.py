@@ -146,6 +146,12 @@ def _interpolate_step_input(
     ]
     if fallback_ids:
         new_input["_candidate_fallbacks"] = fallback_ids
+    logger.info(
+        f"[loop] candidate_id placeholder 보간: {cid!r} → {top_id!r} "
+        f"(fallback 후보 {len(fallback_ids)}개)"
+    )
+    return PlanStep(action=step.action, input=new_input, rationale=step.rationale)
+
 
 # ── Auto verdict synthesis → verification.decide_verdict(agent) ─────────
 
