@@ -65,6 +65,7 @@ def _decide_verdict_fallback(
     claim_unit = (claim.schema.unit or "") if claim.schema else ""
 
     prev_value = getattr(claim.schema, "prev_value", None) if claim.schema else None
+    # [v6.14 C2] 증가율/차이 자동 계산 분기
     if prev_value is not None and prev_value != 0:
         indicator = (claim.schema.indicator or "") if claim.schema else ""
         is_ratio_schema = claim_unit and (
@@ -179,7 +180,10 @@ def _classify_mismatch(
     diff_pct: float,
     config: dict,
 ) -> MismatchType:
-    """MISMATCH 세부 유형 분류 (fallback 프로필, LLM 미사용)."""
+    """
+    MISMATCH 세부 유형 분류 (fallback 프로필, LLM 미사용).
+    우선순위: TIME_PERIOD → POPULATION → EXAGGERATION → VALUE
+    """
     vconf = config.get("verification", {}) if config else {}
     exaggeration_pct = float(vconf.get("exaggeration_diff_percent", 20.0))
 
@@ -191,11 +195,13 @@ def _classify_mismatch(
             else MismatchType.VALUE
         )
 
+    # 시점
     cy = _primary_year_from_period(schema.time_period)
     ey = _primary_year_from_period(evidence.time_period)
     if cy and ey and cy != ey:
         return MismatchType.TIME_PERIOD
 
+    # 집단
     raw = evidence.raw_response if isinstance(evidence.raw_response, dict) else {}
     ev_pop = raw.get("population") or raw.get("population_label")
     if isinstance(ev_pop, (list, tuple)):
@@ -203,6 +209,7 @@ def _classify_mismatch(
     if schema.population and _population_incompatible(schema.population, ev_pop):
         return MismatchType.POPULATION
 
+    # 과장
     if diff_pct > exaggeration_pct:
         return MismatchType.EXAGGERATION
 

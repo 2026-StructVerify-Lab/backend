@@ -76,15 +76,31 @@ class AgentCalculateInput:
 
 
 def infer_claim_type(claim: Claim) -> ClaimType | None:
-    """loop._infer_claim_type — Planner LLM 분류 보정."""
+    """Claim의 *실제* 유형을 schema에서 추론 (loop._infer_claim_type).
+
+    Planner LLM이 source_text 전체 의미로 일괄 분류하기 때문에,
+    같은 문장에서 추출된 absolute / growth_rate claim들이 모두 growth_rate로
+    뭉뚱그려지는 문제가 있음. claim.schema의 indicator/unit/prev_value를 보면
+    정확하게 알 수 있으므로 그것으로 보정.
+
+    우선순위 (v6.17 — prev_value를 unit보다 먼저 체크):
+      1. ClaimSchema.comparison_type (명시되어 있으면)
+      2. Claim.canonical_type
+      3. indicator 키워드 (순위/차이 → ranking/difference)
+      4. prev_value 있음 + unit % → growth_rate
+      5. prev_value 있음 (unit % 아님) → comparison
+      6. prev_value 없음 → ABSOLUTE (unit=%여도 비교 기준 없으면 growth_rate 아님)
+    """
     schema = claim.schema
     if schema is None:
         return None
 
+    # 1. schema.comparison_type 명시
     comp = getattr(schema, "comparison_type", None)
     if isinstance(comp, ClaimType):
         return comp
 
+    # 2. claim.canonical_type
     canon = getattr(claim, "canonical_type", None)
     if isinstance(canon, ClaimType):
         return canon
@@ -93,6 +109,7 @@ def infer_claim_type(claim: Claim) -> ClaimType | None:
     unit = (schema.unit or "").strip()
     prev_value = getattr(schema, "prev_value", None)
 
+    # 3. indicator 키워드 — 순위/차이는 unit과 무관하게 먼저 판정
     if any(kw in indicator for kw in _RANK_INDICATOR_KEYWORDS):
         return ClaimType.RANKING
     if any(kw in indicator for kw in _DIFF_INDICATOR_KEYWORDS):
@@ -100,11 +117,13 @@ def infer_claim_type(claim: Claim) -> ClaimType | None:
     if any(kw in indicator for kw in _GROWTH_INDICATOR_KEYWORDS):
         return ClaimType.GROWTH_RATE
 
+    # 4. prev_value 있음 → 두 시점 비교 claim
     if prev_value is not None:
         if unit in _GROWTH_UNITS:
             return ClaimType.GROWTH_RATE
         return ClaimType.COMPARISON
 
+    # 5. prev_value 없음 → 단일 시점 절대값 (unit=%여도 growth_rate 아님)
     return ClaimType.ABSOLUTE
 
 
@@ -140,9 +159,18 @@ def from_agent_fetch(
     schema = claim.schema
     claim_time = (schema.time_period or "") if schema is not None else ""
 
+    # ── [패치 H-3] aggregated rows에서 claim_time + 지표 criteria 매칭 row 찾기 ──
+    # 시나리오: LLM이 current(2025-04) fetch → prev(2024-04) fetch 순으로 호출하면
+    # last_fetch_observation은 prev 시점만 들어있고 그 fetch의 rows[]에는 2025-04
+    # row가 아예 없다. 단일 fetch만 보면 claim_time row 못 찾아 unverifiable.
+    # → 같은 claim의 모든 fetch observation rows를 합쳐서 풀을 만들고,
+    #   matched_row의 ITM_NM·C1_NM~C4_NM을 criteria로 같은 지표의 다른 시점 row를
+    #   찾는다. 시점만 보고 row 잡으면 출생아 수/혼인 건수 같이 PRD_DE 공유하는
+    #   다른 지표가 잘못 매칭됨 — criteria 필터로 차단.
     matched_row_from_last = evidence.get("matched_row") or {}
     criteria = extract_criteria_from_row(matched_row_from_last)
     pool_rows = aggregate_rows_from_fetches(all_fetch_observations or [])
+    # last fetch의 rows도 합집합에 포함 (보통은 이미 포함됐을 것이나 안전)
     for r in evidence.get("rows") or []:
         if isinstance(r, dict) and r not in pool_rows:
             pool_rows.append(r)
@@ -153,6 +181,7 @@ def from_agent_fetch(
             row_val_for_claim_time, _picked_row = hit
             claim_time_norm = str(claim_time).replace("-", "")
             fetched_time_norm = str(fetched_time).replace("-", "")
+            # 마지막 fetch가 이미 claim_time이면 그대로, 아니면 덮어씀
             if claim_time_norm not in fetched_time_norm:
                 logger.info(
                     f"[loop] {claim_id}: aggregated rows에서 claim_time={claim_time} + "
@@ -183,7 +212,15 @@ def from_agent_calculate(
     last_fetch_observation: Any | None = None,
     workspace: Any | None = None,
 ) -> tuple[AgentCalculateInput | None, VerdictDecision | None]:
-    """calculate Observation → AgentCalculateInput (가드 통과 시)."""
+    """calculate Observation → AgentCalculateInput (가드 통과 시).
+
+    [안전장치] last_fetch_observation이 없으면 calculate 결과를 신뢰하지 않는다.
+    fetch 0건 상태에서 LLM이 prev/current를 임의로 박아 계산한 값이
+    MATCH로 통과하는 환각을 차단.
+
+    [P22 2026-05-22] sibling base evidence가 있으면 fetch 0건이어도 합성 시도.
+    calc.input.current가 sibling base value와 *크게 다르면(>2%)* 환각으로 거부.
+    """
     claim_id = str(claim.claim_id)
 
     if last_calc_observation is None or not getattr(last_calc_observation, "success", False):
@@ -192,6 +229,7 @@ def from_agent_calculate(
         return None, None
 
     if last_fetch_observation is None:
+        # [P22] sibling 검증으로 fetch 0건 케이스 구제 시도
         sib_current: float | None = None
         try:
             sent_id = str(getattr(claim, "sent_id", "") or "").strip()
@@ -203,6 +241,7 @@ def from_agent_calculate(
                 for s in sibs:
                     if s.get("role") != "base":
                         continue
+                    # 같은 시점의 base sibling 찾기
                     s_tp = str(s.get("time_period") or "").replace("-", "")
                     if s_tp == tp_norm and s.get("value") is not None:
                         sib_current = float(s.get("value"))
@@ -217,6 +256,7 @@ def from_agent_calculate(
             )
             return None, None
 
+        # calc input의 current와 sibling base value 비교
         calc_input = getattr(last_calc_observation, "input", None) or {}
         calc_current = calc_input.get("current")
         try:
@@ -232,6 +272,7 @@ def from_agent_calculate(
                 )
                 return None, None
 
+    # [패치 2026-05-20] base claim은 calculate 합성 거부 — derived suffix만 허용
     schema = claim.schema
     schema_indicator = (schema.indicator or "").strip() if schema else ""
     if not any(schema_indicator.endswith(s) for s in _DERIVED_SUFFIXES):

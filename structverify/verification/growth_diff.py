@@ -33,7 +33,14 @@ def verify_growth_or_diff(
     classify_mismatch: Callable[[Claim, Evidence, float, dict], MismatchType],
 ) -> VerificationResult | None:
     """
-    증가율/차이 schema의 자동 계산 검증.
+    증가율/차이 schema의 자동 계산 검증 (fallback 프로필, verifier._verify_growth_or_diff).
+
+    프로세스:
+      1. KOSIS raw_response에서 *현재 시점의 절대값* row 찾기 (unit 검사 우회, 시점 우선)
+      2. claim의 *prev_value*와 함께 계산:
+         - 증가율(%): (current - prev) / prev * 100
+         - 차이(절대): current - prev
+      3. claim의 value와 비교 → verdict
 
     KOSIS 현재 시점 row를 못 찾으면 None 반환 (호출자가 일반 분기로 fallthrough).
     """
@@ -53,6 +60,7 @@ def verify_growth_or_diff(
         normalized = normalize_value(kv["value"], kv["unit"])
         if normalized == 0:
             continue
+        # 연도 ±2년만 필터 (unit 검사는 *우회*)
         if claim_year and kv_period:
             try:
                 if abs(int(claim_year) - int(kv_period[:4])) > 2:
@@ -60,10 +68,12 @@ def verify_growth_or_diff(
             except (ValueError, TypeError):
                 pass
         kv_norm = {**kv, "normalized": normalized}
+        # [v6.15] 정규화 헬퍼 사용
         if claim_year_month and period_matches_ym(kv_period, claim_year_month):
             tier1.append(kv_norm)
         elif claim_year and kv_period.startswith(claim_year):
             if claim_year_month and period_is_annual(kv_period):
+                # claim이 월값인데 row가 연간 누계 → 후순위
                 tier2b.append(kv_norm)
             else:
                 tier2a.append(kv_norm)
@@ -75,6 +85,7 @@ def verify_growth_or_diff(
         logger.info("[verifier C2] 증가율 계산: KOSIS에서 현재 시점 row 못 찾음. fallthrough.")
         return None
 
+    # tier 안에서 *prev_value 자릿수와 비슷한 row* 선택 (안전)
     def _scale_match(kv):
         v = abs(kv["normalized"])
         p = abs(prev_value)
@@ -128,7 +139,12 @@ def try_growth_rate_from_rows(
     claim_id: str,
     all_fetch_observations: list | None = None,
 ) -> tuple[float, float, float, str] | None:
-    """growth_rate claim — 표 rows에서 (current-prev)/prev*100 직접 계산."""
+    """[v6.17] growth_rate claim — 표 rows에서 (current-prev)/prev*100 직접 계산.
+
+    KOSIS에 '증가율' 통계표가 따로 없어도, fetch한 표(현재값 표)의
+    rows에서 prev_time_period 시점 행을 찾아 증가율을 직접 계산한다.
+    [패치 H-3] aggregated pool + criteria 필터로 current/prev row를 올바르게 매칭.
+    """
     prev_time = getattr(schema, "prev_time_period", None) if schema else None
     if not prev_time:
         return None
@@ -193,7 +209,10 @@ def try_difference_from_rows(
     claim_id: str,
     all_fetch_observations: list | None = None,
 ) -> tuple[float, float, float, str] | None:
-    """difference claim — 표 rows에서 current-prev 차이 직접 계산."""
+    """[v6.23] difference claim — 표 rows에서 current-prev 차이 직접 계산.
+
+    [패치 H-3] aggregated pool + criteria 필터로 current/prev row를 올바르게 매칭.
+    """
     prev_time = getattr(schema, "prev_time_period", None) if schema else None
     if not prev_time:
         return None

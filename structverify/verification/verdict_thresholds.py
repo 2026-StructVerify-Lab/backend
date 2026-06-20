@@ -102,7 +102,11 @@ def classify_calculate_simple_agent(
 
 
 def detect_threshold_direction(claim: Claim) -> str | None:
-    """부등식 주장 방향 — gte / lte / None (loop._detect_threshold_direction)."""
+    """부등식 주장 방향 — gte / lte / None (loop._detect_threshold_direction).
+
+    claim_text + schema.modifier에서 키워드 탐지.
+    '넘는/이상' → gte, '미만/이하' → lte. 양쪽 키워드 동시 존재 시 None.
+    """
     text = claim.claim_text or ""
     modifier = ""
     if claim.schema is not None:
@@ -124,7 +128,11 @@ def growth_rate_direction_mismatch(
     indicator: str,
     calc_rate: float,
 ) -> bool:
-    """증가/감소 방향 불일치 — loop 부호 가드."""
+    """증가/감소 방향 불일치 — loop 부호 가드 (패치 J).
+
+    indicator가 '증가율'로 끝나는데 계산값이 음수이거나,
+    '감소율'로 끝나는데 계산값이 양수이면 True.
+    """
     ind = (indicator or "").strip()
     expects_inc = any(ind.endswith(s) for s in _INCREASE_SFX)
     expects_dec = any(ind.endswith(s) for s in _DECREASE_SFX)

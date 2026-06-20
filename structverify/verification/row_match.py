@@ -24,11 +24,23 @@ def extract_numeric_values(rows: list[dict]) -> list[dict]:
 
 
 def normalize_period(period: str) -> str:
-    """KOSIS PRD_DE → YYYYMM 또는 YYYY."""
+    """KOSIS PRD_DE 다양한 형식을 *YYYYMM* 또는 *YYYY*로 정규화.
+
+    지원 형식:
+      "202504"   (6자 숫자)           → "202504"
+      "2025-04"  (7자 하이픈)         → "202504"
+      "2025.04"  (7자 점)             → "202504"
+      "2025M04"  (7자 M 구분)         → "202504"
+      "2025/04"                       → "202504"
+      "2025"     (4자 — 연간 누계)    → "2025"
+      "2025Q1"   (분기 — Q 포함)      → "2025"
+      "202504XX" (8자+ — 일별 등)     → "202504"
+    """
     if not period:
         return ""
     p = str(period).strip()
 
+    # 분기 처리: "2025Q1", "20251Q" 등 → "2025"
     if "Q" in p.upper():
         return p[:4] if p[:4].isdigit() else ""
 
@@ -42,19 +54,26 @@ def normalize_period(period: str) -> str:
 
 
 def period_is_monthly(period: str) -> bool:
+    """이 period가 *월 단위* row인지 (claim_year_month와 정확 비교 가능한 형식)."""
     normalized = normalize_period(period)
     return len(normalized) == 6 and normalized.isdigit()
 
 
 def period_is_annual(period: str) -> bool:
+    """이 period가 *연간 누계 또는 연도 단위* row인지.
+
+    claim이 *월값*인데 (claim_year_month 있음) 매칭되면 *후순위*로 처리해야 함.
+    """
     normalized = normalize_period(period)
     return len(normalized) == 4 and normalized.isdigit()
 
 
 def period_matches_ym(period: str, claim_year_month: str) -> bool:
+    """정규화 후 claim_year_month와 정확히 매칭되는지 (tier 1 후보)."""
     if not period or not claim_year_month:
         return False
     normalized = normalize_period(period)
+    # claim_ym도 정규화 (혹시 "2025-04" 형식으로 들어올 수 있음)
     claim_norm = normalize_period(claim_year_month)
     if len(claim_norm) != 6 or len(normalized) < 6:
         return False
@@ -68,7 +87,15 @@ def find_best_match(
     kosis_values: list[dict],
     claim_year_month: str | None = None,
 ) -> tuple[dict | None, float]:
-    """KOSIS 전체 행에서 claim과 가장 가까운 값 탐색 (factcheck v7 tier 매칭)."""
+    """
+    KOSIS 전체 행에서 claim과 가장 가까운 값 탐색.
+    factcheck_test.py v7 numeric_check 로직 그대로 (fallback 프로필).
+
+    [v6.14 G fix] all_rows_empty — 지표명-단위 일체형 표면 row.unit 비어도 통과.
+    [v6.14 F1 fix] claim_year_month 있으면 동일 연-월 row를 *최우선* picking.
+    [v6.15] tier 2a (월 row) / 2b (연간 누계) 분리.
+    """
+    # [v6.14 G fix] 표 전체 row.unit 분포 분석
     nonempty_units = [
         kv["unit"] for kv in kosis_values
         if kv.get("unit") and str(kv["unit"]).strip()
@@ -91,6 +118,7 @@ def find_best_match(
         if claim_year and kv_period:
             kv_year = kv_period[:4]
             try:
+                # 연도 정확 일치 필터 (박재윤 2026-05-14: ±2 → 0으로 변경)
                 if abs(int(claim_year) - int(kv_year)) > 0:
                     year_filtered += 1
                     continue
@@ -106,15 +134,18 @@ def find_best_match(
             unit_filtered += 1
             continue
 
+        # [v6.14 H fix] 상대 오차 — 분모 1 버그 회피 (소수 지표 오판정 방지)
         denom = max(abs(normalized), abs(claimed), 1e-9)
         error_rate = abs(normalized - claimed) / denom
         kv_with_meta = {**kv, "normalized": normalized, "error_rate": error_rate}
 
+        # [F1] 시점 tier 분류 — [v6.15] period 정규화 + 연간/월 row 분리
         if claim_year_month and kv_period:
             if period_matches_ym(kv_period, claim_year_month):
                 tier1_candidates.append(kv_with_meta)
             elif claim_year and kv_period.startswith(claim_year):
                 if period_is_annual(kv_period):
+                    # 연간 누계 — claim이 월값일 때 후순위
                     tier2b_candidates.append(kv_with_meta)
                 else:
                     tier2a_candidates.append(kv_with_meta)
@@ -140,6 +171,7 @@ def find_best_match(
         pool = tier3_candidates
         selected_tier = "3 (±2년)"
 
+    # [v6.15] 선택된 tier 번호를 각 후보에 기록 (verdict 가드용)
     _tier_num = 1
     if selected_tier:
         if selected_tier.startswith("2"):
@@ -179,13 +211,17 @@ def find_best_match(
     return best_match, best_error
 
 
-# ── agent 프로필 row pool (loop.py에서 추출 — loop는 후속 커밋에서 위임) ─────
+# ── [패치 H-3] agent 프로필 row pool (loop.py에서 추출) ─────────────────────
+# matched_row의 ITM_NM·C1_NM~C4_NM을 criteria로 추출해, aggregated rows
+# 풀에서 같은 지표에 다른 시점(target_time)의 row를 찾는다.
+# 시점만 보고 row를 잡으면 다른 지표 row(출생아 수 vs 혼인 건수 등)가
+# 잘못 매칭되어 가짜 prev/current 비교를 만든다 — criteria 필터로 차단.
 
 INDICATOR_CRITERIA_FIELDS = ("ITM_NM", "C1_NM", "C2_NM", "C3_NM", "C4_NM")
 
 
 def parse_row_dt(raw) -> float | None:
-    """KOSIS row DT → float."""
+    """KOSIS row의 DT 필드를 float로 파싱 (콤마/공백 제거)."""
     if raw is None:
         return None
     try:
@@ -195,9 +231,14 @@ def parse_row_dt(raw) -> float | None:
 
 
 def find_row_value_for_time(rows: list, target_time: str) -> float | None:
-    """특정 PRD_DE 행의 DT 값 (loop._find_row_value_for_time)."""
+    """[v6.17] KOSIS 표 rows에서 특정 시점(PRD_DE) 행의 값(DT)을 찾는다.
+
+    growth_rate 직접 계산용 — 같은 표에서 prev 시점 값을 추출한다.
+    target_time: 'YYYY' 또는 'YYYY-MM'. PRD_DE는 'YYYY' 또는 'YYYYMM' 형식.
+    """
     if not rows or not target_time:
         return None
+    # 'YYYY-MM' → 'YYYYMM' 정규화
     norm = str(target_time).replace("-", "").strip()
     for row in rows:
         if not isinstance(row, dict):
@@ -207,6 +248,7 @@ def find_row_value_for_time(rows: list, target_time: str) -> float | None:
             v = parse_row_dt(row.get("DT"))
             if v is not None:
                 return v
+    # 연도만으로 재시도 (target이 'YYYY-MM'인데 표는 연 단위인 경우)
     year = norm[:4]
     if year and year != norm:
         for row in rows:
@@ -236,7 +278,11 @@ def find_value_for_time_with_criteria(
     target_time: str,
     criteria: dict | None,
 ) -> tuple[float, dict] | None:
-    """target_time + criteria 일치 row → (DT, row)."""
+    """rows[]에서 target_time 매칭 + criteria 컬럼 값 일치하는 row 찾기.
+
+    criteria가 비면 find_row_value_for_time과 동일 동작.
+    찾으면 (DT 값, 매칭한 row) 반환.
+    """
     if not all_rows or not target_time:
         return None
     norm = str(target_time).replace("-", "").strip()
@@ -249,6 +295,7 @@ def find_value_for_time_with_criteria(
                 return False
         return True
 
+    # 1차: PRD_DE 완전 일치 + criteria 일치
     for row in all_rows:
         if not isinstance(row, dict):
             continue
@@ -261,6 +308,7 @@ def find_value_for_time_with_criteria(
         if v is not None:
             return (v, row)
 
+    # 2차: 연 단위 fallback (PRD_DE='YYYY')
     year = norm[:4]
     if year and year != norm:
         for row in all_rows:

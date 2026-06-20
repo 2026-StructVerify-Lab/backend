@@ -28,7 +28,14 @@ def decide_verdict_agent_fetch(
     normalized: AgentFetchInput,
     config: dict,
 ) -> VerdictDecision:
-    """fetch observation 기반 agent 판정 (loop._synthesize_verdict_from_observation)."""
+    """fetch observation 기반 agent 판정 (loop._synthesize_verdict_from_observation).
+
+    합성 규칙:
+      - fetch 성공 + claim에 값 있음 → 값 비교 (tolerance, 기본 5%)
+      - growth_rate/difference/ranking → 두 시점 비교 필요인데 단일 fetch 뿐 → UNVERIFIABLE
+        (단, GROWTH_RATE/DIFFERENCE는 rows pool에서 직접 계산 시도)
+      - fetch 실패 또는 값 없음 → UNVERIFIABLE
+    """
     claim_id = normalized.claim_id
     evidence = normalized.evidence
     tolerance = normalized.tolerance
@@ -46,7 +53,11 @@ def decide_verdict_agent_fetch(
     claim_time = (schema.time_period or "") if schema is not None else ""
     claim_indicator = (schema.indicator or "") if schema is not None else ""
 
+    # 복합 claim type: 두 시점 비교 필요인데 plan은 단일 fetch
+    # ★ plan.claim_type은 Planner LLM이 source_text 의미로 일괄 분류해서 부정확함
+    #   → claim.schema에서 직접 추론한 type을 더 신뢰
     if isinstance(claim_actual_type, ClaimType) and claim_actual_type in _COMPLEX_TYPES:
+        # ── [v6.17] GROWTH_RATE 직접 계산 시도 ──────────────────────────
         if claim_actual_type == ClaimType.GROWTH_RATE:
             result = _try_growth_rate_verdict(
                 claim, claim_id, evidence, schema, claim_value, claim_indicator,
@@ -116,6 +127,7 @@ def decide_verdict_agent_fetch(
 
     src_label = f"KOSIS({stat_table_id})" + (f" {stat_name}" if stat_name else "")
 
+    # [v6.20] 부등식 주장 — threshold 방향 감지 후 실측값 vs 기준값 비교
     thr_dir = detect_threshold_direction(claim)
     if thr_dir is not None and time_aligned:
         if thr_dir == "gte":
@@ -192,7 +204,12 @@ def decide_verdict_agent_calculate(
     normalized: AgentCalculateInput,
     config: dict,
 ) -> VerdictDecision:
-    """calculate observation 기반 agent 판정 (loop._synthesize_verdict_from_calculate)."""
+    """calculate observation 기반 agent 판정 (loop._synthesize_verdict_from_calculate).
+
+    LLM이 prev/current를 계산했지만 finish를 안 부르고 다시 같은 액션 반복
+    → 중복차단 → 강제 unverifiable로 죽는 케이스 회복. calculate output의
+    result 값을 claim.schema.value와 비교해 자동 verdict 생성한다.
+    """
     claim_id = normalized.claim_id
     calc_value = normalized.calc_value
     claim_actual_type = normalized.claim_actual_type
@@ -263,6 +280,7 @@ def _try_growth_rate_verdict(
         return None
 
     if growth_rate_direction_mismatch(claim_indicator, calc_rate):
+        # [패치 J] 증가/감소 방향 불일치 — 부호 가드
         diff = abs(abs(calc_rate) - abs(claimed_rate))
         logger.warning(
             f"[loop] {claim_id}: growth_rate 부호 방향 불일치 "
