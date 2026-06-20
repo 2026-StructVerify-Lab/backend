@@ -52,3 +52,22 @@ def test_unit_period_matches_ym():
     assert period_matches_ym("2025-04", "202504") is True
     assert period_matches_ym("2025", "202504") is False
     assert period_matches_ym("202503", "202504") is False
+
+
+def test_unit_adapter_from_evidence_no_evidence():
+    from uuid import uuid4
+
+    from structverify.core.schemas import Claim, SourceOffset, VerdictType
+    from structverify.verification.adapters import from_evidence
+
+    claim = Claim(
+        doc_id=uuid4(),
+        block_id="b0",
+        sent_id="s0",
+        claim_text="test",
+        source_offset=SourceOffset(),
+    )
+    normalized, early = from_evidence(claim, None)
+    assert normalized is None
+    assert early is not None
+    assert early.verdict == VerdictType.UNVERIFIABLE
