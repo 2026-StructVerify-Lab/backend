@@ -57,9 +57,9 @@ from .units import is_same_unit_type, normalize_value
 from .row_match import (
     extract_numeric_values as _extract_numeric_values,
     find_best_match as _find_best_match,
-    period_is_annual as _period_is_annual,
-    period_matches_ym as _period_matches_ym,
 )
+# [리팩] 증가율/차이 계산 → growth_diff.py
+from .growth_diff import verify_growth_or_diff as _verify_growth_or_diff_impl
 
 if TYPE_CHECKING:
     from structverify.memory.working_memory import DocumentWorkingMemory
@@ -185,9 +185,10 @@ def verify_claim(claim: Claim, evidence: Evidence | None,
         is_diff_schema = ("차이" in indicator or "증감" in indicator
                           or "변화량" in indicator)
         if is_ratio_schema or is_diff_schema:
-            calc_result = _verify_growth_or_diff(
+            calc_result = _verify_growth_or_diff_impl(
                 claim, evidence, claim_year, claim_year_month,
                 prev_value, is_ratio_schema, config,
+                classify_mismatch=_classify_mismatch,
             )
             if calc_result is not None:
                 return calc_result
@@ -319,122 +320,3 @@ def _classify_mismatch(
 
     return MismatchType.VALUE
 
-# ── [v6.14 C2] 증가율/차이 자동 계산 ──────────────────────────────────────
-
-def _verify_growth_or_diff(
-    claim: Claim,
-    evidence: Evidence,
-    claim_year: str | None,
-    claim_year_month: str | None,
-    prev_value: float,
-    is_ratio: bool,
-    config: dict,
-) -> VerificationResult | None:
-    """
-    증가율/차이 schema의 자동 계산 검증.
-
-    프로세스:
-      1. KOSIS raw_response에서 *현재 시점의 절대값* row 찾기 (unit 검사 우회, 시점 우선)
-      2. claim의 *prev_value*와 함께 계산:
-         - 증가율(%): (current - prev) / prev * 100
-         - 차이(절대): current - prev
-      3. claim의 value와 비교 → verdict
-
-    KOSIS 현재 시점 row를 못 찾으면 None 반환 (호출자가 일반 분기로 fallthrough).
-
-    [구체적 케이스]
-      - "출생아 수 6.7% 증가, prev=19059" → KOSIS 2025-04 출생아 수 row 찾기
-        → 만약 20171이면 (20171-19059)/19059*100 = 5.83%
-        → claim 6.7% vs 5.83% → 비교
-      - "합계출산율 차이 0.04, prev=0.72" → KOSIS 2025-04 합계출산율 row 찾기
-        → 만약 0.76이면 0.76-0.72 = 0.04 → claim 0.04 vs 0.04 → MATCH
-    """
-    claimed = claim.schema.value
-    raw = evidence.raw_response if isinstance(evidence.raw_response, dict) else {}
-    rows = raw.get("row", [])
-    if not isinstance(rows, list) or not rows:
-        return None
-
-    kosis_values = _extract_numeric_values(rows)
-    if not kosis_values:
-        return None
-
-    # 현재 시점 row 찾기 — unit 검사 우회 (절대값 row 받아들임)
-    # [v6.15] period 정규화 + 월/연간 분리 적용
-    tier1, tier2a, tier2b, tier3 = [], [], [], []
-    for kv in kosis_values:
-        kv_period = kv.get("period") or ""
-        normalized = normalize_value(kv["value"], kv["unit"])
-        if normalized == 0:
-            continue
-        # 연도 ±2년만 필터 (unit 검사는 *우회*)
-        if claim_year and kv_period:
-            try:
-                if abs(int(claim_year) - int(kv_period[:4])) > 2:
-                    continue
-            except (ValueError, TypeError):
-                pass
-        kv_norm = {**kv, "normalized": normalized}
-        # [v6.15] 정규화 헬퍼 사용
-        if claim_year_month and _period_matches_ym(kv_period, claim_year_month):
-            tier1.append(kv_norm)
-        elif claim_year and kv_period.startswith(claim_year):
-            if claim_year_month and _period_is_annual(kv_period):
-                # claim이 월값인데 row가 연간 누계 → 후순위
-                tier2b.append(kv_norm)
-            else:
-                tier2a.append(kv_norm)
-        else:
-            tier3.append(kv_norm)
-
-    pool = tier1 or tier2a or tier2b or tier3
-    if not pool:
-        logger.info(f"[verifier C2] 증가율 계산: KOSIS에서 현재 시점 row 못 찾음. fallthrough.")
-        return None
-
-    # tier 안에서 *prev_value 자릿수와 비슷한 row* 선택 (안전)
-    # 예: prev_value=19059 (5자리) → 비슷한 자릿수의 row picking
-    # 예: prev_value=0.72 (소수) → 소수 row picking
-    def _scale_match(kv):
-        v = abs(kv["normalized"])
-        p = abs(prev_value)
-        if v == 0 or p == 0:
-            return float("inf")
-        return abs(v / p - 1) if v >= p else abs(p / v - 1)
-
-    current_row = min(pool, key=_scale_match)
-    current_value = current_row["normalized"]
-
-    # 계산
-    if is_ratio:
-        calculated = (current_value - prev_value) / prev_value * 100
-        calc_desc = f"증가율 ({current_value} - {prev_value}) / {prev_value} * 100 = {calculated:.2f}%"
-    else:
-        calculated = current_value - prev_value
-        calc_desc = f"차이 {current_value} - {prev_value} = {calculated:.4f}"
-
-    # [H fix] 분모 1 버그 회피한 공식
-    denom = max(abs(calculated), abs(claimed), 1e-9)
-    error_rate = abs(calculated - claimed) / denom
-
-    logger.info(
-        f"[verifier C2] {calc_desc} | claim={claimed} | error_rate={error_rate*100:.2f}% | "
-        f"current_row: period={current_row.get('period')!r} value={current_row['value']} "
-        f"unit={current_row.get('unit')!r}"
-    )
-
-    # evidence 동기화 (F2 패턴) — current_row 정보로 덮어쓰기
-    evidence = evidence.model_copy(update={
-        "official_value": current_row.get("value"),
-        "unit": current_row.get("unit") or evidence.unit,
-        "time_period": current_row.get("period") or evidence.time_period,
-    })
-
-    # _verdict_from_error에 best_match 정보 전달
-    best_match_info = {
-        **current_row,
-        "error_rate": error_rate,
-        "calculated_from_prev": calculated,
-        "prev_value": prev_value,
-    }
-    return _verdict_from_error(claim, evidence, error_rate, best_match_info, config)
