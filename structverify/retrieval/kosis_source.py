@@ -1303,48 +1303,21 @@ class KOSISDataSource(BaseDataSource):
         # catalog top 후보를 무조건 fetch하면 "합계출산율 - 동북·중앙아시아"
         # 같은 엉뚱한 표를 한국 claim에 가져오게 됨. claim의 indicator/population이
         # 표 이름과 같은 분야인지 검사해서, 무관하면 fetch 거부 (None 반환).
-        from structverify.retrieval.kosis_connector import _is_table_relevant
+        from structverify.retrieval.kosis_relevance import (
+            is_table_relevant, is_overseas_mismatch, is_specialized_mismatch,
+        )
         claim_indicator = (params.get("indicator") or "").strip()
         claim_population = (params.get("population") or "").strip()
         # indicator + population 합쳐서 검사 (지역명이 population에 있을 수 있음)
         relevance_query = f"{claim_indicator} {claim_population}".strip()
 
-        # (a) 해외 지역 표 거르기 — "합계출산율 - 동북·중앙아시아" 처럼
-        #     지표명은 같지만 한국 통계가 아닌 표. claim에 해당 지역어가
-        #     없는데 표 이름에 있으면 fetch 거부.
-        _OVERSEAS = (
-            "동북·중앙아시아", "남부·동남아시아", "중앙아시아", "동남아시아",
-            "북아메리카", "남아메리카", "유럽", "아프리카", "오세아니아",
-            "oecd", "g20", "세계", "국제", "해외",
-        )
-        _stat_lower = stat_name_str.lower()
-        _claim_lower = relevance_query.lower()
-        for kw in _OVERSEAS:
-            if kw in _stat_lower and kw not in _claim_lower:
-                logger.warning(
-                    f"[KOSISDataSource] 해외/국제 통계표 → fetch 거부: "
-                    f"[{stat_id_str}] {stat_name_str!r} "
-                    f"(claim은 국내 통계: {relevance_query!r})"
-                )
-                return None
+        if is_overseas_mismatch(stat_name_str, relevance_query):
+            logger.warning(f"[KOSISDataSource] 해외/국제 통계표 → fetch 거부: [{stat_id_str}]")
+            return None
 
-        # (a-2) 특수 관측 표 거르기 — "[해양기상] 등표 관측값",
-        #     "[항공기상] 공항기상관측", "[고층기상] 레윈존데" 등.
-        #     일반 "연평균기온" claim에 해양/항공 관측 표를 가져오면
-        #     육상 통계와 안 맞아 가짜 mismatch가 남. claim에 해당
-        #     관측 도메인 단어가 없으면 fetch 거부.
-        _SPECIALIZED = (
-            "해양기상", "항공기상", "고층기상", "등표", "레윈존데",
-            "공항기상", "부이", "방재기상",
-        )
-        for kw in _SPECIALIZED:
-            if kw in _stat_lower and kw not in _claim_lower:
-                logger.warning(
-                    f"[KOSISDataSource] 특수 관측 통계표 → fetch 거부: "
-                    f"[{stat_id_str}] {stat_name_str!r} "
-                    f"(claim은 일반 통계: {relevance_query!r})"
-                )
-                return None
+        if is_specialized_mismatch(stat_name_str, relevance_query):
+            logger.warning(f"[KOSISDataSource] 특수 관측 통계표 → fetch 거부: [{stat_id_str}]")
+            return None
 
         # (b) 일반 관련성 체크 — indicator가 표 이름과 같은 분야인지
         # [수정 v6.24] 표 이름만 보던 것을 데이터 기반으로 보강.
@@ -1369,7 +1342,7 @@ class KOSISDataSource(BaseDataSource):
                 f"[KOSISDataSource] relevance_guard.enabled=false → "
                 f"테이블 관련성 가드 전체 우회: [{stat_id_str}]"
             )
-        elif relevance_query and not _is_table_relevant(relevance_query, stat_name_str):
+        elif relevance_query and not is_table_relevant(relevance_query, stat_name_str):
             if _indicator_in_rows(rows, claim_indicator):
                 logger.info(
                     f"[KOSISDataSource] 표 이름엔 지표 없으나 행 데이터에 "
