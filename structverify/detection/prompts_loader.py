@@ -106,3 +106,27 @@ def inject_few_shot(
     if not block:
         return base_prompt
     return base_prompt.rstrip() + block + "\n"
+
+
+def resolve_prompt_for_step(
+    base_prompt: str,
+    domain: str | None,
+    config: dict | None,
+    *,
+    step: str,
+) -> str:
+    """
+    domain-pack에서 step별 few-shot을 찾아 base_prompt에 붙인다.
+
+    키 우선순위: {step}_few_shot → {step}_examples → {step} → few_shot_examples
+    pack/예시 없으면 base_prompt 그대로 (기존 동작 유지).
+    """
+    if not domain:
+        return base_prompt
+    pack = load_domain_pack(domain, config)
+    if not pack:
+        return base_prompt
+    for section in (f"{step}_few_shot", f"{step}_examples", step, "few_shot_examples"):
+        if few_shot_examples_from_pack(pack, section=section):
+            return inject_few_shot(base_prompt, pack, section=section)
+    return base_prompt

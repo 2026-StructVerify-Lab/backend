@@ -30,12 +30,14 @@ detection/claim_detector.py — 검증 가능 주장 탐지 (Step 4)
 """
 from __future__ import annotations
 
-from structverify.core.schemas import Claim, ClaimType, SIRDocument, SourceOffset
+import asyncio  # 병렬처리
+
+from structverify.core.schemas import Claim, SIRDocument, SourceOffset
 from structverify.detection.candidate_scorer import score_candidate
-from structverify.detection.prompts.claim_worthiness import CHECK_WORTHY_PROMPT
+from structverify.detection.claims.worthiness import _check_worthiness
 from structverify.utils.llm_client import LLMClient
 from structverify.utils.logger import get_logger
-import asyncio # 병렬처리 
+
 logger = get_logger(__name__)
 
 
@@ -50,12 +52,6 @@ async def detect_claims(
     1) LLM 기반 sentence candidate scoring
     2) high-score 문장만 check-worthiness 판별 (LLM 중량 모델)
     3) threshold 이상 claim만 Claim 객체로 변환
-
-    TODO [김예슬]: 도메인별 프롬프트 주입
-      domain = sir_doc.detected_domain
-      if domain:
-          domain_examples = load_domain_prompts(domain)  # domain-packs 로드
-          prompt = inject_few_shot(CHECK_WORTHY_PROMPT, domain_examples)
 
     TODO [김예슬]: claim_type 분류 정확도 개선
       - "increase": 증가/상승/올랐다
@@ -118,9 +114,16 @@ async def detect_claims(
 
     logger.info(f"candidate 문장: {len(candidates)}건")
 
+    domain = sir_doc.detected_domain
+
     async def check_one(block, sent):
         async with sem:
-            cw_score, claim_type, canonical_type = await _check_worthiness(llm, sent.text)
+            cw_score, claim_type, canonical_type = await _check_worthiness(
+                llm,
+                sent.text,
+                config=config,
+                domain=domain,
+            )
             return block, sent, cw_score, claim_type, canonical_type
 
     # 2) check-worthiness도 병렬 처리
@@ -160,49 +163,3 @@ async def detect_claims(
         )
     logger.info(f"검증 가능 주장: {len(claims)}건")
     return claims
-
-
-async def _check_worthiness(
-    llm: LLMClient,
-    sentence: str,
-) -> tuple[float, str | None, ClaimType | None]:
-    """
-    LLM 기반 check-worthiness 판별 (2차 정밀 판별).
-    candidate detection 이후 상위 후보에만 적용.
-
-    TODO [김예슬]: 오류 응답 처리 강화
-      - JSON 파싱 실패 시 재시도 (최대 2회)
-      - score 범위 검증 (0~1 클램핑)
-    """
-    try:
-        r = await llm.generate_json(
-            CHECK_WORTHY_PROMPT.format(sentence=sentence),
-            system_prompt="팩트체크 check-worthiness classifier. 반드시 JSON만 출력하세요.",
-        )
-
-        is_check_worthy = bool(r.get("is_check_worthy", False))
-        score = float(r.get("score", 0.0) or 0.0)
-
-        # true인데 score=0으로 오는 문제 방어
-        if is_check_worthy and score <= 0.0:
-            score = 0.8
-
-        score = max(0.0, min(score, 1.0))
-
-        if not is_check_worthy:
-            return 0.0, None, None
-        raw_type = r.get("claim_type")
-        canonical = r.get("canonical_type")
-
-        claim_type = raw_type if raw_type and raw_type != "null" else None
-
-        try:
-            canonical_type = ClaimType(canonical) if canonical else None
-        except ValueError:
-            canonical_type = None
-
-        return score, claim_type, canonical_type
-
-    except Exception as e:
-        logger.error(f"check-worthiness 실패: {e}")
-        return 0.0, None, None

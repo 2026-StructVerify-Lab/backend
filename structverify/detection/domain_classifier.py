@@ -29,108 +29,21 @@ detection/domain_classifier.py — 도메인 자동 분류 (Step 3)
 """
 from __future__ import annotations
 
-import os
-import re
-from typing import Any
-
-import yaml
-
 from structverify.core.schemas import SIRDocument
-from structverify.detection.prompts.domain import DOMAIN_CLASSIFY_PROMPT
+from structverify.detection.domain.classify import _classify_domain_with_llm
+from structverify.detection.domain.registry import (
+    CONFIDENCE_THRESHOLD,
+    DEFAULT_SEED_DOMAINS,
+    DOMAIN_NAME_PATTERN,
+    DomainRegistry,
+)
 from structverify.detection.prompts_loader import load_domain_pack
-from structverify.utils.llm_client import LLMClient
 from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-CONFIDENCE_THRESHOLD = 0.6
-DOMAIN_NAME_PATTERN = re.compile(r"^[a-z][a-z_]{0,29}$")
-
-# 기본 시드 도메인 — 레지스트리 파일이 없을 때 초기값으로 사용
-DEFAULT_SEED_DOMAINS: dict[str, str] = {
-    "agriculture":  "농림수산식품 (농가, 경작면적, 수확량, 축산, 어업)",
-    "economy":      "경제/경기 (GDP, 성장률, 소비, 수출입, 물가, 산업생산)",
-    "finance":      "금융/증권 (금리, 환율, 주가, 대출, 가계부채, 보험)",
-    "population":   "인구/가구 (출생, 사망, 혼인, 고령화, 인구구조)",
-    "employment":   "고용/노동/임금 (취업률, 실업률, 임금, 근로시간)",
-    "healthcare":   "보건/의료 (질병, 의료기관, 사망률, 건강보험)",
-    "education":    "교육 (학생, 학교, 교육비, 진학률, 입시)",
-    "policy":       "정책/행정 (예산, 법률, 복지, 지원금, 정부)",
-    "environment":  "환경/에너지 (기후, 탄소, 재생에너지, 환경오염)",
-    "general":      "분류 불가 또는 복합 도메인",
-}
-
-
-
-# ── DomainRegistry ────────────────────────────────────────────────────────
-
-class DomainRegistry:
-    """
-    도메인 레지스트리 — {domain: description} 매핑을 파일로 영속 관리.
-
-    registry.yaml 구조:
-        agriculture: "농림수산식품 (농가, 경작면적, ...)"
-        economy: "경제/경기 (GDP, 성장률, ...)"
-        real_estate: "부동산 (아파트, 매매가, ...)"   ← 런타임에 추가됨
-
-    사용법:
-        registry = DomainRegistry("domain-packs/registry.yaml")
-        domains = registry.load()           # {domain: description} 반환
-        registry.register("real_estate", "부동산 관련 통계")
-    """
-
-    def __init__(self, registry_path: str = "domain-packs/registry.yaml"):
-        self.registry_path = registry_path
-
-    def load(self) -> dict[str, str]:
-        """
-        레지스트리 파일 로드.
-        파일이 없으면 DEFAULT_SEED_DOMAINS를 파일로 저장 후 반환.
-        """
-        if not os.path.exists(self.registry_path):
-            logger.info(f"레지스트리 없음 → 시드 도메인으로 초기화: {self.registry_path}")
-            self._save(DEFAULT_SEED_DOMAINS)
-            return dict(DEFAULT_SEED_DOMAINS)
-
-        try:
-            with open(self.registry_path, encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
-            return {k: str(v) for k, v in data.items()}
-        except Exception as e:
-            logger.warning(f"레지스트리 로드 실패 → 시드 사용: {e}")
-            return dict(DEFAULT_SEED_DOMAINS)
-
-    def register(self, domain: str, description: str) -> None:
-        """
-        새 도메인을 레지스트리에 추가하고 파일로 저장.
-        이미 있으면 무시.
-        """
-        current = self.load()
-        if domain in current:
-            return
-
-        current[domain] = description
-        self._save(current)
-        logger.info(f"새 도메인 등록: {domain} — {description}")
-
-    def _save(self, data: dict[str, str]) -> None:
-        os.makedirs(os.path.dirname(self.registry_path) or ".", exist_ok=True)
-        with open(self.registry_path, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, allow_unicode=True, sort_keys=True)
-
-    def format_for_prompt(self) -> str:
-        """
-        프롬프트 주입용 문자열 생성.
-        예: "- agriculture: 농림수산식품 (농가, 경작면적, ...)"
-        """
-        domains = self.load()
-        lines = [f"- {k}: {v}" for k, v in sorted(domains.items())]
-        return "\n".join(lines)
-
-
-# ── 메인 함수 ──────────────────────────────────────────────────────────────
-
+# ── 메인 진입점 ──────────────────────────────────────────────────────────────
 async def classify_domain(
     sir_doc: SIRDocument,
     config: dict | None = None,
@@ -156,88 +69,7 @@ async def classify_domain(
         (domain, description) 튜플
         예: ("agriculture", "농림수산식품 (농가, 경작면적, ...)")
     """
-    config = config or {}
-    registry_path = config.get("domain_registry_path", "domain-packs/registry.yaml")
-    registry = DomainRegistry(registry_path)
-
-    preview = _build_text_preview(sir_doc)
-    domain_list_str = registry.format_for_prompt()
-    llm = LLMClient(config=config.get("llm", {}))
-
-    try:
-        result = await llm.generate_json(
-            prompt=DOMAIN_CLASSIFY_PROMPT.format(
-                domain_list=domain_list_str,
-                text_preview=preview,
-            ),
-            system_prompt="도메인 분류 전문가. JSON으로만 답하세요.",
-            model_tier="light",  # HCX-DASH-001
-        )
-
-        raw_domain    = result.get("domain", "general")
-        description   = result.get("description", "")
-        is_new        = bool(result.get("is_new", False))
-        confidence    = float(result.get("confidence", 0.0))
-        reason        = result.get("reason", "")
-
-        # 도메인 형식 검증
-        if not DOMAIN_NAME_PATTERN.match(raw_domain):
-            logger.warning(f"도메인 형식 오류 '{raw_domain}' → general")
-            raw_domain, description = "general", DEFAULT_SEED_DOMAINS["general"]
-
-        # confidence 낮으면 general
-        if confidence < CONFIDENCE_THRESHOLD:
-            logger.warning(f"confidence 낮음 ({confidence:.2f}) → general")
-            raw_domain, description = "general", DEFAULT_SEED_DOMAINS["general"]
-
-        # 신규 도메인이면 레지스트리에 저장
-        if is_new and raw_domain != "general":
-            registry.register(raw_domain, description)
-
-        # 기존 도메인이면 레지스트리의 공식 설명 사용 (LLM 설명이 다를 수 있음)
-        if not is_new:
-            registered = registry.load()
-            description = registered.get(raw_domain, description)
-
-        domain = raw_domain
-        logger.info(
-            f"도메인 분류: {domain} ({'신규' if is_new else '기존'}) "
-            f"confidence={confidence:.2f}, reason={reason}"
-        )
-
-    except Exception as e:
-        logger.error(f"도메인 분류 실패: {e}")
-        domain, description = "general", DEFAULT_SEED_DOMAINS["general"]
-
+    domain, description = await _classify_domain_with_llm(sir_doc, config)
     sir_doc.detected_domain = domain
     load_domain_pack(domain, config)
     return domain, description
-
-
-# ── 내부 유틸 ─────────────────────────────────────────────────────────────
-
-def _build_text_preview(sir_doc: SIRDocument, max_chars: int = 600) -> str:
-    """
-    SIR 문서에서 분류에 유용한 미리보기 텍스트를 구성한다.
-    heading 블록 우선, 이후 paragraph 추가. table/list 제외.
-    """
-    from structverify.core.schemas import BlockType
-
-    parts: list[str] = []
-    total = 0
-
-    for block in sir_doc.blocks:
-        if block.type == BlockType.HEADING and block.content:
-            parts.append(block.content.strip())
-            total += len(block.content)
-            if total >= max_chars:
-                break
-
-    for block in sir_doc.blocks:
-        if block.type == BlockType.PARAGRAPH and block.content:
-            parts.append(block.content.strip())
-            total += len(block.content)
-            if total >= max_chars:
-                break
-
-    return " ".join(parts)[:max_chars]

@@ -8,6 +8,7 @@ from structverify.detection.prompts_loader import (
     load_domain_pack,
     load_domain_prompts,
     prompts_yaml_path,
+    resolve_prompt_for_step,
 )
 
 
@@ -34,6 +35,24 @@ def test_few_shot_helpers_no_op_when_empty():
     assert inject_few_shot(prompt, None) == prompt
     assert format_few_shot_block([]) == ""
     assert few_shot_examples_from_pack({"few_shot_examples": []}) == []
+
+
+def test_resolve_prompt_for_step_no_domain_unchanged():
+    base = "PROMPT {sentence}"
+    assert resolve_prompt_for_step(base, None, {}, step="candidate") == base
+
+
+def test_resolve_prompt_for_step_injects_step_key(tmp_path):
+    pack_dir = tmp_path / "economy"
+    pack_dir.mkdir()
+    data = {"candidate_examples": ["예시 문장"]}
+    (pack_dir / "prompts.yaml").write_text(
+        yaml.dump(data, allow_unicode=True), encoding="utf-8"
+    )
+    config = {"domain_packs_dir": str(tmp_path)}
+    out = resolve_prompt_for_step("BASE", "economy", config, step="candidate")
+    assert "BASE" in out
+    assert "[도메인 few-shot 예시]" in out
 
 
 def test_inject_few_shot_appends_block():
