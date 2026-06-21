@@ -7,12 +7,15 @@ from __future__ import annotations
 from structverify.core.schemas import SIRDocument
 from structverify.detection.domain.preview import _build_text_preview
 from structverify.detection.domain.registry import (
-    CONFIDENCE_THRESHOLD,
     DEFAULT_SEED_DOMAINS,
     DOMAIN_NAME_PATTERN,
     DomainRegistry,
 )
-from structverify.detection.config import domain_registry_path
+from structverify.detection._config import (
+    domain_confidence_threshold,
+    domain_registry_path,
+    model_tier_for,
+)
 from structverify.detection._llm import get_llm_client
 from structverify.detection.prompts.domain import DOMAIN_CLASSIFY_PROMPT
 from structverify.utils.logger import get_logger
@@ -40,7 +43,7 @@ async def _classify_domain_with_llm(
                 text_preview=preview,
             ),
             system_prompt="도메인 분류 전문가. JSON으로만 답하세요.",
-            model_tier="light",  # HCX-DASH-001
+            model_tier=model_tier_for(config, "domain_classify", default="light"),
         )
 
         raw_domain    = result.get("domain", "general")
@@ -55,7 +58,7 @@ async def _classify_domain_with_llm(
             raw_domain, description = "general", DEFAULT_SEED_DOMAINS["general"]
 
         # confidence 낮으면 general
-        if confidence < CONFIDENCE_THRESHOLD:
+        if confidence < domain_confidence_threshold(config):
             logger.warning(f"confidence 낮음 ({confidence:.2f}) → general")
             raw_domain, description = "general", DEFAULT_SEED_DOMAINS["general"]
 

@@ -4,18 +4,18 @@ structverify.utils.llm_client.LLMClient를 detection 모듈에서 직접 생성�
 여기를 경유한다. (utils/llm_client.py 대수술 없음)
 
 [리팩 Phase C #14] detection 내 LLMClient 생성은 get_llm_client()로 통일.
-[리팩 Phase C #15] llm 서브설정은 detection.config.llm_config() 경유.
+[리팩 Phase C #15] llm 서브설정은 detection._config.llm_config() 경유.
 """
 from __future__ import annotations
 
 from typing import Any
 
-from structverify.detection.config import llm_config
+from structverify.detection._config import llm_config
 from structverify.utils.llm_client import LLMClient
 
 
 def get_llm_client(config: dict | None = None) -> LLMClient:
-    """detection.config.llm_config()로 LLMClient 생성 (레거시 config.llm 호환)."""
+    """detection._config.llm_config()로 LLMClient 생성 (레거시 config.llm 호환)."""
     return LLMClient(config=llm_config(config))
 
 

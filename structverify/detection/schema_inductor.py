@@ -45,7 +45,7 @@ from structverify.detection.schema.expand import (
 )
 from structverify.detection.schema.induce import _induce_multiple
 from structverify.detection.schema.regenerate import regenerate_schema
-from structverify.detection.config import detected_domain
+from structverify.detection._config import detected_domain
 from structverify.detection._llm import get_llm_client
 from structverify.detection.schema.temporal_hints import _build_temporal_hint
 from structverify.utils.logger import get_logger

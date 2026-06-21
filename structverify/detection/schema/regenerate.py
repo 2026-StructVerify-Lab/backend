@@ -11,6 +11,7 @@ import re
 from typing import Any
 
 from structverify.detection.prompts.schema import REGENERATE_SCHEMA_PROMPT
+from structverify.detection._config import model_tier_for
 from structverify.detection._llm import get_llm_client
 from structverify.detection.schema.validate import _safe_float
 from structverify.utils.logger import get_logger
@@ -108,7 +109,7 @@ async def regenerate_schema(
         raw = await llm.generate(
             prompt=prompt,
             system_prompt="당신은 통계 검증 schema 수정자입니다. JSON만 응답.",
-            model_tier="heavy",
+            model_tier=model_tier_for(config, "schema_regenerate"),
         )
     except Exception as e:
         logger.warning(f"[schema_inductor.regenerate] LLM 호출 실패: {e}")

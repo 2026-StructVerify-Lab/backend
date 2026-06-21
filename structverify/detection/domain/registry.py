@@ -15,7 +15,9 @@ from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-CONFIDENCE_THRESHOLD = 0.6
+# [김예슬 - 2026-04-23] DomainRegistry — LLM 도메인 파편화 방지
+# confidence_threshold 기본값 → detection/config.yaml (domain.confidence_threshold)
+CONFIDENCE_THRESHOLD = 0.6  # re-export 호환; 런타임은 config.domain_confidence_threshold()
 DOMAIN_NAME_PATTERN = re.compile(r"^[a-z][a-z_]{0,29}$")
 
 # 기본 시드 도메인 — 레지스트리 파일이 없을 때 초기값으로 사용
