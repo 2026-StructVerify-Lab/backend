@@ -13,101 +13,41 @@ explanation/explainer.py — LLM 기반 설명 생성 + Provenance 렌더링 (St
 
 [참고] ReAct (Yao et al., ICLR 2023)
   Agent의 최종 Observation 단계에서 판정 근거를 자연어로 설명하는 Step 9
+
+[리팩 2026-06 / refactor/v1/js/explanation]
+- verdict별 프롬프트 문자열 → prompts/ 로 분리 (import만 유지, 동작 동일)
+- 수치·출처 포맷 헬퍼 → formatters.py 로 분리
+- LLM 실패 fallback 문구 → fallback.py 로 분리
+- LLM 호출 → _llm.py 로 분리
+- model_tier 등 모듈 설정 → explanation/config.yaml (default.yaml 미수정)
 """
 from __future__ import annotations
 
 from structverify.core.schemas import (
-    Claim, Evidence, MismatchType, VerdictType, VerificationResult,
+    Claim, VerdictType, VerificationResult,
 )
+# [리팩] explainer에 있던 포맷 헬퍼 → formatters.py (로직 동일)
+from .formatters import (
+    _calc_diff,
+    _calc_diff_pct,
+    _format_search_hint,
+    _format_stat_source,
+    _mismatch_reason_text,
+    _unverifiable_reason,
+)
+# [리팩] verdict별 LLM 프롬프트 문자열 → prompts/ (동작 변경 없음)
+from .prompts.match import MATCH_PROMPT
+from .prompts.mismatch import MISMATCH_PROMPT
+from .prompts.multihop import MULTIHOP_PROMPT
+from .prompts.unverifiable import UNVERIFIABLE_PROMPT
+# [리팩] LLM 실패 시 fallback 문구 → fallback.py (explainer에서 re-export)
+from .fallback import _fallback_explanation
+# [리팩] LLMClient 직접 호출 → _llm.py
+from ._llm import generate_explanation_text
 from structverify.graph.provenance import render_provenance_text
-from structverify.utils.llm_client import LLMClient
 from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-
-# ── verdict별 전용 프롬프트 ────────────────────────────────────────────────
-
-MATCH_PROMPT = """당신은 팩트체크 전문 작가입니다.
-아래 검증 결과를 독자가 이해하기 쉽게 한국어로 설명하세요.
-
-[판정: ✅ 일치 (MATCH) — 이 판정은 확정입니다. 절대 "사실이 아니다"라고 쓰지 마세요.]
-주장: "{claim_text}"
-기사 수치: {claimed_value} {unit}
-공식 수치: {official_value} {unit}
-오차: {diff_pct:.1f}%
-신뢰도: {confidence:.0%}
-근거 통계: {stat_source}
-출처: {provenance}
-
-[작성 규칙]
-- 2~3문장으로 간결하게
-- 판정이 "일치"이므로 "사실입니다", "확인됩니다" 등 긍정적 표현 사용
-- "KOSIS {{통계명}}에 따르면" 형식으로 출처 명시
-- 기사 수치와 공식 수치를 나란히 비교
-- 통계표 ID 포함
-- ⚠️ "사실이 아닙니다", "틀렸습니다" 등 부정 표현 절대 금지
-
-[⚠️ 주의 — 설명 전 반드시 확인]
-- 공식 통계 출처({stat_source})가 indicator({indicator})와 
-  *같은 국가/지역*의 통계인지 확인하세요.
-- 시점({claim_time} vs {evidence_time})이 다르면 
-  "같은 연도 데이터가 아님"을 반드시 명시하세요.
-"""
-
-MULTIHOP_PROMPT = """당신은 팩트체크 전문 작가입니다.
-아래 검증 결과를 독자가 이해하기 쉽게 한국어로 설명하세요.
-
-[판정: {verdict_label} — 멀티홉 검증으로 판정했습니다.]
-주장: "{claim_text}"
-주장한 비율/배수: {claimed_ratio}배
-계산된 비율/배수: {computed_ratio}배
-근거: 원천 수치 {largest_value} / {smallest_value} = {computed_ratio}배
-신뢰도: {confidence:.0%}
-
-[작성 규칙]
-- 이 주장은 KOSIS에서 직접 찾을 수 없는 "파생 주장"(비율/배수)입니다
-- 대신 같은 지표의 원천 수치 2개를 KOSIS에서 찾아 비율을 직접 계산했습니다
-- 2~3문장으로, 어떻게 계산했는지 설명: "원천 수치 {largest_value}와 {smallest_value}를 비교하면 약 {computed_ratio}배"
-- 위에 적힌 수치만 사용하세요. 새 수치를 만들지 마세요."""
-
-
-MISMATCH_PROMPT = """당신은 팩트체크 전문 작가입니다.
-아래 검증 결과를 독자가 이해하기 쉽게 한국어로 설명하세요.
-
-[판정: 불일치 (MISMATCH) — 기사 수치와 공식 수치가 다릅니다.]
-주장: "{claim_text}"
-기사 수치: {claimed_value} {unit}
-공식 수치: {official_value} {unit}
-차이: {diff} {unit} ({diff_pct:.1f}%)
-불일치 유형: {mismatch_reason}
-신뢰도: {confidence:.0%}
-근거 통계: {stat_source}
-출처: {provenance}
-
-[작성 규칙]
-- 3~4문장으로 작성
-- 기사 수치({claimed_value})와 공식 수치({official_value})를 반드시 정확히 인용
-- 위에 적힌 수치만 사용하세요. 새로운 수치를 만들어내지 마세요.
-- 불일치 유형({mismatch_reason})에 맞는 원인 설명 포함
-- KOSIS 출처 포함"""
-
-UNVERIFIABLE_PROMPT = """당신은 팩트체크 전문 작가입니다.
-아래 검증 결과를 독자가 이해하기 쉽게 한국어로 설명하세요.
-
-[판정: 검증 불가 (UNVERIFIABLE) — 공식 통계를 찾지 못했습니다.]
-주장: "{claim_text}"
-검증 불가 이유: {reason}
-시도한 통계표: {stat_source} 
-시도한 검색어: {search_hint}
-
-[작성 규칙]
-- 2~3문장으로 작성
-- "사실입니다" 또는 "사실이 아닙니다"라고 단정하지 마세요
-- 왜 공식 통계를 찾지 못했는지만 설명
-- 독자가 직접 KOSIS에서 확인할 방법 제시
-- 수치를 새로 만들어내지 마세요. 위에 명시된 수치만 사용.
-"""
 
 
 # ── 메인 함수 ─────────────────────────────────────────────────────────────
@@ -134,7 +74,6 @@ async def generate_explanation(
         자연어 설명 문자열
     """
     config = config or {}
-    llm = LLMClient(config=config.get("llm", {}))
 
     # Provenance 텍스트 렌더링
     prov_text = "출처 정보 없음"
@@ -145,11 +84,7 @@ async def generate_explanation(
     prompt = _build_prompt(claim, result, prov_text)
 
     try:
-        explanation = await llm.generate(
-            prompt=prompt,
-            system_prompt="팩트체크 전문 작가. 명확하고 간결한 한국어로 작성하세요.",
-            model_tier="heavy",  # HCX-003 — 설명 품질이 중요
-        )
+        explanation = await generate_explanation_text(prompt, config)
         logger.info(f"[Step 9] 설명 생성 완료: {claim.sent_id} ({result.verdict.value})")
         return explanation
 
@@ -246,98 +181,3 @@ def _build_prompt(
             search_hint=search_hint,
         )
 
-
-def _mismatch_reason_text(mismatch_type: MismatchType | None) -> str:
-    """MismatchType을 독자가 이해할 수 있는 설명 문구로 변환한다."""
-    mapping = {
-        MismatchType.VALUE:       "단순 수치 오류 — 기사가 공식 수치와 다른 값을 인용",
-        MismatchType.TIME_PERIOD: "시점 불일치 — 다른 연도의 통계를 현재 수치처럼 인용",
-        MismatchType.POPULATION:  "대상 집단 불일치 — 다른 범위(전체 vs 일부)의 통계를 혼용",
-        MismatchType.EXAGGERATION:"과장/축소 — 실제 수치보다 크게 또는 작게 표현",
-    }
-    return mapping.get(mismatch_type, "수치 불일치")
-
-
-def _unverifiable_reason(claim: Claim, result: VerificationResult) -> str:
-    """검증 불가 이유를 구체적으로 서술한다."""
-    if result.evidence is None:
-        return "KOSIS에서 관련 통계표를 찾지 못함"
-    if result.evidence.official_value is None:
-        return "통계표는 찾았으나 해당 시점/대상의 수치가 없음"
-    if claim.schema is None or claim.schema.value is None:
-        return "기사에서 구체적인 수치를 추출하지 못함"
-    return "검증에 필요한 정보가 불충분함"
-
-
-def _format_stat_source(ev: Evidence | None) -> str:
-    """Evidence에서 통계 출처 텍스트를 생성한다."""
-    if not ev:
-        return "N/A"
-    parts = []
-    if ev.source_name:
-        parts.append(ev.source_name)
-    if ev.stat_table_id:
-        parts.append(f"표ID: {ev.stat_table_id}")
-    if ev.time_period:
-        parts.append(f"{ev.time_period} 기준")
-    return " | ".join(parts) if parts else "N/A"
-
-
-def _format_search_hint(claim: Claim) -> str:
-    """독자가 직접 검색할 수 있는 키워드를 제안한다."""
-    if not claim.schema:
-        return claim.claim_text[:30]
-    parts = []
-    if claim.schema.indicator:
-        parts.append(claim.schema.indicator)
-    if claim.schema.population:
-        parts.append(claim.schema.population)
-    if claim.schema.time_period:
-        parts.append(claim.schema.time_period)
-    return " ".join(parts) if parts else claim.claim_text[:30]
-
-
-def _calc_diff_pct(claimed: float | str, official: float | str) -> float:
-    """차이 비율(%) 계산. 수치가 없으면 0 반환."""
-    try:
-        c, o = float(claimed), float(official)
-        if o == 0:
-            return 0.0
-        return abs(c - o) / abs(o) * 100
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _calc_diff(claimed: float | str, official: float | str) -> str:
-    """실제 차이값 계산. 수치가 없으면 'N/A' 반환."""
-    try:
-        c, o = float(claimed), float(official)
-        diff = c - o
-        return f"{diff:+.1f}"
-    except (TypeError, ValueError):
-        return "N/A"
-
-
-def _fallback_explanation(claim: Claim, result: VerificationResult) -> str:
-    """LLM 실패 시 기본 텍스트로 fallback."""
-    verdict_kr = {
-        VerdictType.MATCH: "일치",
-        VerdictType.MISMATCH: "불일치",
-        VerdictType.UNVERIFIABLE: "검증 불가",
-    }.get(result.verdict, result.verdict.value)
-
-    base = f'"{claim.claim_text[:40]}..." — 판정: {verdict_kr}'
-
-    if result.verdict == VerdictType.MISMATCH and result.evidence:
-        ev = result.evidence
-        schema = claim.schema
-        if schema and schema.value and ev.official_value:
-            base += (
-                f" | 기사: {schema.value}{schema.unit or ''}"
-                f" / 공식: {ev.official_value}{ev.unit or ''}"
-            )
-
-    if result.provenance_summary:
-        base += f" | {result.provenance_summary}"
-
-    return base

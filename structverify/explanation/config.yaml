@@ -1,0 +1,3 @@
+# Step 9 explanation 모듈 설정 (임시 — 팀 취합 후 default.yaml 등으로 이전 예정)
+# [리팩] 모듈 옆 config.yaml — default.yaml 미수정
+model_tier: heavy  # HCX-003, 설명 품질 우선 (기존 하드코딩과 동일)
