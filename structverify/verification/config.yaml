@@ -1,0 +1,21 @@
+# Step 8 verification 모듈 설정 (임시 — 팀 취합 후 default.yaml 등으로 이전 예정)
+# [리팩] agent / fallback 프로필 분리 — default.yaml 미수정
+#
+# agent:   loop.py 현행 (agent.enabled=true 기본 경로)
+# fallback: verifier.py 현행 (agent 실패·비활성 폴백)
+
+profiles:
+  agent:
+    value_match_tolerance: 0.05          # LoopConfig 기본 5%
+    growth_rate_match_pp: 1.5            # 증가율 %p MATCH
+    growth_rate_unverifiable_pp: 5.0     # 증가율 %p UNVERIFIABLE 상한
+    difference_rel_tolerance: 0.10       # 차이값 gap 허용: max(|claimed|×10%, 0.02)
+    difference_min_tolerance: 0.02
+    difference_unverifiable_multiplier: 3.0
+    calculate_simple_tolerance: 0.01     # _synthesize_verdict_from_calculate 일반 수치 1%
+
+  fallback:
+    match_max_error: 0.10                # ≤10% MATCH (_verdict_from_error v7)
+    unverifiable_max_error: 0.30         # 10~30% UNVERIFIABLE
+    mismatch_max_error: 0.90             # 30~90% MISMATCH, >90% UNVERIFIABLE
+    exaggeration_diff_percent: 20.0      # MismatchType.EXAGGERATION
