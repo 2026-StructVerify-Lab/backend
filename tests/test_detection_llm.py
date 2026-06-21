@@ -10,6 +10,14 @@ def test_get_llm_client_returns_llm_client():
     assert client.temperature == 0.2
 
 
+def test_get_llm_client_detection_llm_override():
+    client = get_llm_client({
+        "llm": {"provider": "hcx", "temperature": 0.1},
+        "detection": {"llm": {"temperature": 0.5}},
+    })
+    assert client.temperature == 0.5
+
+
 def test_get_llm_client_none_llm_block_uses_empty_config():
     client = get_llm_client({"llm": None})
     assert isinstance(client, LLMClient)
@@ -18,4 +26,8 @@ def test_get_llm_client_none_llm_block_uses_empty_config():
 
 def test_llm_config_from_extracts_subdict():
     assert llm_config_from({"llm": {"provider": "openai"}}) == {"provider": "openai"}
+    assert llm_config_from({
+        "llm": {"provider": "openai"},
+        "detection": {"llm": {"temperature": 0.2}},
+    }) == {"provider": "openai", "temperature": 0.2}
     assert llm_config_from(None) == {}

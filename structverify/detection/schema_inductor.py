@@ -45,6 +45,7 @@ from structverify.detection.schema.expand import (
 )
 from structverify.detection.schema.induce import _induce_multiple
 from structverify.detection.schema.regenerate import regenerate_schema
+from structverify.detection.config import detected_domain
 from structverify.detection._llm import get_llm_client
 from structverify.detection.schema.temporal_hints import _build_temporal_hint
 from structverify.utils.logger import get_logger
@@ -73,7 +74,7 @@ async def induce_schemas(
     expanded: list[Claim] = []
 
     for claim in claims:
-        domain = config.get("detected_domain", "general")
+        domain = detected_domain(config)
         domain_hint = (
             f"주요 지표 예시: {DOMAIN_HINTS[domain]}"
             if domain in DOMAIN_HINTS else ""

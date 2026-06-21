@@ -281,6 +281,17 @@ candidate_detection:
   # → 2로 하향. min_call_interval_ms와 함께 *실제 처리량*을 결정.
   concurrency: 2
 
+# Step 3~5 detection 전용 설정 (신규). 위 candidate_detection 등은 레거시 fallback.
+detection:
+  domain_packs_dir: "domain-packs"
+  domain_registry_path: "domain-packs/registry.yaml"
+  candidate:
+    threshold: 0.65
+    concurrency: 2
+    teacher_llm_fallback: true
+  claim:
+    min_confidence: 0.7   # 미설정 시 verification.min_confidence 사용
+
 observability:
   langfuse_enabled: false
   log_level: "INFO"

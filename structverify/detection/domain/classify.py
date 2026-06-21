@@ -12,6 +12,7 @@ from structverify.detection.domain.registry import (
     DOMAIN_NAME_PATTERN,
     DomainRegistry,
 )
+from structverify.detection.config import domain_registry_path
 from structverify.detection._llm import get_llm_client
 from structverify.detection.prompts.domain import DOMAIN_CLASSIFY_PROMPT
 from structverify.utils.logger import get_logger
@@ -25,7 +26,7 @@ async def _classify_domain_with_llm(
 ) -> tuple[str, str]:
     """레지스트리 + LLM으로 (domain, description) 반환."""
     config = config or {}
-    registry_path = config.get("domain_registry_path", "domain-packs/registry.yaml")
+    registry_path = domain_registry_path(config)
     registry = DomainRegistry(registry_path)
 
     preview = _build_text_preview(sir_doc)

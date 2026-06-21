@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from structverify.detection.config import candidate_detection_config
 from structverify.detection.candidate.heuristic import _score_candidate_heuristic
 from structverify.detection.candidate.llm import _score_candidate_llm
 from structverify.utils.logger import get_logger
@@ -60,7 +61,7 @@ async def score_candidate(
       - if adapter_path: return _score_with_trained_model(sentence, adapter_path)
     """
     config = config or {}
-    cd_cfg = config.get("candidate_detection", {})
+    cd_cfg = candidate_detection_config(config)
     use_llm = cd_cfg.get("teacher_llm_fallback", True)
     threshold = float(cd_cfg.get("threshold", 0.1))
     domain = (context or {}).get("domain")

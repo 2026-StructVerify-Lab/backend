@@ -12,15 +12,15 @@ from typing import Any
 
 import yaml
 
+from structverify.detection.config import domain_packs_dir as _domain_packs_dir
 from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
 def domain_packs_dir(config: dict | None) -> str:
-    """config에서 domain-packs 루트 경로."""
-    cfg = config or {}
-    return cfg.get("domain_packs_dir", "domain-packs")
+    """config에서 domain-packs 루트 경로 (detection.config 위임)."""
+    return _domain_packs_dir(config)
 
 
 def prompts_yaml_path(domain: str, config: dict | None) -> str:

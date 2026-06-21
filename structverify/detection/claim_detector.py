@@ -34,6 +34,7 @@ import asyncio  # 병렬처리
 
 from structverify.core.schemas import Claim, SIRDocument, SourceOffset
 from structverify.detection.candidate_scorer import score_candidate
+from structverify.detection.config import candidate_detection_config, claim_min_confidence
 from structverify.detection._llm import get_llm_client
 from structverify.detection.claims.worthiness import _check_worthiness
 from structverify.utils.logger import get_logger
@@ -63,9 +64,9 @@ async def detect_claims(
     config = config or {}
     llm = get_llm_client(config)
 
-    cd_cfg = config.get("candidate_detection", {})
+    cd_cfg = candidate_detection_config(config)
     candidate_threshold = float(cd_cfg.get("threshold", 0.65))
-    min_conf = float(config.get("verification", {}).get("min_confidence", 0.7))
+    min_conf = claim_min_confidence(config)
 
     # 동시 LLM 호출 수 제한 — HCX 429 rate limit 회피 (config: candidate_detection.concurrency)
     # [2026-05-21] 기본값 5 → 4: HCX-003 burst 시 전체 429 폭주 빈발해서 안전 기본값 하향.
