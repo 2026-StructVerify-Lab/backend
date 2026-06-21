@@ -37,6 +37,7 @@ import yaml
 
 from structverify.core.schemas import SIRDocument
 from structverify.detection.prompts.domain import DOMAIN_CLASSIFY_PROMPT
+from structverify.detection.prompts_loader import load_domain_pack
 from structverify.utils.llm_client import LLMClient
 from structverify.utils.logger import get_logger
 
@@ -209,7 +210,7 @@ async def classify_domain(
         domain, description = "general", DEFAULT_SEED_DOMAINS["general"]
 
     sir_doc.detected_domain = domain
-    _load_domain_pack(domain, config)
+    load_domain_pack(domain, config)
     return domain, description
 
 
@@ -240,25 +241,3 @@ def _build_text_preview(sir_doc: SIRDocument, max_chars: int = 600) -> str:
                 break
 
     return " ".join(parts)[:max_chars]
-
-
-def _load_domain_pack(domain: str, config: dict) -> dict[str, Any] | None:
-    """
-    domain-packs/{domain}/prompts.yaml 로드.
-    없으면 None 반환 (에러 아님).
-    """
-    pack_dir = config.get("domain_packs_dir", "domain-packs")
-    yaml_path = os.path.join(pack_dir, domain, "prompts.yaml")
-
-    if not os.path.exists(yaml_path):
-        logger.debug(f"Domain Pack 없음: {yaml_path}")
-        return None
-
-    try:
-        with open(yaml_path, encoding="utf-8") as f:
-            pack = yaml.safe_load(f)
-        logger.info(f"Domain Pack 로드: {yaml_path}")
-        return pack
-    except Exception as e:
-        logger.warning(f"Domain Pack 로드 실패: {yaml_path} — {e}")
-        return None
