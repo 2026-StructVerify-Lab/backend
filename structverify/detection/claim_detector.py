@@ -34,8 +34,8 @@ import asyncio  # 병렬처리
 
 from structverify.core.schemas import Claim, SIRDocument, SourceOffset
 from structverify.detection.candidate_scorer import score_candidate
+from structverify.detection._llm import get_llm_client
 from structverify.detection.claims.worthiness import _check_worthiness
-from structverify.utils.llm_client import LLMClient
 from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -61,7 +61,7 @@ async def detect_claims(
       - "forecast": 전망/예상/목표
     """
     config = config or {}
-    llm = LLMClient(config=config.get("llm", {}))
+    llm = get_llm_client(config)
 
     cd_cfg = config.get("candidate_detection", {})
     candidate_threshold = float(cd_cfg.get("threshold", 0.65))

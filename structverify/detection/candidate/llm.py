@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from structverify.detection._llm import get_llm_client
 from structverify.detection.prompts.candidate import CANDIDATE_PROMPT
 from structverify.detection.prompts_loader import resolve_prompt_for_step
-from structverify.utils.llm_client import LLMClient
 from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -23,7 +23,7 @@ async def _score_candidate_llm(
     threshold: float,
     domain: str | None = None,
 ) -> tuple[float, bool, str, dict[str, Any]]:
-    llm = LLMClient(config=config.get("llm", {}))
+    llm = get_llm_client(config)
     base = CANDIDATE_PROMPT.format(sentence=sentence)
     prompt = resolve_prompt_for_step(base, domain, config, step="candidate")
     result = await llm.generate_json(

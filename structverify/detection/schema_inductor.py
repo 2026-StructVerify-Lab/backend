@@ -45,8 +45,8 @@ from structverify.detection.schema.expand import (
 )
 from structverify.detection.schema.induce import _induce_multiple
 from structverify.detection.schema.regenerate import regenerate_schema
+from structverify.detection._llm import get_llm_client
 from structverify.detection.schema.temporal_hints import _build_temporal_hint
-from structverify.utils.llm_client import LLMClient
 from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -68,7 +68,7 @@ async def induce_schemas(
     [v6 멀티홉] graph 있으면 시점 해소 결과를 prompt hint로 주입.
     """
     config = config or {}
-    llm = LLMClient(config=config.get("llm", {}))
+    llm = get_llm_client(config)
     success, fail = 0, 0
     expanded: list[Claim] = []
 

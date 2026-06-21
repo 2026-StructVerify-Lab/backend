@@ -11,8 +11,8 @@ import re
 from typing import Any
 
 from structverify.detection.prompts.schema import REGENERATE_SCHEMA_PROMPT
+from structverify.detection._llm import get_llm_client
 from structverify.detection.schema.validate import _safe_float
-from structverify.utils.llm_client import LLMClient
 from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -103,7 +103,7 @@ async def regenerate_schema(
         f"obs={len(observations or [])}건"
     )
 
-    llm = LLMClient(config=(config or {}).get("llm") or {})
+    llm = get_llm_client(config)
     try:
         raw = await llm.generate(
             prompt=prompt,

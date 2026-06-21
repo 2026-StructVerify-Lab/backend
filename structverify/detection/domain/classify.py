@@ -12,8 +12,8 @@ from structverify.detection.domain.registry import (
     DOMAIN_NAME_PATTERN,
     DomainRegistry,
 )
+from structverify.detection._llm import get_llm_client
 from structverify.detection.prompts.domain import DOMAIN_CLASSIFY_PROMPT
-from structverify.utils.llm_client import LLMClient
 from structverify.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -30,7 +30,7 @@ async def _classify_domain_with_llm(
 
     preview = _build_text_preview(sir_doc)
     domain_list_str = registry.format_for_prompt()
-    llm = LLMClient(config=config.get("llm", {}))
+    llm = get_llm_client(config)
 
     try:
         result = await llm.generate_json(
