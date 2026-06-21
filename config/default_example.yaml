@@ -281,6 +281,9 @@ candidate_detection:
   # → 2로 하향. min_call_interval_ms와 함께 *실제 처리량*을 결정.
   concurrency: 2
 
+# Step 3~5 detection 신규 키셋 → structverify/detection/config.yaml (취합 전 모듈 로컬)
+# 런타임 override: config.detection.*  |  레거시: candidate_detection, verification.min_confidence
+
 observability:
   langfuse_enabled: false
   log_level: "INFO"

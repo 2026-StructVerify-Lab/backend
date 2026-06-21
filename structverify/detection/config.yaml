@@ -1,0 +1,32 @@
+# detection/config.yaml — Step 3~5 모듈 설정 (취합 전 임시 보관)
+#
+# 우선순위 (낮 → 높):
+#   1) 이 파일
+#   2) 런타임 config.detection.*
+#   3) 레거시 yaml (candidate_detection, verification.min_confidence 등) — 변경하지 않음
+#
+# 취합 시 config/default.yaml 로 이전 예정.
+
+domain_packs_dir: "domain-packs"
+domain_registry_path: "domain-packs/registry.yaml"
+
+domain:
+  confidence_threshold: 0.6
+
+candidate_detection:
+  threshold: 0.65
+  concurrency: 2
+  teacher_llm_fallback: true
+  use_surface_signals: true
+  heuristic_threshold: 0.65
+  llm_label_floor_score: 0.75
+
+claim:
+  min_confidence: 0.7
+  worthy_score_floor: 0.8
+
+model_tier:
+  domain_classify: light
+  candidate_score: heavy
+  claim_worthiness: heavy
+  schema_regenerate: heavy
