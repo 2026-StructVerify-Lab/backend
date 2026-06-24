@@ -162,6 +162,22 @@ class LLMClient:
         else:
             self.openai_api_key = os.environ.get(openai_key_env, "")
 
+        # [v2 - 김예슬] Upstage(Solar) 지원 — OpenAI 호환 API (base_url만 다름).
+        #   provider: "upstage" 로 두면 HCX 키 없이 Upstage 키로 동작. (pip install openai 필요)
+        self.upstage_base_url = self.config.get("base_url", "https://api.upstage.ai/v1")
+        self.upstage_api_key = (
+            self.config.get("_direct_api_key")
+            or os.environ.get(self.config.get("api_key_env", "UPSTAGE_API_KEY"), "")
+            or os.environ.get("UPSTAGE_API_KEY", "")
+        )
+        # provider가 upstage인데 models 미지정이면 Solar 기본 모델로 교체
+        if self.provider == "upstage" and "models" not in self.config:
+            self.models = {
+                "heavy": "solar-pro", "light": "solar-mini",
+                "structured": "solar-pro", "reasoning": "solar-pro",
+            }
+            self.default_model = self.models["heavy"]
+
         # [2026-05-21] 프로세스 전역 HCX rate limit — config에서 min_call_interval_ms.
         # 여러 LLMClient 인스턴스가 *같은 limiter*를 공유 → 모든 HCX 호출 직렬 간격 보장.
         _interval_ms = float(self.config.get("min_call_interval_ms", 0) or 0)
@@ -193,6 +209,8 @@ class LLMClient:
             return await self._call_hcx_v1(prompt, system_prompt, temperature, model)
         elif self.provider == "openai":
             return await self._call_openai(prompt, system_prompt, temperature, model_tier)
+        elif self.provider == "upstage":  # [v2 - 김예슬] HCX 키 없을 때 Upstage(Solar)
+            return await self._call_upstage(prompt, system_prompt, temperature, model_tier)
         raise ValueError(f"미지원 provider: {self.provider}")
 
     async def generate_json(
@@ -243,6 +261,8 @@ class LLMClient:
             # OpenAI도 response_format으로 JSON Schema 지원
             raw = await self._call_openai_structured(prompt, schema, system_prompt)
             return raw
+        elif self.provider == "upstage":  # [v2 - 김예슬]
+            return await self._call_upstage_structured(prompt, schema, system_prompt)
         raise ValueError(f"미지원 provider: {self.provider}")
 
     async def generate_light(self, prompt: str, system_prompt: str | None = None) -> str:
@@ -590,6 +610,72 @@ class LLMClient:
         )
         content = resp.choices[0].message.content
         return json.loads(content)
+
+    # ── [v2 - 김예슬] Upstage (Solar) — OpenAI 호환 (base_url만 다름) ──────────
+
+    async def _call_upstage(
+        self,
+        prompt: str,
+        system_prompt: str | None,
+        temperature: float | None,
+        model_tier: str,
+    ) -> str:
+        """Upstage Solar Chat Completions (OpenAI 호환)."""
+        try:
+            from openai import AsyncOpenAI
+        except ImportError:
+            raise ImportError("pip install openai")
+        model = self.models.get(model_tier, self.default_model)
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        client = AsyncOpenAI(api_key=self.upstage_api_key, base_url=self.upstage_base_url)
+        resp = await client.chat.completions.create(
+            model=model, messages=messages,
+            temperature=temperature if temperature is not None else self.temperature,
+            max_tokens=self.max_tokens,
+        )
+        return resp.choices[0].message.content
+
+    async def _call_upstage_structured(
+        self,
+        prompt: str,
+        schema: dict[str, Any],
+        system_prompt: str | None,
+    ) -> dict[str, Any]:
+        """Upstage 구조화 응답.
+        Solar는 json_schema strict를 보장하지 않으므로, json_object 모드 + 스키마를
+        프롬프트 힌트로 주고 응답을 파싱한다(response_format 미지원 시 일반 호출로 폴백).
+        """
+        try:
+            from openai import AsyncOpenAI
+        except ImportError:
+            raise ImportError("pip install openai")
+        sys_p = (system_prompt or "")
+        sys_p += (
+            "\n\n반드시 아래 JSON 스키마에 맞는 JSON 객체 하나만 출력하세요. "
+            "설명·코드펜스 없이 JSON만 출력:\n"
+            + json.dumps(schema, ensure_ascii=False)
+        )
+        messages = [
+            {"role": "system", "content": sys_p},
+            {"role": "user", "content": prompt},
+        ]
+        model = self.models.get("structured", self.default_model)
+        client = AsyncOpenAI(api_key=self.upstage_api_key, base_url=self.upstage_base_url)
+        try:
+            resp = await client.chat.completions.create(
+                model=model, messages=messages,
+                temperature=self.temperature, max_tokens=self.max_tokens,
+                response_format={"type": "json_object"},
+            )
+        except Exception:
+            resp = await client.chat.completions.create(
+                model=model, messages=messages,
+                temperature=self.temperature, max_tokens=self.max_tokens,
+            )
+        return _parse_json_response(resp.choices[0].message.content)
 
 
 # ── 유틸리티 ────────────────────────────────────────────────────────────────

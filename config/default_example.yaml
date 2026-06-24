@@ -139,7 +139,13 @@ domain:
   extra_schema_fields: []                     # ClaimSchema 확장 필드 이름들
 
 llm:
-  provider: "hcx"                    # openai → hcx 로 변경
+  provider: "hcx"                    # hcx | openai | upstage
+  # ── [v2 - 김예슬] HCX 키가 없으면 Upstage(Solar)로 전환 (OpenAI 호환, base_url만 다름) ──
+  #   provider:    "upstage"
+  #   api_key_env: "UPSTAGE_API_KEY"          # .env 에 UPSTAGE_API_KEY 세팅
+  #   base_url:    "https://api.upstage.ai/v1"
+  #   models: { heavy: "solar-pro", light: "solar-mini", structured: "solar-pro" }
+  #   (pip install openai 필요. ※ 임베딩/카탈로그는 아직 HCX-EMB 기준 — 임베딩 전환은 별도 작업)
   models:
     heavy:      "HCX-003"            # 복잡한 태스크 (check-worthiness, 설명 생성) — v1 API
     light:      "HCX-DASH-002"       # 빠른 분류 (도메인, candidate scoring) — v3 API
