@@ -242,3 +242,30 @@ async def verify_document(
         VerificationReport
     """
     return await VerificationPipeline(config).run(source, source_type, source_text)
+
+
+# [v2 - 김예슬] 객체형 진입점 — 같은 config로 여러 번 검증할 때 (함수형은 일회성).
+class VerificationEngine:
+    """config를 한 번 주입해 두고 여러 문서를 검증하는 객체형 진입점.
+
+    - 함수형(`verify_text`/`verify_document`): 매번 config를 받는 *일회성* 호출에 편함.
+    - 객체형(`VerificationEngine`): 엔진을 만들어 두고 재사용.
+
+        engine = VerificationEngine(config)
+        r1 = await engine.verify_text("문장1")
+        r2 = await engine.verify_document(url, source_type="url")
+    """
+
+    def __init__(self, config: dict | None = None):
+        self._pipeline = VerificationPipeline(config)
+
+    async def verify_text(self, text: str) -> VerificationReport:
+        return await self._pipeline.run(text, "text")
+
+    async def verify_document(
+        self,
+        source: str,
+        source_type: str = "url",
+        source_text: str | None = None,
+    ) -> VerificationReport:
+        return await self._pipeline.run(source, source_type, source_text)
