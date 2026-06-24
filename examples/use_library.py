@@ -7,12 +7,13 @@
     NCP_API_KEY=...                 # HCX 사용 시 (LLM·임베딩·reranker 공용)
     UPSTAGE_API_KEY=up-...          # Upstage(Solar) LLM 사용 시
     OPENAI_API_KEY=sk-...           # OpenAI provider 사용 시
+    GEMINI_API_KEY=...              # Gemini(Google) provider 사용 시 (또는 GOOGLE_API_KEY)
     KOSIS_API_KEY=...               # KOSIS 데이터 소스
     PGVECTOR_DSN=postgresql://...   # 카탈로그(pgvector)
     CUSTOM_DB_DSN=...               # custom_db 데이터 소스 사용 시
 
 provider 전환:
-    config/default.yaml 의 `llm.provider` 를 hcx | openai | upstage 로 변경.
+    config/default.yaml 의 `llm.provider` 를 hcx | openai | upstage | gemini 로 변경.
     (예시는 config/default_example.yaml 참고)
 
 실행:
@@ -51,11 +52,21 @@ async def example_with_config():
             "provider": "upstage",
             "api_key_env": "UPSTAGE_API_KEY",
             "base_url": "https://api.upstage.ai/v1",
-            "models": {"heavy": "solar-pro", "light": "solar-mini", "structured": "solar-pro"},
+            "models": {"heavy": "solar-pro2", "light": "solar-mini", "structured": "solar-pro2"},
         },
     }
     report = await structverify.verify_text("검증할 문장", config=config)
     print(report)
+
+
+# ── 4) 객체형 진입점 — 같은 config로 여러 번 재사용 (VerificationEngine) ──
+async def example_engine():
+    from structverify import VerificationEngine
+
+    engine = VerificationEngine()                      # config 생략 시 config/default.yaml
+    r1 = await engine.verify_text("문장 1")
+    r2 = await engine.verify_document("https://example.com", source_type="url")
+    print(r1, r2)
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@
 |---|---|---|
 | DataSource 추상화 | ✅ | `retrieval/base.py::BaseDataSource`, `retrieval/registry.py`(`register_datasource`/`build_datasource`) |
 | KOSIS 격리 | ✅ | `kosis_source.py` → `@register_datasource("kosis")` 한 구현으로 분리 |
-| 라이브러리 진입점 | 🚧 | `structverify/__init__.py` → `verify_text`, `VerificationPipeline` (문서 입력 `verify_document`는 미노출) |
+| 라이브러리 진입점 | ✅ | `__init__.py` → `verify_text`/`verify_document`/`VerificationEngine`/`VerificationPipeline` (PEP 562 지연 로딩) |
 | 패키징 | 🚧 | `pyproject.toml`(name=structverify, 0.2.0, setuptools) 있음 — 설치/빌드 검증 필요 |
 | config 데이터소스 선택 | 🚧 | `data_sources.enabled: ["kosis"]  # 회사: ["custom_db","custom_csv"]` 슬롯만 존재 |
 | custom_csv / custom_db | 📋 | registry에 `kosis` 하나뿐 — 구현 없음 |
@@ -92,7 +92,7 @@ Phase 1 (골격) → Phase 2 (custom_csv) → Phase 3 (BYO config/LLM) → Phase
 
 | # | 결정 | 비고 |
 |---|---|---|
-| (a) | 공개 진입점 형태 | `verify_text`/`verify_document` 함수형 ↔ `VerificationEngine(config)` 객체형 (둘 다 제공?) |
+| (a) | ✅ 공개 진입점 형태 | **함수형 + 객체형 둘 다 제공** 결정 — 일회성은 `verify_text`/`verify_document`, 재사용은 `VerificationEngine(config)` |
 | (b) | custom 소스 우선순위 | `custom_csv`(쉬움) 먼저 → `custom_db`(DSN) 후속 — 본 계획 기본값 |
 | (c) | sv_platform 소비 방식 | in-tree import 유지 ↔ 설치 패키지로 분리 |
 | (d) | LLM provider 범위 | 우선 hcx+openai ↔ local(vLLM)까지 |
@@ -125,22 +125,33 @@ pip install -e .            # (+ pip install openai  — upstage/openai provider
 | `NCP_API_KEY` | HCX (LLM·임베딩·reranker 공용) |
 | `UPSTAGE_API_KEY` | Upstage(Solar) LLM |
 | `OPENAI_API_KEY` | OpenAI provider |
+| `GEMINI_API_KEY` | Gemini(Google) provider (또는 `GOOGLE_API_KEY`) |
 | `KOSIS_API_KEY` | KOSIS 데이터 소스 |
 | `PGVECTOR_DSN` | 카탈로그(pgvector) |
 | `CUSTOM_DB_DSN` | custom_db 데이터 소스 |
 
 ### LLM provider 전환
-`config/default.yaml` 의 `llm.provider` 를 `hcx | openai | upstage` 로 변경. HCX 키가 없으면 Upstage(Solar, OpenAI 호환):
+`config/default.yaml` 의 `llm.provider` 를 `hcx | openai | upstage | gemini` 로 변경. HCX 키가 없으면 Upstage(Solar) 또는 Gemini(둘 다 OpenAI 호환):
 
 ```yaml
 llm:
   provider: "upstage"
   api_key_env: "UPSTAGE_API_KEY"
   base_url: "https://api.upstage.ai/v1"
-  models: { heavy: "solar-pro", light: "solar-mini", structured: "solar-pro" }
+  models: { heavy: "solar-pro2", light: "solar-mini", structured: "solar-pro2" }  # 최신은 solar-pro3
 ```
 
-※ 임베딩/카탈로그는 아직 HCX-EMB 기준 → Upstage만으로 전체 E2E는 임베딩 전환(재임베딩) 후 가능 (Phase 3, 박재윤).
+Gemini(Google)도 동일하게 OpenAI 호환:
+
+```yaml
+llm:
+  provider: "gemini"
+  api_key_env: "GEMINI_API_KEY"   # 또는 GOOGLE_API_KEY
+  base_url: "https://generativelanguage.googleapis.com/v1beta/openai/"
+  models: { heavy: "gemini-2.5-pro", light: "gemini-2.5-flash", structured: "gemini-2.5-pro" }
+```
+
+※ 임베딩/카탈로그는 아직 HCX-EMB 기준 → Upstage/Gemini만으로 전체 E2E는 임베딩 전환(재임베딩) 후 가능 (Phase 3, 박재윤).
 
 ### 사용 (코드)
 ```python
@@ -153,7 +164,9 @@ report = asyncio.run(structverify.verify_text("올해 출생아 수는 2만 명�
 
 ## 9. 진행 현황
 
-- ✅ [Phase 1] 공개 API `verify_document` 추가 (`pipeline.py` / `__init__.py`)
+- ✅ [Phase 1] 공개 API 확정 — `verify_text`/`verify_document`/`VerificationEngine`/`VerificationPipeline` (`pipeline.py`/`__init__.py`)
+- ✅ [Phase 1] **지연 로딩(PEP 562)** — `import structverify` 가 무거운 deps(trafilatura 등) 안 끌어옴 → 외부 디렉토리 import 성공 = **DoD 충족**
+- ✅ [Phase 1] 진입점 결정 — 함수형(일회성) + 객체형(`VerificationEngine`, 재사용) 둘 다 제공
 - ✅ [Phase 3 일부] LLM provider `upstage`(Solar) 추가 (`llm_client.py`)
 - ✅ 예시 파일 — `config/default_example.yaml`(Upstage 반영), `examples/use_library.py`
 - 📋 나머지는 4절 Phase·역할분담 참고 (이슈로 트래킹)
