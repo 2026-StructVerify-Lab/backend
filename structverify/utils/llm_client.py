@@ -173,8 +173,26 @@ class LLMClient:
         # provider가 upstage인데 models 미지정이면 Solar 기본 모델로 교체
         if self.provider == "upstage" and "models" not in self.config:
             self.models = {
-                "heavy": "solar-pro", "light": "solar-mini",
-                "structured": "solar-pro", "reasoning": "solar-pro",
+                "heavy": "solar-pro2", "light": "solar-mini",     # 최신 flagship: solar-pro3
+                "structured": "solar-pro2", "reasoning": "solar-pro2",
+            }
+            self.default_model = self.models["heavy"]
+
+        # [v2 - 김예슬] Gemini(Google) 지원 — OpenAI 호환 엔드포인트.
+        #   provider: "gemini" + GEMINI_API_KEY(또는 GOOGLE_API_KEY). (pip install openai 필요)
+        self.gemini_base_url = self.config.get(
+            "base_url", "https://generativelanguage.googleapis.com/v1beta/openai/"
+        )
+        self.gemini_api_key = (
+            self.config.get("_direct_api_key")
+            or os.environ.get(self.config.get("api_key_env", "GEMINI_API_KEY"), "")
+            or os.environ.get("GEMINI_API_KEY", "")
+            or os.environ.get("GOOGLE_API_KEY", "")
+        )
+        if self.provider == "gemini" and "models" not in self.config:
+            self.models = {
+                "heavy": "gemini-2.5-pro", "light": "gemini-2.5-flash",
+                "structured": "gemini-2.5-pro", "reasoning": "gemini-2.5-pro",
             }
             self.default_model = self.models["heavy"]
 
@@ -211,6 +229,8 @@ class LLMClient:
             return await self._call_openai(prompt, system_prompt, temperature, model_tier)
         elif self.provider == "upstage":  # [v2 - 김예슬] HCX 키 없을 때 Upstage(Solar)
             return await self._call_upstage(prompt, system_prompt, temperature, model_tier)
+        elif self.provider == "gemini":  # [v2 - 김예슬]
+            return await self._call_gemini(prompt, system_prompt, temperature, model_tier)
         raise ValueError(f"미지원 provider: {self.provider}")
 
     async def generate_json(
@@ -263,6 +283,8 @@ class LLMClient:
             return raw
         elif self.provider == "upstage":  # [v2 - 김예슬]
             return await self._call_upstage_structured(prompt, schema, system_prompt)
+        elif self.provider == "gemini":  # [v2 - 김예슬]
+            return await self._call_gemini_structured(prompt, schema, system_prompt)
         raise ValueError(f"미지원 provider: {self.provider}")
 
     async def generate_light(self, prompt: str, system_prompt: str | None = None) -> str:
@@ -611,16 +633,19 @@ class LLMClient:
         content = resp.choices[0].message.content
         return json.loads(content)
 
-    # ── [v2 - 김예슬] Upstage (Solar) — OpenAI 호환 (base_url만 다름) ──────────
+    # ── [v2 - 김예슬] OpenAI 호환 provider (upstage·gemini) — base_url만 다름 ──
 
-    async def _call_upstage(
+    async def _call_openai_compatible(
         self,
         prompt: str,
         system_prompt: str | None,
         temperature: float | None,
         model_tier: str,
+        *,
+        base_url: str,
+        api_key: str,
     ) -> str:
-        """Upstage Solar Chat Completions (OpenAI 호환)."""
+        """OpenAI 호환 Chat Completions 공통 호출 (upstage·gemini가 공유)."""
         try:
             from openai import AsyncOpenAI
         except ImportError:
@@ -630,7 +655,7 @@ class LLMClient:
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
-        client = AsyncOpenAI(api_key=self.upstage_api_key, base_url=self.upstage_base_url)
+        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         resp = await client.chat.completions.create(
             model=model, messages=messages,
             temperature=temperature if temperature is not None else self.temperature,
@@ -638,15 +663,18 @@ class LLMClient:
         )
         return resp.choices[0].message.content
 
-    async def _call_upstage_structured(
+    async def _call_openai_compatible_structured(
         self,
         prompt: str,
         schema: dict[str, Any],
         system_prompt: str | None,
+        *,
+        base_url: str,
+        api_key: str,
     ) -> dict[str, Any]:
-        """Upstage 구조화 응답.
-        Solar는 json_schema strict를 보장하지 않으므로, json_object 모드 + 스키마를
-        프롬프트 힌트로 주고 응답을 파싱한다(response_format 미지원 시 일반 호출로 폴백).
+        """OpenAI 호환 구조화 응답 공통 호출.
+        json_schema strict를 보장 못하는 provider가 있어, json_object 모드 + 스키마를
+        프롬프트 힌트로 주고 파싱한다(response_format 미지원 시 일반 호출로 폴백).
         """
         try:
             from openai import AsyncOpenAI
@@ -663,7 +691,7 @@ class LLMClient:
             {"role": "user", "content": prompt},
         ]
         model = self.models.get("structured", self.default_model)
-        client = AsyncOpenAI(api_key=self.upstage_api_key, base_url=self.upstage_base_url)
+        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         try:
             resp = await client.chat.completions.create(
                 model=model, messages=messages,
@@ -676,6 +704,32 @@ class LLMClient:
                 temperature=self.temperature, max_tokens=self.max_tokens,
             )
         return _parse_json_response(resp.choices[0].message.content)
+
+    # Upstage (Solar)
+    async def _call_upstage(self, prompt, system_prompt, temperature, model_tier) -> str:
+        return await self._call_openai_compatible(
+            prompt, system_prompt, temperature, model_tier,
+            base_url=self.upstage_base_url, api_key=self.upstage_api_key,
+        )
+
+    async def _call_upstage_structured(self, prompt, schema, system_prompt) -> dict[str, Any]:
+        return await self._call_openai_compatible_structured(
+            prompt, schema, system_prompt,
+            base_url=self.upstage_base_url, api_key=self.upstage_api_key,
+        )
+
+    # Gemini (Google) — OpenAI 호환 엔드포인트
+    async def _call_gemini(self, prompt, system_prompt, temperature, model_tier) -> str:
+        return await self._call_openai_compatible(
+            prompt, system_prompt, temperature, model_tier,
+            base_url=self.gemini_base_url, api_key=self.gemini_api_key,
+        )
+
+    async def _call_gemini_structured(self, prompt, schema, system_prompt) -> dict[str, Any]:
+        return await self._call_openai_compatible_structured(
+            prompt, schema, system_prompt,
+            base_url=self.gemini_base_url, api_key=self.gemini_api_key,
+        )
 
 
 # ── 유틸리티 ────────────────────────────────────────────────────────────────
