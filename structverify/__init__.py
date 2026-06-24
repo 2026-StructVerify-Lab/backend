@@ -13,7 +13,7 @@ verify_document()
 2. verify_text() 함수 실행 시 VerificationPipeline.run() 호출 여부
 
 """
-from structverify.core.pipeline import verify_text, VerificationPipeline
+from structverify.core.pipeline import verify_text, verify_document, VerificationPipeline
 
-__all__ = ["verify_text", "VerificationPipeline"]
+__all__ = ["verify_text", "verify_document", "VerificationPipeline"]
 __version__ = "0.2.0"

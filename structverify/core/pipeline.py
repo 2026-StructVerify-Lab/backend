@@ -220,3 +220,25 @@ async def verify_text(text: str, config: dict | None = None) -> VerificationRepo
         VerificationReport
     """
     return await VerificationPipeline(config).run(text, "text")
+
+
+# [v2 - 김예슬] 문서 입력(URL/PDF/DOCX/TEXT) 공개 진입점
+async def verify_document(
+    source: str,
+    source_type: str = "url",
+    config: dict | None = None,
+    source_text: str | None = None,
+) -> VerificationReport:
+    """
+    최상위 API — 문서 입력(URL/PDF/DOCX/TEXT) → 검증 보고서.
+
+    Args:
+        source: URL · 파일 경로 · 또는 본문 텍스트
+        source_type: "url" | "pdf" | "docx" | "text"
+        config: 선택적 설정 dict
+        source_text: 이미 추출된 본문이 있으면 전달(중복 추출 방지)
+
+    Returns:
+        VerificationReport
+    """
+    return await VerificationPipeline(config).run(source, source_type, source_text)
