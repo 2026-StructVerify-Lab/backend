@@ -97,6 +97,12 @@ data_sources:
     base_path: "./uploads/custom"
     catalog_json: ""                          # 표 목록 JSON (필수)
     embedding_cached: true
+    column_mapping:        # CSV 컬럼 → 표준 필드
+      indicator: indicator
+      time_period: year
+      region: region
+      value: value
+      unit: unit
 
   # custom_db — 회사 자체 DB
   custom_db:
