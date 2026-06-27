@@ -53,6 +53,7 @@ kosis_catalog_cache.json
 
 # result files
 *.csv
+!tests/fixtures/*.csv
 *.zip
 
 # python
