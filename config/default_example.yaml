@@ -64,8 +64,8 @@ agent:
 # === Data sources (KOSIS만 → multi-source 일반화) ===
 # 기존 kosis: 섹션은 *그대로 유지*. 여기서는 *추상화 레이어*만 추가.
 data_sources:
-  enabled: ["kosis"]                          # 회사: ["custom_db", "custom_csv"]
-  default_source: "kosis"
+  enabled: ["kosis"]                          # custom_csv 쓰려면 여기에 "custom_csv" 추가
+  # default_source: "kosis"                   # (선택) 기본 검색 소스. 미지정 시 코드 기본 "kosis"
 
   # KOSIS 데이터소스 — 검색/ranking/관련성 가드 설정
   # 주의: 여기 'kosis' 섹션은 KOSISDataSource 생성자에 전달됨 (self._connector_config).
@@ -91,13 +91,12 @@ data_sources:
       row_match_llm_fallback: true   # P33c: _select_best_row 매칭 0건일 때 LLM rescue
       row_match_model_tier: "light"
 
-  # custom_csv — 회사 업로드 파일
+  # custom_csv — 회사 업로드 CSV (BaseDataSource). 켜기: 위 data_sources.enabled 에 "custom_csv" 추가
+  #   CSV 형태: indicator,year,region,value,unit (행 = 시점별 값)
   custom_csv:
-    enabled: false
-    base_path: "./uploads/custom"
-    catalog_json: ""                          # 표 목록 JSON (필수)
-    embedding_cached: true
-    column_mapping:        # CSV 컬럼 → 표준 필드
+    # base_path: "./uploads/custom"
+    # csv_path: "./uploads/custom/my_data.csv"   # 단일 CSV 직접 지정 (없으면 base_path+catalog_json)
+    column_mapping:        # CSV 컬럼 → 표준 필드 (코드가 읽는 키)
       indicator: indicator
       time_period: year
       region: region
