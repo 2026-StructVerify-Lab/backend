@@ -22,10 +22,13 @@ import psycopg2
 from psycopg2.extras import execute_values
 from dotenv import load_dotenv
 
+from structverify.core.config_loader import load_config
+from structverify.utils.embedding_client import EmbeddingClient
+
 # 환경변수 로드
 load_dotenv()
 
-HCX_API_KEY = os.getenv("CLOVASTUDIO_API_KEY")
+# [#67-D] HCX_API_KEY 모듈 전역 제거 → EmbeddingClient(config.embedding)로 일원화.
 KOSIS_API_KEY = os.getenv("KOSIS_API_KEY")
 PG_CONN = {
     "host": os.getenv("POSTGRES_HOST"),
@@ -94,7 +97,15 @@ async def fetch_kosis_deep_meta(client, org_id, tbl_id):
     # Y, M, Q 다 돌았는데도 없으면 None 반환
     return None
 
-async def process_single_table(client, item, semaphore_api, semaphore_hcx):
+async def process_single_table(client, item, semaphore_api, semaphore_hcx, embedder=None):
+    # [#67-D] 인라인 HCX 임베딩 → 공용 EmbeddingClient.embed 로 교체.
+    #   embed()는 실패 시 None → 기존 'skip on failure'(None은 update_records에서 제외) 보존.
+    #   embedder 미주입 시 기본 EmbeddingClient (hcx + CLOVASTUDIO_API_KEY) → 기존 키 동작.
+    #   주의: 단건 embed 경로엔 429 재시도가 없음(_embed_batch_hcx에만 이식). 재실행형
+    #         스크립트라 이번 run에서 누락(skip)된 표는 다음 run(embedding IS NULL)이 보강.
+    if embedder is None:
+        embedder = EmbeddingClient({})
+
     async with semaphore_api:
         meta = await fetch_kosis_deep_meta(client, item["org_id"], item["stat_id"])
 
@@ -103,26 +114,16 @@ async def process_single_table(client, item, semaphore_api, semaphore_hcx):
         embed_text += f" | 항목: {meta['items']} | 분류: {meta['categories']} | 단위: {meta['units']}"
 
     async with semaphore_hcx:
-        for retry in range(5):  # 3 → 5
-            try:
-                resp = await client.post(
-                    "https://clovastudio.stream.ntruss.com/v1/api-tools/embedding/v2",
-                    headers={"Authorization": f"Bearer {HCX_API_KEY}", "Content-Type": "application/json"},
-                    json={"text": embed_text}, timeout=30
-                )
-                data = resp.json()
-                if data.get("result"):
-                    return (data["result"]["embedding"], item["stat_id"])
-                if resp.status_code == 429:  # ← 추가
-                    wait = 2 ** retry
-                    await asyncio.sleep(wait)
-                    continue
-            except Exception:
-                await asyncio.sleep(2 ** retry)
-    return None
+        vec = await embedder.embed(embed_text)
+    if vec is None:
+        return None
+    return (vec, item["stat_id"])
 
 async def main():
     print("🚀 KOSIS 딥 메타데이터 수집 및 벡터 DB 재구축 시작 (안정화 버전)")
+
+    # [#67-D] config.embedding 으로 EmbeddingClient 구성 (없으면 {} → hcx + CLOVASTUDIO_API_KEY)
+    embedder = EmbeddingClient(load_config().get("embedding", {}))
 
     with open(CATALOG_JSON_FILE, 'r', encoding='utf-8') as f:
         catalog = json.load(f)
@@ -149,7 +150,7 @@ async def main():
         for i in range(start_index, len(target_catalog), BATCH_SIZE):
             batch = target_catalog[i:i+BATCH_SIZE]
 
-            tasks = [process_single_table(client, item, semaphore_api, semaphore_hcx) for item in batch]
+            tasks = [process_single_table(client, item, semaphore_api, semaphore_hcx, embedder) for item in batch]
             results = await asyncio.gather(*tasks)
 
             update_records = [res for res in results if res is not None]
