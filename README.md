@@ -25,6 +25,8 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
+> ⚠️ venv는 `python -m venv` 또는 `uv venv --seed` 로 생성 (`uv venv` 는 pip 미포함이라 `pip install -e .` 가 실패)
+
 API 키 / DB 설정 (env 또는 `.env`):
 ```
 NCP_API_KEY=<NCP CLOVA Studio key — HCX-003/007/DASH-002/EMB-V2 공용>
