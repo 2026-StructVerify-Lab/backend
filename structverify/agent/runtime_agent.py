@@ -125,6 +125,8 @@ class RuntimeAgent:
         kosis_cfg = {
             **self.config.get("kosis", {}),
             "llm": self.config.get("llm", {}),
+            # [#67-D A-2] config.embedding 을 CatalogSearchTool까지 전달 (provider 선택)
+            "embedding": self.config.get("embedding", {}),
         }
         self.kosis = KOSISConnector(config=kosis_cfg)
 
@@ -723,6 +725,8 @@ class RuntimeAgent:
             # 2) DataSource 등록 (KOSIS)
             ds_cfg = self.config.get("data_sources") or {}
             kosis_ds_cfg = dict(ds_cfg.get("kosis") or self.config.get("kosis") or {})
+            # [#67-D A-2] top-level config.embedding 을 datasource config에 실어 CatalogSearchTool까지 전달
+            kosis_ds_cfg.setdefault("embedding", self.config.get("embedding", {}))
             datasources = {
                 ds.name: ds
                 for ds in build_all_enabled({
