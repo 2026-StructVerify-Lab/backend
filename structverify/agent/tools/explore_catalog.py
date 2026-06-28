@@ -27,6 +27,7 @@ import os
 from typing import Any
 from collections import defaultdict
 from structverify.utils.logger import get_logger
+from structverify.utils.embedding_client import EmbeddingClient
 
 from ..schemas import ActionType
 from .base import ToolBase, ToolContext, ToolResult, register_tool
@@ -60,6 +61,8 @@ class ExploreCatalogTool(ToolBase):
         context: ToolContext,
     ) -> ToolResult:
         query = (input_data.get("query") or "").strip()
+        # [#67-D] context.config.embedding 을 _embed_query가 쓰도록 self에 보관.
+        self._embedding_config = (context.config or {}).get("embedding") or {}
 
         def _safe_int(k, default, lo, hi):
             try:
@@ -287,30 +290,18 @@ class ExploreCatalogTool(ToolBase):
     # ── 임베딩 helper ──────────────────────────────────────────────
 
     async def _embed_query(self, text: str) -> list[float] | None:
-        """Naver Clovastudio 임베딩 API 호출.
+        """텍스트 → 임베딩. 공용 EmbeddingClient 사용 (#67-D).
 
-        키 우선순위:
-          1. NCP_API_KEY (새 NCP 통합 인증, 'nv-...')
-          2. CLOVASTUDIO_API_KEY (구식)
+        키 우선순위: 원래 NCP_API_KEY 우선이라 api_key_env 기본을 "NCP_API_KEY"로 둠.
+        config.embedding.api_key_env 가 있으면 그 값을 우선.
+        주의: 원래 NCP_API_KEY or CLOVASTUDIO_API_KEY 폴백이었으나 EmbeddingClient는
+        단일 api_key_env → NCP만 1순위(NCP 없을 때 CLOVA 폴백은 제거됨).
         """
-        api_key = os.environ.get("NCP_API_KEY") or os.environ.get("CLOVASTUDIO_API_KEY")
-        if not api_key:
-            logger.debug("[explore_catalog] NCP_API_KEY/CLOVASTUDIO_API_KEY 둘 다 없음")
-            return None
+        emb_cfg = dict(getattr(self, "_embedding_config", None) or {})
+        emb_cfg.setdefault("api_key_env", "NCP_API_KEY")
         try:
-            import httpx
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(
-                    "https://clovastudio.stream.ntruss.com/v1/api-tools/embedding/v2",
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={"text": text},
-                )
-                data = resp.json()
-                return data.get("result", {}).get("embedding")
-        except Exception as e:
+            return await EmbeddingClient(emb_cfg).embed(text)
+        except Exception as e:  # noqa: BLE001
             logger.debug(f"[explore_catalog] _embed_query 실패: {e}")
             return None
 
