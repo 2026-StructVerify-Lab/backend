@@ -118,6 +118,17 @@ class _HCXRateLimiter:
 _hcx_rate_limiter = _HCXRateLimiter()
 
 
+# [v2 - 김예슬 / #64] provider별 기본 모델 티어 매핑.
+#   config.llm.models 를 안 바꾸고 provider 만 바꿔도 동작하도록, provider별 기본 모델을 둔다.
+#   (default.yaml 의 models 는 HCX 이름이라, provider 만 upstage/gemini 로 바꾸면 그대로 쓰면 404)
+_PROVIDER_DEFAULT_MODELS = {
+    "hcx":     {"heavy": "HCX-003",       "light": "HCX-DASH-002",      "structured": "HCX-007",       "reasoning": "HCX-003"},
+    "openai":  {"heavy": "gpt-4o",        "light": "gpt-4o-mini",       "structured": "gpt-4o",        "reasoning": "gpt-4o"},
+    "upstage": {"heavy": "solar-pro2",    "light": "solar-mini",        "structured": "solar-pro2",    "reasoning": "solar-pro2"},
+    "gemini":  {"heavy": "gemini-2.5-pro", "light": "gemini-2.5-flash", "structured": "gemini-2.5-pro", "reasoning": "gemini-2.5-pro"},
+}
+
+
 class LLMClient:
     """
     HCX(NCP CLOVA Studio) + OpenAI 통합 클라이언트.
@@ -136,13 +147,21 @@ class LLMClient:
     def __init__(self, config: dict | None = None):
         self.config = config or {}
         self.provider = self.config.get("provider", "hcx")
-        self.models = self.config.get("models", {
-            "heavy":      "HCX-003",
-            "light":      "HCX-DASH-002",
-            "structured": "HCX-007",
-            "reasoning":  "HCX-003",
-        })
-        self.default_model = self.models.get("heavy", "HCX-003")
+        # [v2 - 김예슬 / #64] provider별 모델 티어 매핑 — provider 만 바꿔도 동작하게.
+        #   · config.models 없으면 provider 기본값.
+        #   · provider!=hcx 인데 config.models 가 HCX 이름이면(=default.yaml 잔재) 무시하고 provider 기본값.
+        #   · 그 외엔 provider 기본값 위에 config.models 를 덮어써 일부 티어만 override 허용.
+        _defaults = _PROVIDER_DEFAULT_MODELS.get(self.provider, _PROVIDER_DEFAULT_MODELS["hcx"])
+        _user_models = self.config.get("models")
+        if not _user_models:
+            self.models = dict(_defaults)
+        elif self.provider != "hcx" and any(
+            str(v).upper().startswith("HCX") for v in _user_models.values()
+        ):
+            self.models = dict(_defaults)
+        else:
+            self.models = {**_defaults, **_user_models}
+        self.default_model = self.models.get("heavy") or next(iter(self.models.values()), "HCX-003")
         self.temperature = float(self.config.get("temperature", 0.1))
         self.max_tokens = int(self.config.get("max_tokens", 2048))
 
@@ -161,6 +180,29 @@ class LLMClient:
             self.openai_api_key = openai_key_env
         else:
             self.openai_api_key = os.environ.get(openai_key_env, "")
+
+        # [v2 - 김예슬] Upstage(Solar) 지원 — OpenAI 호환 API (base_url만 다름).
+        #   provider: "upstage" 로 두면 HCX 키 없이 Upstage 키로 동작. (pip install openai 필요)
+        self.upstage_base_url = self.config.get("base_url", "https://api.upstage.ai/v1")
+        self.upstage_api_key = (
+            self.config.get("_direct_api_key")
+            or os.environ.get(self.config.get("api_key_env", "UPSTAGE_API_KEY"), "")
+            or os.environ.get("UPSTAGE_API_KEY", "")
+        )
+        # (upstage 모델 티어는 _PROVIDER_DEFAULT_MODELS["upstage"]에서 결정 — #64)
+
+        # [v2 - 김예슬] Gemini(Google) 지원 — OpenAI 호환 엔드포인트.
+        #   provider: "gemini" + GEMINI_API_KEY(또는 GOOGLE_API_KEY). (pip install openai 필요)
+        self.gemini_base_url = self.config.get(
+            "base_url", "https://generativelanguage.googleapis.com/v1beta/openai/"
+        )
+        self.gemini_api_key = (
+            self.config.get("_direct_api_key")
+            or os.environ.get(self.config.get("api_key_env", "GEMINI_API_KEY"), "")
+            or os.environ.get("GEMINI_API_KEY", "")
+            or os.environ.get("GOOGLE_API_KEY", "")
+        )
+        # (gemini 모델 티어는 _PROVIDER_DEFAULT_MODELS["gemini"]에서 결정 — #64)
 
         # [2026-05-21] 프로세스 전역 HCX rate limit — config에서 min_call_interval_ms.
         # 여러 LLMClient 인스턴스가 *같은 limiter*를 공유 → 모든 HCX 호출 직렬 간격 보장.
@@ -193,6 +235,10 @@ class LLMClient:
             return await self._call_hcx_v1(prompt, system_prompt, temperature, model)
         elif self.provider == "openai":
             return await self._call_openai(prompt, system_prompt, temperature, model_tier)
+        elif self.provider == "upstage":  # [v2 - 김예슬] HCX 키 없을 때 Upstage(Solar)
+            return await self._call_upstage(prompt, system_prompt, temperature, model_tier)
+        elif self.provider == "gemini":  # [v2 - 김예슬]
+            return await self._call_gemini(prompt, system_prompt, temperature, model_tier)
         raise ValueError(f"미지원 provider: {self.provider}")
 
     async def generate_json(
@@ -243,6 +289,10 @@ class LLMClient:
             # OpenAI도 response_format으로 JSON Schema 지원
             raw = await self._call_openai_structured(prompt, schema, system_prompt)
             return raw
+        elif self.provider == "upstage":  # [v2 - 김예슬]
+            return await self._call_upstage_structured(prompt, schema, system_prompt)
+        elif self.provider == "gemini":  # [v2 - 김예슬]
+            return await self._call_gemini_structured(prompt, schema, system_prompt)
         raise ValueError(f"미지원 provider: {self.provider}")
 
     async def generate_light(self, prompt: str, system_prompt: str | None = None) -> str:
@@ -590,6 +640,104 @@ class LLMClient:
         )
         content = resp.choices[0].message.content
         return json.loads(content)
+
+    # ── [v2 - 김예슬] OpenAI 호환 provider (upstage·gemini) — base_url만 다름 ──
+
+    async def _call_openai_compatible(
+        self,
+        prompt: str,
+        system_prompt: str | None,
+        temperature: float | None,
+        model_tier: str,
+        *,
+        base_url: str,
+        api_key: str,
+    ) -> str:
+        """OpenAI 호환 Chat Completions 공통 호출 (upstage·gemini가 공유)."""
+        try:
+            from openai import AsyncOpenAI
+        except ImportError:
+            raise ImportError("pip install openai")
+        model = self.models.get(model_tier, self.default_model)
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        resp = await client.chat.completions.create(
+            model=model, messages=messages,
+            temperature=temperature if temperature is not None else self.temperature,
+            max_tokens=self.max_tokens,
+        )
+        return resp.choices[0].message.content
+
+    async def _call_openai_compatible_structured(
+        self,
+        prompt: str,
+        schema: dict[str, Any],
+        system_prompt: str | None,
+        *,
+        base_url: str,
+        api_key: str,
+    ) -> dict[str, Any]:
+        """OpenAI 호환 구조화 응답 공통 호출.
+        json_schema strict를 보장 못하는 provider가 있어, json_object 모드 + 스키마를
+        프롬프트 힌트로 주고 파싱한다(response_format 미지원 시 일반 호출로 폴백).
+        """
+        try:
+            from openai import AsyncOpenAI
+        except ImportError:
+            raise ImportError("pip install openai")
+        sys_p = (system_prompt or "")
+        sys_p += (
+            "\n\n반드시 아래 JSON 스키마에 맞는 JSON 객체 하나만 출력하세요. "
+            "설명·코드펜스 없이 JSON만 출력:\n"
+            + json.dumps(schema, ensure_ascii=False)
+        )
+        messages = [
+            {"role": "system", "content": sys_p},
+            {"role": "user", "content": prompt},
+        ]
+        model = self.models.get("structured", self.default_model)
+        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        try:
+            resp = await client.chat.completions.create(
+                model=model, messages=messages,
+                temperature=self.temperature, max_tokens=self.max_tokens,
+                response_format={"type": "json_object"},
+            )
+        except Exception:
+            resp = await client.chat.completions.create(
+                model=model, messages=messages,
+                temperature=self.temperature, max_tokens=self.max_tokens,
+            )
+        return _parse_json_response(resp.choices[0].message.content)
+
+    # Upstage (Solar)
+    async def _call_upstage(self, prompt, system_prompt, temperature, model_tier) -> str:
+        return await self._call_openai_compatible(
+            prompt, system_prompt, temperature, model_tier,
+            base_url=self.upstage_base_url, api_key=self.upstage_api_key,
+        )
+
+    async def _call_upstage_structured(self, prompt, schema, system_prompt) -> dict[str, Any]:
+        return await self._call_openai_compatible_structured(
+            prompt, schema, system_prompt,
+            base_url=self.upstage_base_url, api_key=self.upstage_api_key,
+        )
+
+    # Gemini (Google) — OpenAI 호환 엔드포인트
+    async def _call_gemini(self, prompt, system_prompt, temperature, model_tier) -> str:
+        return await self._call_openai_compatible(
+            prompt, system_prompt, temperature, model_tier,
+            base_url=self.gemini_base_url, api_key=self.gemini_api_key,
+        )
+
+    async def _call_gemini_structured(self, prompt, schema, system_prompt) -> dict[str, Any]:
+        return await self._call_openai_compatible_structured(
+            prompt, schema, system_prompt,
+            base_url=self.gemini_base_url, api_key=self.gemini_api_key,
+        )
 
 
 # ── 유틸리티 ────────────────────────────────────────────────────────────────

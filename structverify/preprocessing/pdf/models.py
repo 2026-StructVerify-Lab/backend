@@ -5,7 +5,7 @@ preprocessing/pdf/models.py — PDF 파이프라인 내부용 데이터 구조
 * SIR Tree 로의 변환은 상위 단계(`sir_builder.py`)에서 수행.
 """
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass

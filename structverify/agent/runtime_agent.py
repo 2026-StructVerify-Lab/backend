@@ -125,6 +125,8 @@ class RuntimeAgent:
         kosis_cfg = {
             **self.config.get("kosis", {}),
             "llm": self.config.get("llm", {}),
+            # [#67-D A-2] config.embedding 을 CatalogSearchTool까지 전달 (provider 선택)
+            "embedding": self.config.get("embedding", {}),
         }
         self.kosis = KOSISConnector(config=kosis_cfg)
 
@@ -134,6 +136,28 @@ class RuntimeAgent:
         from structverify.graph.graph_store import GraphStore
         graph_store_cfg = (self.config.get("graph") or {}).get("store") or {}
         self.graph_store = GraphStore(config=graph_store_cfg)
+
+    def _build_datasources(self) -> dict:
+        """config.data_sources.enabled 기반 {name: DataSource} 구성 (#66).
+
+        enabled 미설정이면 ["kosis"] (동작 보존). 소스별 config는 data_sources.<name>.
+        kosis는 embedding 주입 유지(#67-D A-2). custom_csv 등록 트리거 import 포함.
+        """
+        import structverify.retrieval.kosis_source  # noqa: F401 — @register_datasource
+        import structverify.retrieval.custom_csv_source  # noqa: F401 — @register_datasource
+        from structverify.retrieval.registry import build_all_enabled
+
+        ds_cfg = self.config.get("data_sources") or {}
+        enabled = list(ds_cfg.get("enabled", ["kosis"]))
+
+        kosis_ds_cfg = dict(ds_cfg.get("kosis") or self.config.get("kosis") or {})
+        kosis_ds_cfg.setdefault("embedding", self.config.get("embedding", {}))
+
+        build_cfg = {"enabled": enabled}
+        for name in enabled:
+            build_cfg[name] = kosis_ds_cfg if name == "kosis" else (ds_cfg.get(name) or {})
+
+        return {ds.name: ds for ds in build_all_enabled(build_cfg)}
 
     async def process(self, sir_doc: SIRDocument) -> tuple[
         list[Claim], list[VerificationResult], list[GraphNode], list[GraphEdge]
@@ -680,8 +704,6 @@ class RuntimeAgent:
         from structverify.agent.loop import agent_loop, LoopConfig
         from structverify.agent.reflect import ReflectAgent, ReflectConfig
         from structverify.agent.workspace import build_workspace
-        from structverify.retrieval.registry import build_all_enabled
-        import structverify.retrieval.kosis_source  # noqa: F401 — @register_datasource 트리거
 
         agent_cfg = self.config.get("agent") or {}
         llm_cfg   = self.config.get("llm") or {}
@@ -720,16 +742,8 @@ class RuntimeAgent:
                 claim.claim_id, claim_data=claim.model_dump(mode="json")
             )
 
-            # 2) DataSource 등록 (KOSIS)
-            ds_cfg = self.config.get("data_sources") or {}
-            kosis_ds_cfg = dict(ds_cfg.get("kosis") or self.config.get("kosis") or {})
-            datasources = {
-                ds.name: ds
-                for ds in build_all_enabled({
-                    "enabled": ["kosis"],
-                    "kosis": kosis_ds_cfg,
-                })
-            }
+            # 2) DataSource 등록 — config.data_sources.enabled 기반 (#66)
+            datasources = self._build_datasources()
 
             # 3) Planner LLM wiring — 기존 LLMClient 재사용
             from structverify.utils.llm_client import LLMClient

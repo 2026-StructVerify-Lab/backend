@@ -53,6 +53,7 @@ kosis_catalog_cache.json
 
 # result files
 *.csv
+!tests/fixtures/*.csv
 *.zip
 
 # python
@@ -94,3 +95,5 @@ test_outputs/
 
 # ── 개인 메모 (태그 정리 등 — 로컬에서만) ──
 태그
+/eval/datasets
+/eval/runs

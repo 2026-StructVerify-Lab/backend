@@ -38,6 +38,7 @@ import httpx
 
 from structverify.retrieval.base_connector import ConnectorQuery, StatRecord
 from structverify.utils.logger import get_logger
+from structverify.utils.embedding_client import EmbeddingClient
 
 logger = get_logger(__name__)
 
@@ -165,6 +166,12 @@ class CatalogSearchTool:
             "postgresql://structverify:svpass123@localhost:5432/structverify",
         )
         self.timeout = self.config.get("timeout", 30)
+        # [#67-D A-1] 공용 EmbeddingClient. config.embedding 있으면 그것, 없으면
+        # 현재 키 소스(config.llm.api_key_env, 기본 CLOVASTUDIO_API_KEY)로 폴백(동작 보존).
+        emb_cfg = self.config.get("embedding") or {
+            "api_key_env": self.config.get("llm", {}).get("api_key_env", "CLOVASTUDIO_API_KEY"),
+        }
+        self._embedder = EmbeddingClient(emb_cfg)
 
     async def search(
         self,
@@ -405,23 +412,8 @@ class CatalogSearchTool:
     # ── HCX 임베딩 생성 ──────────────────────────────────────────────────────
 
     async def _get_embedding(self, text: str) -> list[float] | None:
-        """HCX 임베딩 API로 벡터 생성"""
-        if not self.hcx_key:
-            return None
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.post(
-                    "https://clovastudio.stream.ntruss.com/v1/api-tools/embedding/v2",
-                    headers={
-                        "Authorization": f"Bearer {self.hcx_key}",
-                        "Content-Type":  "application/json",
-                    },
-                    json={"text": text},
-                )
-                return resp.json()["result"]["embedding"]
-        except Exception as e:
-            logger.debug(f"임베딩 생성 실패: {e}")
-            return None
+        """텍스트 → 임베딩 벡터. 공용 EmbeddingClient 사용 (#67-D A-1)."""
+        return await self._embedder.embed(text)
 
     # ── KOSIS 통합검색 ────────────────────────────────────────────────────────
 

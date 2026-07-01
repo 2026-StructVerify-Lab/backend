@@ -30,11 +30,9 @@ KOSIS에서 직접 검증 불가능한 "파생 주장"을 Graph 2-hop 탐색으�
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from structverify.core.schemas import (
-    Claim, ClaimType, GraphEdge, GraphEdgeType, GraphNode,
-    VerdictType, VerificationResult,
+    Claim, ClaimType, GraphEdge, VerdictType, VerificationResult,
 )
 from structverify.utils.logger import get_logger
 
