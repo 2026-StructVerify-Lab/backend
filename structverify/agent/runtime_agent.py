@@ -127,6 +127,7 @@ class RuntimeAgent:
             "llm": self.config.get("llm", {}),
             # [#67-D A-2] config.embedding 을 CatalogSearchTool까지 전달 (provider 선택)
             "embedding": self.config.get("embedding", {}),
+            "catalog_search": self.config.get("catalog_search", {}),
         }
         self.kosis = KOSISConnector(config=kosis_cfg)
 
@@ -152,6 +153,8 @@ class RuntimeAgent:
 
         kosis_ds_cfg = dict(ds_cfg.get("kosis") or self.config.get("kosis") or {})
         kosis_ds_cfg.setdefault("embedding", self.config.get("embedding", {}))
+        kosis_ds_cfg.setdefault("llm", self.config.get("llm", {}))
+        kosis_ds_cfg.setdefault("catalog_search", self.config.get("catalog_search", {}))
 
         build_cfg = {"enabled": enabled}
         for name in enabled:

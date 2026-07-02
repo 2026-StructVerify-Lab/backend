@@ -594,9 +594,7 @@ class LLMClient:
         except ImportError:
             raise ImportError("pip install openai")
 
-        model_map = {"heavy": "gpt-4o", "light": "gpt-4o-mini",
-                     "structured": "gpt-4o", "reasoning": "gpt-4o"}
-        model = model_map.get(model_tier, "gpt-4o")
+        model = self.models.get(model_tier, self.default_model)
 
         messages = []
         if system_prompt:
@@ -628,9 +626,10 @@ class LLMClient:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
+        model = self.models.get("structured", self.default_model)
         client = AsyncOpenAI(api_key=self.openai_api_key)
         resp = await client.chat.completions.create(
-            model="gpt-4o",
+            model=model,
             messages=messages,
             temperature=self.temperature,
             max_tokens=self.max_tokens,

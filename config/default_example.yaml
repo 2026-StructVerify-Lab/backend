@@ -255,6 +255,13 @@ verification:
   
 # [P21 2026-05-22] catalog_search 의미 정확도 보강 — LLM rerank
 catalog_search:
+  # [retrieval/catalog_search] parent_path 없을 때 카테고리/검색어 LLM 추출 (LLMClient #64)
+  # 전역 llm.temperature/max_tokens 와 분리 — 짧은 결정적 출력용
+  category_extract:
+    model_tier: "light"       # HCX-DASH-002 / gpt-4o-mini 등 light 티어
+    temperature: 0
+    max_tokens: 80
+
   # rerank_mode:
   #   - "none"        : catalog 임베딩 + prior score만 사용 (기본)
   #   - "table_name"  : top N 표 이름만 LLM에 노출해서 best 선택 (저비용)
