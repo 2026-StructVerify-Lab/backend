@@ -147,3 +147,45 @@ def test_parse_json_fallback():
     from structverify.utils.llm_client import _parse_json_response
     result = _parse_json_response("죄송합니다, 답변드리겠습니다.")
     assert "raw" in result
+
+
+# ── 5. provider별 모델 티어 매핑 (#64) — 키/네트워크 불필요 ─────────────────
+
+@pytest.mark.parametrize("provider,heavy,light", [
+    ("hcx",     "HCX-003",       "HCX-DASH-002"),
+    ("openai",  "gpt-4o",        "gpt-4o-mini"),
+    ("upstage", "solar-pro2",    "solar-mini"),
+    ("gemini",  "gemini-2.5-pro", "gemini-2.5-flash"),
+])
+def test_provider_default_models(provider, heavy, light):
+    """models 미지정 시 provider별 기본 모델 사용."""
+    from structverify.utils.llm_client import LLMClient
+    c = LLMClient({"provider": provider})
+    assert c.models["heavy"] == heavy
+    assert c.models["light"] == light
+    assert c.default_model == heavy
+
+
+def test_provider_switch_ignores_hcx_models():
+    """default.yaml의 HCX models를 둔 채 provider만 바꿔도 provider 기본 모델 사용 (#64 핵심).
+    이게 안 되면 upstage에 model='HCX-003'을 보내 404."""
+    from structverify.utils.llm_client import LLMClient
+    hcx_models = {"heavy": "HCX-003", "light": "HCX-DASH-002", "structured": "HCX-007"}
+    c = LLMClient({"provider": "upstage", "models": hcx_models})
+    assert c.models["light"] == "solar-mini"
+    assert not c.models["structured"].upper().startswith("HCX")
+
+
+def test_provider_partial_model_override():
+    """provider용 이름으로 일부 티어만 override하면 나머지는 기본값 merge."""
+    from structverify.utils.llm_client import LLMClient
+    c = LLMClient({"provider": "upstage", "models": {"heavy": "solar-pro3"}})
+    assert c.models["heavy"] == "solar-pro3"      # override 반영
+    assert c.models["light"] == "solar-mini"      # 나머지는 provider 기본값
+
+
+def test_hcx_user_models_preserved():
+    """hcx는 기존대로 사용자 지정 models를 그대로 존중(회귀 방지)."""
+    from structverify.utils.llm_client import LLMClient
+    c = LLMClient({"provider": "hcx", "models": {"heavy": "HCX-003", "light": "HCX-DASH-001"}})
+    assert c.models["light"] == "HCX-DASH-001"

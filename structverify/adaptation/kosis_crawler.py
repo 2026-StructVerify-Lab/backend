@@ -226,42 +226,16 @@ async def save_to_db(catalog: list[dict], config: dict | None = None) -> int:
       2) catalog에 있지만 DB에 없는 신규 행만 임베딩 생성
     """
     import psycopg2
-    import httpx
-    import asyncio
     from dotenv import load_dotenv
     load_dotenv()
 
-    # [v1] - 박재윤: OpenAI 임베딩 (API 키 문제로 교체)
-    # from openai import OpenAI
-    # client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-
-    # [v2] - 박재윤: HCX 임베딩 v2 건별 호출 (배치 미지원)
-    # for item in batch:
-    #     resp = hx.post(...)
-    #     embeddings_list.append(resp.json()["result"]["embedding"])
-
-    # [v3] - 박재윤: asyncio.gather + 세마포어로 rate limit 제어 (3개 동시)
-    hcx_api_key = os.environ.get("CLOVASTUDIO_API_KEY", "")
-    semaphore = asyncio.Semaphore(3)
-
-    async def get_embedding_safe(client, text):
-        async with semaphore:
-            for retry in range(5):
-                resp = await client.post(
-                    "https://clovastudio.stream.ntruss.com/v1/api-tools/embedding/v2",
-                    headers={
-                        "Authorization": f"Bearer {hcx_api_key}",
-                        "Content-Type": "application/json"
-                    },
-                    json={"text": text},
-                    timeout=30
-                )
-                data = resp.json()
-                if data.get("result") is not None:
-                    return data["result"]["embedding"]
-                if resp.status_code == 429:
-                    await asyncio.sleep(2 ** retry)
-            return [0.0] * 1024
+    # [#67-D] 인라인 HCX 임베딩(get_embedding_safe) → 공용 EmbeddingClient.embed_batch 로 교체.
+    #   config.embedding({provider, model, api_key_env}) 사용. config 없으면 {} →
+    #   provider 기본 hcx + CLOVASTUDIO_API_KEY → 기존 키/동작 보존.
+    #   Semaphore(3)+429 지수백오프+zero폴백([0.0]*EMBEDDING_DIM)은
+    #   EmbeddingClient._embed_batch_hcx 에 그대로 이식돼 있음.
+    from structverify.utils.embedding_client import EmbeddingClient
+    embedder = EmbeddingClient((config or {}).get("embedding", {}))
 
     conn = psycopg2.connect(
         host=os.getenv("POSTGRES_HOST"),
@@ -273,46 +247,43 @@ async def save_to_db(catalog: list[dict], config: dict | None = None) -> int:
     cur = conn.cursor()
 
     BATCH_SIZE = 100
-    async with httpx.AsyncClient(timeout=60) as client:
-        for i in range(0, len(catalog), BATCH_SIZE):
-            batch = catalog[i:i+BATCH_SIZE]
-            texts = [f"{item['category_path']} {item['stat_name']}" for item in batch]
+    for i in range(0, len(catalog), BATCH_SIZE):
+        batch = catalog[i:i+BATCH_SIZE]
+        texts = [f"{item['category_path']} {item['stat_name']}" for item in batch]
 
-            embeddings_list = await asyncio.gather(*[
-                get_embedding_safe(client, text) for text in texts
-            ])
+        embeddings_list = await embedder.embed_batch(texts)
 
-            for item, embedding in zip(batch, embeddings_list):
-                # [v2 박재윤/김예슬] embedding skip 최적화:
-                # - 신규 행: embedding 포함 INSERT
-                # - 기존 행: stat_name/fetched_at만 UPDATE, embedding은 기존 값 유지
-                #   (ON CONFLICT DO UPDATE에서 embedding 제외 → 이미 있는 임베딩 보존)
-                cur.execute("""
-                    INSERT INTO kosis_stat_catalog
-                        (stat_id, stat_name, org_id, org_name, category_path,
-                         keywords, embedding, raw_meta_json)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s::vector, %s::jsonb)
-                    ON CONFLICT (stat_id) DO UPDATE
-                    SET stat_name    = EXCLUDED.stat_name,
-                        org_name     = EXCLUDED.org_name,
-                        category_path= EXCLUDED.category_path,
-                        keywords     = EXCLUDED.keywords,
-                        raw_meta_json= EXCLUDED.raw_meta_json,
-                        fetched_at   = NOW(),
-                        embedding    = COALESCE(kosis_stat_catalog.embedding, EXCLUDED.embedding)
-                """, (
-                    item["stat_id"],
-                    item["stat_name"],
-                    item["org_id"],
-                    item["org_name"],
-                    item["category_path"],
-                    item["keywords"],
-                    str(embedding),
-                    json.dumps(item)
-                ))
+        for item, embedding in zip(batch, embeddings_list):
+            # [v2 박재윤/김예슬] embedding skip 최적화:
+            # - 신규 행: embedding 포함 INSERT
+            # - 기존 행: stat_name/fetched_at만 UPDATE, embedding은 기존 값 유지
+            #   (ON CONFLICT DO UPDATE에서 embedding은 COALESCE로 이미 있는 값 보존)
+            cur.execute("""
+                INSERT INTO kosis_stat_catalog
+                    (stat_id, stat_name, org_id, org_name, category_path,
+                     keywords, embedding, raw_meta_json)
+                VALUES (%s, %s, %s, %s, %s, %s, %s::vector, %s::jsonb)
+                ON CONFLICT (stat_id) DO UPDATE
+                SET stat_name    = EXCLUDED.stat_name,
+                    org_name     = EXCLUDED.org_name,
+                    category_path= EXCLUDED.category_path,
+                    keywords     = EXCLUDED.keywords,
+                    raw_meta_json= EXCLUDED.raw_meta_json,
+                    fetched_at   = NOW(),
+                    embedding    = COALESCE(kosis_stat_catalog.embedding, EXCLUDED.embedding)
+            """, (
+                item["stat_id"],
+                item["stat_name"],
+                item["org_id"],
+                item["org_name"],
+                item["category_path"],
+                item["keywords"],
+                str(embedding),
+                json.dumps(item)
+            ))
 
-            conn.commit()
-            print(f"✅ {i+len(batch)}/{len(catalog)}건 저장 완료")
+        conn.commit()
+        print(f"✅ {i+len(batch)}/{len(catalog)}건 저장 완료")
 
     cur.close()
     conn.close()
