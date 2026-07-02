@@ -189,3 +189,38 @@ def test_hcx_user_models_preserved():
     from structverify.utils.llm_client import LLMClient
     c = LLMClient({"provider": "hcx", "models": {"heavy": "HCX-003", "light": "HCX-DASH-001"}})
     assert c.models["light"] == "HCX-DASH-001"
+
+
+@pytest.mark.asyncio
+async def test_openai_structured_uses_compatible_path(monkeypatch):
+    """OpenAI structured는 strict json_schema 대신 compatible(json_object+힌트) 경로."""
+    from structverify.utils.llm_client import LLMClient
+
+    calls: list[dict] = []
+
+    async def fake_compatible(self, prompt, schema, system_prompt, *, base_url, api_key):
+        calls.append({
+            "prompt": prompt,
+            "schema": schema,
+            "system_prompt": system_prompt,
+            "base_url": base_url,
+            "api_key": api_key,
+        })
+        return {"schemas": []}
+
+    monkeypatch.setattr(
+        "structverify.utils.llm_client.LLMClient._call_openai_compatible_structured",
+        fake_compatible,
+    )
+
+    client = LLMClient({"provider": "openai", "openai_key_env": "sk-test"})
+    out = await client.generate_structured(
+        prompt="test",
+        schema={"type": "object", "properties": {"schemas": {"type": "array"}}},
+        system_prompt="sys",
+    )
+
+    assert out == {"schemas": []}
+    assert len(calls) == 1
+    assert calls[0]["base_url"] == "https://api.openai.com/v1"
+    assert calls[0]["api_key"]  # openai_key_env / _direct sk- 경로

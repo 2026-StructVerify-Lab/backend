@@ -1359,10 +1359,9 @@ class KOSISDataSource(BaseDataSource):
                 )
             else:
                 # [P32] LLM fallback — relevance_guard.llm_fallback=true면 룰 거부
-                # 결정 전에 의미 기반 LLM 판단 1회. self.config가 KOSISDataSource에는
-                # 없으므로 _connector_config(= data_sources.kosis 섹션) 안의
-                # relevance_guard 키를 본다. LLM config는 LLMClient가 환경변수에서
-                # NCP_API_KEY를 알아서 찾으므로 None으로 넘겨도 동작.
+                # 결정 전에 의미 기반 LLM 판단 1회. _connector_config(=
+                # data_sources.kosis + RuntimeAgent가 주입한 llm/embedding)에서
+                # relevance_guard와 llm provider를 함께 relevance_judge에 전달.
                 _kosis_cfg = self._connector_config or {}
                 _rg_cfg = _kosis_cfg.get("relevance_guard") or {}
                 _llm_rescued = False
@@ -1379,7 +1378,10 @@ class KOSISDataSource(BaseDataSource):
                             population=claim_population,
                             parent_path=str(_parent_path),
                             table_name=stat_name_str,
-                            config={"kosis": {"relevance_guard": _rg_cfg}},
+                            config={
+                                "kosis": {"relevance_guard": _rg_cfg},
+                                "llm": _kosis_cfg.get("llm") or {},
+                            },
                         )
                         if _rel is True:
                             _llm_rescued = True
