@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_healthcare_0038_c02",
+  "elapsed_sec": 91.55261278152466,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "8305195f-d459-4694-8c31-960c444fd081",
+        "claim_text": "2023년 전국 의료기관의 방문일당 약제비는 일 평균 1.0원으로 나타났다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "방문일당 약제비",
+          "value": 1.0,
+          "unit": "원",
+          "time_period": "2023",
+          "population": "전국",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "보건 > 의료비 > 약제비"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "8305195f-d459-4694-8c31-960c444fd081",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "이 주장은 검증할 수 없습니다. KOSIS에서 2023년 전국 의료기관의 방문일당 약제비에 대한 공식 통계를 찾을 수 없었기 때문입니다. 독자께서는 KOSIS 웹사이트에서 \"방문일당 약제비 전국 2023\"과 같은 검색어를 사용하여 직접 확인해 보실 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

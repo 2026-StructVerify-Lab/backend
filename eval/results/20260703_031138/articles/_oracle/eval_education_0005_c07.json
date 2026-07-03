@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_education_0005_c07",
+  "elapsed_sec": 133.17187476158142,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "3e24ec39-51d4-41f2-b8b6-0cf55d3a5189",
+        "claim_text": "2026년에는 한국의 교육 시장이 더욱 성장할 것으로 예상된다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "교육 시장 성장",
+          "value": null,
+          "unit": "N/A",
+          "time_period": "2026",
+          "population": "한국",
+          "value_role": "derived_rate",
+          "prev_value": null,
+          "prev_time_period": "2025",
+          "parent_path": "교육 시장"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "3e24ec39-51d4-41f2-b8b6-0cf55d3a5189",
+        "verdict": "unverifiable",
+        "confidence": 0.5,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "이 주장은 2026년 한국의 교육 시장 성장에 대한 예측이지만, 이를 뒷받침할 공식 통계는 찾을 수 없었습니다. KOSIS에서 관련 통계표를 찾지 못했기 때문에 검증이 불가합니다. 독자께서는 KOSIS 웹사이트에서 \"교육 시장 성장 한국 2026\"과 같은 검색어를 사용하여 직접 확인해 보실 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

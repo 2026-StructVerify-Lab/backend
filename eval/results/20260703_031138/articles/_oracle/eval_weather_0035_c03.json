@@ -1,0 +1,41 @@
+{
+  "claim_id": "eval_weather_0035_c03",
+  "elapsed_sec": 108.88031721115112,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "4dc8a495-b9ba-4104-9986-c4c59077c415",
+        "claim_text": "2016 향후 1년간 기상산업 부문 인력채용 규모은(는) 110개로 나타났다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": null,
+          "value": null,
+          "unit": null,
+          "time_period": null,
+          "population": null,
+          "value_role": null,
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": null
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "4dc8a495-b9ba-4104-9986-c4c59077c415",
+        "verdict": "match",
+        "confidence": 1.0,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "주장은 사실입니다. KOSIS 통계에 따르면, 2016년 기상산업 부문 인력채용 규모는 110명으로 나타났습니다. 이는 기사에서 언급된 수치와 정확히 일치하며, 통계표 ID는 DT_42401N_00021입니다.",
+        "evidence": {
+          "stat_table_id": "DT_42401N_00021",
+          "official_value": 110.0,
+          "unit": "개",
+          "time_period": "2016",
+          "source_name": "KOSIS"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "claim_id": "eval_policy_0017_c07",
+  "elapsed_sec": 116.38410973548889,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "ee1f5f51-bd6a-4d6b-8dd5-da27e39a6d20",
+        "claim_text": "2026년까지 한국의 시장 전망은 긍정적으로 진행될 가능성이 높습니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "인플레이션 전망",
+          "value": 1.97448,
+          "unit": "%",
+          "time_period": "2026",
+          "population": "한국",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "DT_2KAAD36"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "ee1f5f51-bd6a-4d6b-8dd5-da27e39a6d20",
+        "verdict": "match",
+        "confidence": 0.85,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "주장은 사실입니다. KOSIS의 통계에 따르면, 2026년 한국의 시장 전망은 긍정적으로 진행될 가능성이 높으며, 기사 수치와 공식 수치 모두 1.97448%로 일치합니다. 통계는 표ID DT_2KAAD36을 기준으로 하며, 신뢰도는 85%입니다.",
+        "evidence": {
+          "stat_table_id": "DT_2KAAD36",
+          "official_value": 1.97448,
+          "unit": "%",
+          "time_period": "2026",
+          "source_name": "KOSIS"
+        }
+      }
+    ]
+  }
+}

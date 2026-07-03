@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_employment_0022_c01",
+  "elapsed_sec": 144.12007093429565,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "a3a86f91-518f-4214-b8d6-3b119ed34c80",
+        "claim_text": "2024년 한국에서 전체 인구의 약 95%가 고용 상태에 있다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "고용 상태 인구 비율",
+          "value": 95.0,
+          "unit": "%",
+          "time_period": "2024",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "고용 > 고용률"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "a3a86f91-518f-4214-b8d6-3b119ed34c80",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "이 주장은 2024년 한국 인구의 약 95%가 고용 상태에 있다는 내용입니다. 그러나 KOSIS에서 이와 관련된 공식 통계를 찾을 수 없어 검증이 불가합니다. 독자께서는 KOSIS 웹사이트에서 \"고용 상태 인구 비율\" 등의 검색어를 사용하여 직접 관련 통계를 확인해 보실 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_healthcare_0014_c02",
+  "elapsed_sec": 111.18564510345459,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "6a8071b7-042d-47fe-9c90-25e75cf5385a",
+        "claim_text": "2010년에 최근 1년간 술집 출입을 시도한 아동 및 청소년은 총 328명이었습니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "술집 출입 시도 아동 및 청소년 수",
+          "value": 328.0,
+          "unit": "명",
+          "time_period": "2010",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "사회 > 청소년 > 음주"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "6a8071b7-042d-47fe-9c90-25e75cf5385a",
+        "verdict": "unverifiable",
+        "confidence": 0.5,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장을 검증하기 위해 KOSIS에서 관련 통계를 찾으려 했으나, \"2010년에 최근 1년간 술집 출입을 시도한 아동 및 청소년 수\"에 대한 공식 통계는 확인할 수 없었습니다. KOSIS에서 직접 확인하려면 \"술집 출입 시도 아동 및 청소년\"과 관련된 키워드로 검색해 보시기 바랍니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

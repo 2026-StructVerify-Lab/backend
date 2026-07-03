@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_finance_0008_c01",
+  "elapsed_sec": 118.9952609539032,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "d74aed03-ac7f-4f2c-8039-3f7873a9e683",
+        "claim_text": "전국적으로 2005년에 향후 주택 구입을 희망하는 사람들이 약 400건으로 나타났습니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "향후 주택 구입 희망자 수",
+          "value": 400.0,
+          "unit": "건",
+          "time_period": "2005",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "주택 > 수요 > 주택 구입 희망"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "d74aed03-ac7f-4f2c-8039-3f7873a9e683",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장을 검증하기 위해 KOSIS에서 관련 통계를 찾으려 했으나, \"향후 주택 구입 희망자 수 전체 2005\"에 대한 공식 통계표를 발견하지 못했습니다. 독자께서는 KOSIS 홈페이지에 접속하여 직접 검색어를 입력해 관련 통계가 있는지 확인해 보실 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

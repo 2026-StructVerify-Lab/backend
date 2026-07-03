@@ -1,0 +1,60 @@
+{
+  "claim_id": "eval_finance_0004_c02",
+  "elapsed_sec": 262.63805389404297,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "a0bbb176-6f04-4f8a-8180-8c945344e1d4",
+        "claim_text": "2007년 한국에서 총 17,726,101,489,2천 원이 질병 소분류별 입원 다빈도 상병 급여",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": null,
+          "value": null,
+          "unit": null,
+          "time_period": null,
+          "population": null,
+          "value_role": null,
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": null
+        }
+      },
+      {
+        "claim_id": "6b39d36b-3c17-4650-9eef-82f11f06897b",
+        "claim_text": "현황으로 지출되었다.",
+        "sent_id": "b0000_s0001",
+        "schema": {
+          "indicator": null,
+          "value": null,
+          "unit": null,
+          "time_period": null,
+          "population": null,
+          "value_role": null,
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": null
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "a0bbb176-6f04-4f8a-8180-8c945344e1d4",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "이 주장은 2007년 한국에서 특정 금액이 질병 소분류별 입원 다빈도 상병 급여로 사용되었다고 하지만, 이를 확인할 수 있는 공식 통계는 찾을 수 없었습니다. KOSIS에서 관련 통계표를 찾지 못했기 때문에 검증이 불가합니다. 독자께서는 KOSIS 웹사이트를 방문하여 직접 관련 통계를 검색해 보실 수 있습니다.",
+        "evidence": null
+      },
+      {
+        "claim_id": "6b39d36b-3c17-4650-9eef-82f11f06897b",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "이 주장은 \"현황으로 지출되었다\"는 내용을 담고 있지만, 이를 뒷받침할 공식 통계를 KOSIS에서 찾을 수 없었습니다. 이는 관련된 통계표가 존재하지 않거나 검색어가 부정확했기 때문일 수 있습니다. 독자께서는 KOSIS 홈페이지를 방문하여 보다 다양한 검색어를 사용해 직접 확인해 보시기 바랍니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_population_0002_c12",
+  "elapsed_sec": 221.04557013511658,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "71211c05-03ae-42c2-b295-bdce9ee03fa6",
+        "claim_text": "최근 한국의 인구 규모는 약 619만 명 정도로 파악되고 있다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "인구 규모",
+          "value": 6190000.0,
+          "unit": "명",
+          "time_period": null,
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "인구 > 인구 규모"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "71211c05-03ae-42c2-b295-bdce9ee03fa6",
+        "verdict": "unverifiable",
+        "confidence": 0.5,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "이 주장은 검증할 수 없습니다. KOSIS에서 관련 통계를 찾지 못했기 때문입니다. 독자는 KOSIS 홈페이지에 접속하여 \"인구 규모 전체\"와 같은 검색어를 사용해 직접 확인해 볼 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}
