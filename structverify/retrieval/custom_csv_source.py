@@ -153,6 +153,8 @@ class CustomCSVDataSource(BaseDataSource):
         self,
         candidate_id: str,
         params: dict[str, Any] | None = None,
+        workspace: Any = None,
+        **kwargs: Any,
     ) -> EvidenceData | None:
         """candidate_id("지표|지역") + params["time_period"]로 CSV 행 매칭 → EvidenceData.
 
