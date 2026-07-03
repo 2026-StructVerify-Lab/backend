@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_environment_0021_c01",
+  "elapsed_sec": 74.06142783164978,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "b3121421-9361-4a56-94fd-b15f4c053f3a",
+        "claim_text": "2009년에 실시한 청소년 매체 이용 및 유해 환경 실태 조사에서 전체 청소년 중 2.9%가 가출 경험이 있었다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "가출 경험 청소년 비율",
+          "value": 2.9,
+          "unit": "%",
+          "time_period": "2009",
+          "population": "전체 청소년",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "사회 > 청소년 > 유해 환경"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "b3121421-9361-4a56-94fd-b15f4c053f3a",
+        "verdict": "unverifiable",
+        "confidence": 0.3,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "2009년에 청소년의 가출 경험 비율에 대한 공식 통계를 KOSIS에서 찾을 수 없었습니다. 이는 해당 주제에 대한 통계가 KOSIS에 등록되지 않았거나, 검색어와 일치하는 자료가 없기 때문일 수 있습니다. 독자는 KOSIS 홈페이지에서 \"청소년 가출 경험\" 또는 관련 키워드를 사용해 직접 검색해 볼 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

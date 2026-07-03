@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_weather_0009_c03",
+  "elapsed_sec": 94.00962042808533,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "aadfd4c9-a4ae-49fb-86c1-875067f553be",
+        "claim_text": "2024년 한국의 항공 기후 정보는 1022.3으로 측정되었습니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "항공 기후 정보",
+          "value": 1022.3,
+          "unit": null,
+          "time_period": "2024",
+          "population": "한국",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "환경 > 기후 > 항공 기후 정보"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "aadfd4c9-a4ae-49fb-86c1-875067f553be",
+        "verdict": "unverifiable",
+        "confidence": 0.5,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "이 주장은 2024년 한국의 항공 기후 정보가 1022.3으로 측정되었다고 하지만, 이를 확인할 수 있는 공식 통계는 찾을 수 없었습니다. KOSIS에서 관련 통계표를 검색했으나, 해당 정보를 제공하는 자료가 없었습니다. 독자께서는 KOSIS 웹사이트를 방문하여 \"항공 기후 정보 한국 2024\"와 같은 검색어로 직접 확인해 보실 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

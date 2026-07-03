@@ -282,9 +282,16 @@ class LLMClient:
         if self.provider == "hcx":
             return await self._call_hcx_structured(prompt, schema, system_prompt)
         elif self.provider == "openai":
-            # OpenAI도 response_format으로 JSON Schema 지원
-            raw = await self._call_openai_structured(prompt, schema, system_prompt)
-            return raw
+            # ── [legacy] strict json_schema 직접 호출 (additionalProperties 400 시 폐기) ──
+            # return await self._call_openai_structured(...)  아래 _call_openai_structured
+            # legacy 본문(strict json_schema) 참고.
+            # OpenAI: strict json_schema 대신 Upstage/Gemini와 동일하게
+            # json_object + 프롬프트 스키마 힌트 (HCX canonical 스키마 공유 유지).
+            return await self._call_openai_structured(prompt, schema, system_prompt)
+        elif self.provider == "upstage":  # [v2 - 김예슬]
+            return await self._call_upstage_structured(prompt, schema, system_prompt)
+        elif self.provider == "gemini":  # [v2 - 김예슬]
+            return await self._call_gemini_structured(prompt, schema, system_prompt)
         raise ValueError(f"미지원 provider: {self.provider}")
 
     async def generate_light(self, prompt: str, system_prompt: str | None = None) -> str:
@@ -607,30 +614,42 @@ class LLMClient:
         schema: dict[str, Any],
         system_prompt: str | None,
     ) -> dict[str, Any]:
-        """OpenAI JSON Schema 구조화 응답"""
-        try:
-            from openai import AsyncOpenAI
-        except ImportError:
-            raise ImportError("pip install openai")
+        """OpenAI 구조화 응답 — json_object + 스키마 프롬프트 힌트 (strict json_schema 미사용)."""
+        # ── [legacy] OpenAI strict json_schema (프롬프트 힌트 없음) ─────────────
+        # canonical 스키마에 additionalProperties 등 strict 규칙 맞춘 뒤 재활성 검토.
+        # """OpenAI JSON Schema 구조화 응답"""
+        # try:
+        #     from openai import AsyncOpenAI
+        # except ImportError:
+        #     raise ImportError("pip install openai")
+        #
+        # messages = []
+        # if system_prompt:
+        #     messages.append({"role": "system", "content": system_prompt})
+        # messages.append({"role": "user", "content": prompt})
+        #
+        # model = self.models.get("structured", self.default_model)
+        # client = AsyncOpenAI(api_key=self.openai_api_key)
+        # resp = await client.chat.completions.create(
+        #     model=model,
+        #     messages=messages,
+        #     temperature=self.temperature,
+        #     max_tokens=self.max_tokens,
+        #     response_format={"type": "json_schema", "json_schema": {
+        #         "name": "structured_output", "strict": True, "schema": schema
+        #     }},
+        # )
+        # content = resp.choices[0].message.content
+        # return json.loads(content)
 
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-
-        model = self.models.get("structured", self.default_model)
-        client = AsyncOpenAI(api_key=self.openai_api_key)
-        resp = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-            response_format={"type": "json_schema", "json_schema": {
-                "name": "structured_output", "strict": True, "schema": schema
-            }},
+        base_url = self.config.get("base_url") or "https://api.openai.com/v1"
+        return await self._call_openai_compatible_structured(
+            prompt,
+            schema,
+            system_prompt,
+            base_url=base_url,
+            api_key=self.openai_api_key,
         )
-        content = resp.choices[0].message.content
-        return json.loads(content)
 
 
 # ── 유틸리티 ────────────────────────────────────────────────────────────────

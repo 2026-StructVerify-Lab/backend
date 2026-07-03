@@ -1,0 +1,114 @@
+{
+  "wins": [
+    {
+      "claim_id": "eval_population_0002_c03",
+      "claim_text": "최근 한국의 인구 규모는 약 217만 명 정도로 파악되고 있다.",
+      "baseline_verdict": "mismatch",
+      "now_verdict": "unverifiable"
+    },
+    {
+      "claim_id": "eval_population_0002_c12",
+      "claim_text": "최근 한국의 인구 규모는 약 619만 명 정도로 파악되고 있다.",
+      "baseline_verdict": "mismatch",
+      "now_verdict": "unverifiable"
+    },
+    {
+      "claim_id": "eval_education_0005_c04",
+      "claim_text": "2024년 한국에서 전체 학생들 중 약 42.0%가 비공식 교육을 받고 있다.",
+      "baseline_verdict": "mismatch",
+      "now_verdict": "unverifiable"
+    },
+    {
+      "claim_id": "eval_economy_0006_c01",
+      "claim_text": "한국의 경제 규모는 최근 약 930조 원에 달하는 것으로 나타났다.",
+      "baseline_verdict": "mismatch",
+      "now_verdict": "unverifiable"
+    },
+    {
+      "claim_id": "eval_policy_0017_c03",
+      "claim_text": "2024년 한국의 정책 관련 비공식 지표에서 약 29.0%의 정책이 성공적으로 평가받았습니다.",
+      "baseline_verdict": "mismatch",
+      "now_verdict": "unverifiable"
+    },
+    {
+      "claim_id": "eval_policy_0017_c04",
+      "claim_text": "최근 한국의 경제 규모는 약 953조 원으로 추정되며, 이는 지속적인 성장을 나타냅니다.",
+      "baseline_verdict": "mismatch",
+      "now_verdict": "unverifiable"
+    },
+    {
+      "claim_id": "eval_employment_0022_c01",
+      "claim_text": "2024년 한국에서 전체 인구의 약 95%가 고용 상태에 있다.",
+      "baseline_verdict": "mismatch",
+      "now_verdict": "unverifiable"
+    },
+    {
+      "claim_id": "eval_weather_0035_c03",
+      "claim_text": "2016 향후 1년간 기상산업 부문 인력채용 규모은(는) 110개로 나타났다.",
+      "baseline_verdict": "unverifiable",
+      "now_verdict": "match"
+    },
+    {
+      "claim_id": "eval_real_estate_0036_c06",
+      "claim_text": "2011 본사소재지별 계약방법별 발주기관별 공사종류별 계약실적 - 토목은(는) 35,230,810억원로 나타났다.",
+      "baseline_verdict": "unverifiable",
+      "now_verdict": "mismatch"
+    }
+  ],
+  "regressions": [
+    {
+      "claim_id": "eval_weather_0011_c02",
+      "claim_text": "2024년에도 기상산업 육성을 위해 우선 추진해야 할 정부 중점 정책적 지원 사항은 5개였습니다.",
+      "baseline_verdict": "match",
+      "now_verdict": "unverifiable"
+    },
+    {
+      "claim_id": "eval_population_0012_c13",
+      "claim_text": "인구 증가 추세가 지속될 것으로 예상됩니다.",
+      "baseline_verdict": "unverifiable",
+      "now_verdict": "mismatch"
+    },
+    {
+      "claim_id": "eval_policy_0017_c07",
+      "claim_text": "2026년까지 한국의 시장 전망은 긍정적으로 진행될 가능성이 높습니다.",
+      "baseline_verdict": "unverifiable",
+      "now_verdict": "match"
+    },
+    {
+      "claim_id": "eval_education_0018_c01",
+      "claim_text": "2021년 문화예술교육 미참여자 중 향후 참여 의향이 있는 사람은 1150명이다.",
+      "baseline_verdict": "mismatch",
+      "now_verdict": "unverifiable"
+    },
+    {
+      "claim_id": "eval_agriculture_0019_c04",
+      "claim_text": "2023년 전국 쌀 가공 식품 제조업체 수는 4,416개였습니다.",
+      "baseline_verdict": "mismatch",
+      "now_verdict": "unverifiable"
+    },
+    {
+      "claim_id": "eval_education_0028_c06",
+      "claim_text": "2024 전년 대비 당해년 진로교육 예산 변화은(는) 22,7%로 나타났다.",
+      "baseline_verdict": "mismatch",
+      "now_verdict": "unverifiable"
+    },
+    {
+      "claim_id": "eval_weather_0029_c01",
+      "claim_text": "2024년 한국의 기상 관련 제품 수출은 총 49,45개로 집계되었다.",
+      "baseline_verdict": "mismatch",
+      "now_verdict": "unverifiable"
+    },
+    {
+      "claim_id": "eval_economy_0037_c03",
+      "claim_text": "2023년 한옥 체험업 객실 판매량은 총 538,931개로 집계되었습니다.",
+      "baseline_verdict": "match",
+      "now_verdict": "unverifiable"
+    },
+    {
+      "claim_id": "eval_healthcare_0038_c02",
+      "claim_text": "2023년 전국 의료기관의 방문일당 약제비는 일 평균 1.0원으로 나타났다.",
+      "baseline_verdict": "mismatch",
+      "now_verdict": "unverifiable"
+    }
+  ]
+}

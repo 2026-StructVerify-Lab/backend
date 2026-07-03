@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_agriculture_0013_c01",
+  "elapsed_sec": 191.91921615600586,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "76d1b0e5-5366-41a2-b71b-cc35c7e912d5",
+        "claim_text": "2024년 전국 농어업인 가구의 10.125%가 악취를 주요 문제로 인식하고 있습니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "악취 인식 비율",
+          "value": 10.125,
+          "unit": "%",
+          "time_period": "2024",
+          "population": "전국 농어업인 가구",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "환경 > 농림 > 악취"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "76d1b0e5-5366-41a2-b71b-cc35c7e912d5",
+        "verdict": "unverifiable",
+        "confidence": 0.3,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "이 주장은 2024년 전국 농어업인 가구의 10.125%가 악취를 주요 문제로 인식한다고 하지만, 이를 뒷받침할 공식 통계를 KOSIS에서 찾을 수 없었습니다. 이는 KOSIS에서 관련된 통계표가 제공되지 않기 때문입니다. 독자께서는 KOSIS 웹사이트에서 \"악취 인식 비율 전국 농어업인 가구 2024\"와 같은 검색어를 사용하여 직접 확인해 보실 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

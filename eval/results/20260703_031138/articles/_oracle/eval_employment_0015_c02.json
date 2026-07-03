@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_employment_0015_c02",
+  "elapsed_sec": 120.16406202316284,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "8926b1f3-7e33-4e69-b6f8-c07174d27adb",
+        "claim_text": "최근 전국적으로 학교 선생님들의 평가 규모는 약 864명 정도이다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "학교 선생님 평가 규모",
+          "value": 864.0,
+          "unit": "명",
+          "time_period": null,
+          "population": "전국",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "교육 > 교원 > 평가"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "8926b1f3-7e33-4e69-b6f8-c07174d27adb",
+        "verdict": "unverifiable",
+        "confidence": 0.5,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "이 주장은 검증할 수 없습니다. KOSIS에서 \"학교 선생님 평가 규모 전국\"과 관련된 공식 통계를 찾지 못했기 때문입니다. 독자께서는 KOSIS 웹사이트에서 직접 관련 통계를 검색하여 확인해 보실 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_environment_0024_c01",
+  "elapsed_sec": 113.17622900009155,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "d3223cb8-d8e8-4084-b139-e961ad1838f8",
+        "claim_text": "2011년에 전체 청소년 중 약 11,965.5%가 가출 경험이 있었다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": null,
+          "value": null,
+          "unit": null,
+          "time_period": null,
+          "population": null,
+          "value_role": null,
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": null
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "d3223cb8-d8e8-4084-b139-e961ad1838f8",
+        "verdict": "unverifiable",
+        "confidence": 0.5,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "이 주장은 검증할 수 없습니다. KOSIS에서 관련 통계를 찾지 못했기 때문입니다. 독자께서는 KOSIS 홈페이지에 접속하여 \"2011년 청소년 가출 경험\"과 관련된 통계를 직접 검색해 보실 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

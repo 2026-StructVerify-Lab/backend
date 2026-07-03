@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_real_estate_0031_c03",
+  "elapsed_sec": 170.73090386390686,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "21e7c499-7273-4fa3-82b4-392953e627e4",
+        "claim_text": "1983 공사규모별/세분공사종류별 계약실적 - 수의계약은(는) 3,821,631,320천원로 나타났다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "수의계약 계약실적",
+          "value": 3821631320.0,
+          "unit": "천원",
+          "time_period": "1983",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "건설 > 계약 > 수의계약"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "21e7c499-7273-4fa3-82b4-392953e627e4",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "1983년의 수의계약 계약실적에 대한 공식 통계를 KOSIS에서 찾을 수 없었습니다. 이는 해당 연도의 구체적인 통계표가 KOSIS에 등록되어 있지 않기 때문일 수 있습니다. 독자께서는 KOSIS 웹사이트를 방문하여 \"수의계약 계약실적 전체 1983\"과 같은 검색어를 사용해 직접 확인해 보실 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

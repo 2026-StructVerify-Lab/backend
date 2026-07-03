@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_economy_0037_c01",
+  "elapsed_sec": 125.95070266723633,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "3e7eea56-2b4a-489e-985c-7b70808f9310",
+        "claim_text": "2023년 한국의 카지노업 대표자는 총 17명이었습니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "카지노업 대표자 수",
+          "value": 17.0,
+          "unit": "명",
+          "time_period": "2023",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "산업 > 서비스업 > 카지노업"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "3e7eea56-2b4a-489e-985c-7b70808f9310",
+        "verdict": "unverifiable",
+        "confidence": 0.5,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "이 주장은 검증할 수 없습니다. KOSIS에서 2023년 한국의 카지노업 대표자 수에 대한 공식 통계를 찾을 수 없었기 때문입니다. 독자께서는 KOSIS 웹사이트에서 \"카지노업 대표자 수\"와 관련된 최신 통계를 직접 검색해보실 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

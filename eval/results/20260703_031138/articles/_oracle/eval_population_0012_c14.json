@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_population_0012_c14",
+  "elapsed_sec": 106.11319184303284,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "98e42fcb-af91-4ec1-ac0f-8c1e160c20d1",
+        "claim_text": "이러한 추세는 경제 성장과 더불어 사회적 변화를 촉진하는 주요 요인으로 작용하고 있습니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": null,
+          "value": null,
+          "unit": null,
+          "time_period": null,
+          "population": null,
+          "value_role": null,
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": null
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "98e42fcb-af91-4ec1-ac0f-8c1e160c20d1",
+        "verdict": "unverifiable",
+        "confidence": 0.5,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "이 주장을 검증하기 위해 KOSIS에서 관련 통계를 찾으려 했으나, 적절한 통계표를 발견하지 못했습니다. 따라서 이 주장의 정확성을 확인할 수 없습니다. 독자께서는 KOSIS 웹사이트에서 직접 관련 검색어를 사용하여 추가적인 정보를 찾아보실 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

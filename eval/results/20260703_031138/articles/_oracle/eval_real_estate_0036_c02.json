@@ -1,0 +1,41 @@
+{
+  "claim_id": "eval_real_estate_0036_c02",
+  "elapsed_sec": 64.42823195457458,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "2e70add9-e4b9-4fdf-8999-711bb7b50dde",
+        "claim_text": "2013 본사소재지별 계약방법별 발주기관별 공사종류별 계약실적 - 토목은(는) 35,230,810억원로 나타났다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "계약실적",
+          "value": 35230810.0,
+          "unit": "억원",
+          "time_period": "2013",
+          "population": "토목",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "건설 > 계약 > 계약실적"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "2e70add9-e4b9-4fdf-8999-711bb7b50dde",
+        "verdict": "mismatch",
+        "confidence": 1.0,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "주장은 2013년 토목 계약 실적이 35,230,810억 원이라고 했지만, 공식 통계에 따르면 실제 수치는 4,171,779억 원입니다. 이는 기사 수치가 공식 수치보다 31,059,031억 원, 즉 744.5% 더 많다는 것을 의미합니다. 이러한 수치 불일치는 KOSIS의 공식 통계와 비교했을 때 잘못된 정보가 기사에 포함되었음을 나타냅니다. 공식 통계는 KOSIS의 데이터를 기반으로 합니다.",
+        "evidence": {
+          "stat_table_id": "TX_36601_A108",
+          "official_value": 4171779.0,
+          "unit": "백만원",
+          "time_period": "2013",
+          "source_name": "KOSIS"
+        }
+      }
+    ]
+  }
+}

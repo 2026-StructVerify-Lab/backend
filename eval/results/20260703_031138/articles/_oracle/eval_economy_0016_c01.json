@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_economy_0016_c01",
+  "elapsed_sec": 127.91558194160461,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "03c39c5b-a1f5-4b32-89dd-9397ada367a6",
+        "claim_text": "2001 취업상태/경지규모별 가구원수은(는) 2,965명로 나타났다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "가구원 수",
+          "value": 2965.0,
+          "unit": "명",
+          "time_period": "2001",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "가구 > 가구원 수"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "03c39c5b-a1f5-4b32-89dd-9397ada367a6",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "해당 주장의 검증을 위해 KOSIS에서 관련 통계를 찾으려 했으나, \"2001 취업상태/경지규모별 가구원수\"에 대한 공식 통계표를 발견하지 못했습니다. 독자께서는 KOSIS 홈페이지에서 \"가구원 수 전체 2001\" 등의 검색어를 사용하여 직접 확인해 보실 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

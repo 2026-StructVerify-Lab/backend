@@ -1,0 +1,41 @@
+{
+  "claim_id": "eval_real_estate_0036_c01",
+  "elapsed_sec": 50.214595079422,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "8d43a499-100b-4216-9608-8783a0738eb2",
+        "claim_text": "2012 발주기관별 세분공사종류별 기성실적 - 당해년도 계약분은(는) 43,899,7십억원로 나타났다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "기성실적",
+          "value": 438997.0,
+          "unit": "십억원",
+          "time_period": "2012",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "건설 > 계약 > 기성실적"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "8d43a499-100b-4216-9608-8783a0738eb2",
+        "verdict": "mismatch",
+        "confidence": 1.0,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "기사에서 주장한 2012년 발주기관별 세분공사종류별 기성실적 수치는 438997.0 십억원입니다. 그러나 KOSIS의 공식 통계에 따르면 실제 수치는 78178044.0 십억원으로, 두 수치 간에 큰 차이가 있습니다. 이 차이는 77739047.0 십억원으로, 약 99.4%의 불일치가 발생했습니다. 이는 기사 작성 시 수치 오류가 있었음을 나타내며, 신뢰할 수 있는 KOSIS 통계를 참고하는 것이 중요합니다.",
+        "evidence": {
+          "stat_table_id": "TX_36601_A154",
+          "official_value": 78178044.0,
+          "unit": "백만원",
+          "time_period": "2012",
+          "source_name": "KOSIS"
+        }
+      }
+    ]
+  }
+}

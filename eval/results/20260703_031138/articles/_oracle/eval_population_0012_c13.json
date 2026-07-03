@@ -1,0 +1,41 @@
+{
+  "claim_id": "eval_population_0012_c13",
+  "elapsed_sec": 199.59444117546082,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "58edacca-a364-490e-a50e-c2418c0b5013",
+        "claim_text": "인구 증가 추세가 지속될 것으로 예상됩니다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": null,
+          "value": null,
+          "unit": null,
+          "time_period": null,
+          "population": null,
+          "value_role": null,
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": null
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "58edacca-a364-490e-a50e-c2418c0b5013",
+        "verdict": "mismatch",
+        "confidence": 0.9,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "주장은 \"인구 증가 추세가 지속될 것으로 예상됩니다\"라고 했지만, 기사에서는 구체적인 수치(N/A)를 제공하지 않았습니다. 반면, KOSIS의 공식 수치에 따르면 2022년 기준 인구는 52,732,700명입니다. 기사 수치가 제공되지 않아 공식 수치와 비교할 수 없으므로, 수치 불일치가 발생했습니다. 따라서 주장의 신뢰도는 90%로 평가되며, KOSIS의 데이터를 참고하는 것이 중요합니다.",
+        "evidence": {
+          "stat_table_id": "DT_1YL20621",
+          "official_value": 52732700.0,
+          "unit": "명",
+          "time_period": "2022",
+          "source_name": "KOSIS"
+        }
+      }
+    ]
+  }
+}

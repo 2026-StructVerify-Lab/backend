@@ -1,0 +1,41 @@
+{
+  "claim_id": "eval_education_0028_c01",
+  "elapsed_sec": 98.55953693389893,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "f973c5e7-667b-4817-88b3-490c2c99c63e",
+        "claim_text": "2025년 한국의 진로교육 예산은 전년 대비 22.7% 증가했다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": null,
+          "value": null,
+          "unit": null,
+          "time_period": null,
+          "population": null,
+          "value_role": null,
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": null
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "f973c5e7-667b-4817-88b3-490c2c99c63e",
+        "verdict": "mismatch",
+        "confidence": 0.95,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "주장은 \"2025년 한국의 진로교육 예산이 전년 대비 22.7% 증가했다\"는 내용입니다. 그러나 기사에서는 구체적인 수치가 제공되지 않았고(N/A), 공식 통계에 따르면 증가율은 4.02%입니다. 이로 인해 수치 불일치가 발생했으며, 이는 KOSIS의 공식 통계와 기사 내용이 일치하지 않기 때문입니다. 신뢰도는 95%로, KOSIS의 데이터를 근거로 합니다.",
+        "evidence": {
+          "stat_table_id": "DT_11216N_30401",
+          "official_value": 4.02,
+          "unit": "점",
+          "time_period": "2025",
+          "source_name": "KOSIS"
+        }
+      }
+    ]
+  }
+}

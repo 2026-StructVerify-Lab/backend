@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_automotive_technology_0003_c02",
+  "elapsed_sec": 416.02257776260376,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "aebe7a96-50a9-4366-bce3-5f8d425772ab",
+        "claim_text": "1994 10,000Kg 이하은(는) 66,344대로 나타났다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "10,000Kg 이하 차량 수",
+          "value": 66344.0,
+          "unit": "대",
+          "time_period": "1994",
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "교통 > 차량 > 차량 수"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "aebe7a96-50a9-4366-bce3-5f8d425772ab",
+        "verdict": "unverifiable",
+        "confidence": 0.5,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "이 주장은 1994년에 10,000Kg 이하 차량이 66,344대였다는 내용입니다. 그러나 KOSIS에서 관련 통계를 찾을 수 없어 검증이 불가합니다. 독자께서는 KOSIS 웹사이트에서 \"10,000Kg 이하 차량 수 전체 1994\"와 같은 검색어를 사용하여 직접 확인해 보실 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

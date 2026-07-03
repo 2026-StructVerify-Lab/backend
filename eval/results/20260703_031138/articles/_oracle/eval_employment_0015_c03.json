@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_employment_0015_c03",
+  "elapsed_sec": 112.31354427337646,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "a2491722-23f9-4267-ab83-4834f7de5fb7",
+        "claim_text": "2007년에도 전국적으로 학교 선생님들의 평가 비율이 100%로 유지되었다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "학교 선생님 평가 비율",
+          "value": 100.0,
+          "unit": "%",
+          "time_period": "2007",
+          "population": "전국",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "교육 > 학교 > 교원 평가"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "a2491722-23f9-4267-ab83-4834f7de5fb7",
+        "verdict": "unverifiable",
+        "confidence": 0.2,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "2007년 전국적으로 학교 선생님들의 평가 비율이 100%로 유지되었다는 주장에 대한 공식 통계를 KOSIS에서 찾을 수 없었습니다. 이는 해당 주장을 검증할 수 있는 관련 통계표가 존재하지 않기 때문입니다. 독자께서는 KOSIS 홈페이지에서 \"학교 선생님 평가 비율 전국 2007\"과 같은 검색어를 사용하여 직접 확인해 보실 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}

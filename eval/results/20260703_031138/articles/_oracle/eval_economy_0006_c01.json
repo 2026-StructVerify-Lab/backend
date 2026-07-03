@@ -1,0 +1,35 @@
+{
+  "claim_id": "eval_economy_0006_c01",
+  "elapsed_sec": 75.3090090751648,
+  "report": {
+    "claims": [
+      {
+        "claim_id": "a4b7f260-100f-4345-bc8b-fbc41e6371c7",
+        "claim_text": "한국의 경제 규모는 최근 약 930조 원에 달하는 것으로 나타났다.",
+        "sent_id": "b0000_s0000",
+        "schema": {
+          "indicator": "경제 규모",
+          "value": 930.0,
+          "unit": "원",
+          "time_period": null,
+          "population": "전체",
+          "value_role": "base",
+          "prev_value": null,
+          "prev_time_period": null,
+          "parent_path": "경제 > 경제 규모"
+        }
+      }
+    ],
+    "results": [
+      {
+        "claim_id": "a4b7f260-100f-4345-bc8b-fbc41e6371c7",
+        "verdict": "unverifiable",
+        "confidence": 0.5,
+        "computed_value": null,
+        "formula": null,
+        "explanation": "이 주장은 공식 통계로 확인할 수 없었습니다. KOSIS에서 관련 통계표를 찾지 못했기 때문입니다. 독자께서는 KOSIS 웹사이트에서 \"경제 규모\"와 관련된 최신 데이터를 직접 검색하여 확인해 보실 수 있습니다.",
+        "evidence": null
+      }
+    ]
+  }
+}
