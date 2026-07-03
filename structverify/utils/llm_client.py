@@ -235,10 +235,6 @@ class LLMClient:
             return await self._call_hcx_v1(prompt, system_prompt, temperature, model)
         elif self.provider == "openai":
             return await self._call_openai(prompt, system_prompt, temperature, model_tier)
-        elif self.provider == "upstage":  # [v2 - 김예슬] HCX 키 없을 때 Upstage(Solar)
-            return await self._call_upstage(prompt, system_prompt, temperature, model_tier)
-        elif self.provider == "gemini":  # [v2 - 김예슬]
-            return await self._call_gemini(prompt, system_prompt, temperature, model_tier)
         raise ValueError(f"미지원 provider: {self.provider}")
 
     async def generate_json(
@@ -653,104 +649,6 @@ class LLMClient:
             system_prompt,
             base_url=base_url,
             api_key=self.openai_api_key,
-        )
-
-    # ── [v2 - 김예슬] OpenAI 호환 provider (upstage·gemini) — base_url만 다름 ──
-
-    async def _call_openai_compatible(
-        self,
-        prompt: str,
-        system_prompt: str | None,
-        temperature: float | None,
-        model_tier: str,
-        *,
-        base_url: str,
-        api_key: str,
-    ) -> str:
-        """OpenAI 호환 Chat Completions 공통 호출 (upstage·gemini가 공유)."""
-        try:
-            from openai import AsyncOpenAI
-        except ImportError:
-            raise ImportError("pip install openai")
-        model = self.models.get(model_tier, self.default_model)
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-        resp = await client.chat.completions.create(
-            model=model, messages=messages,
-            temperature=temperature if temperature is not None else self.temperature,
-            max_tokens=self.max_tokens,
-        )
-        return resp.choices[0].message.content
-
-    async def _call_openai_compatible_structured(
-        self,
-        prompt: str,
-        schema: dict[str, Any],
-        system_prompt: str | None,
-        *,
-        base_url: str,
-        api_key: str,
-    ) -> dict[str, Any]:
-        """OpenAI 호환 구조화 응답 공통 호출.
-        json_schema strict를 보장 못하는 provider가 있어, json_object 모드 + 스키마를
-        프롬프트 힌트로 주고 파싱한다(response_format 미지원 시 일반 호출로 폴백).
-        """
-        try:
-            from openai import AsyncOpenAI
-        except ImportError:
-            raise ImportError("pip install openai")
-        sys_p = (system_prompt or "")
-        sys_p += (
-            "\n\n반드시 아래 JSON 스키마에 맞는 JSON 객체 하나만 출력하세요. "
-            "설명·코드펜스 없이 JSON만 출력:\n"
-            + json.dumps(schema, ensure_ascii=False)
-        )
-        messages = [
-            {"role": "system", "content": sys_p},
-            {"role": "user", "content": prompt},
-        ]
-        model = self.models.get("structured", self.default_model)
-        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-        try:
-            resp = await client.chat.completions.create(
-                model=model, messages=messages,
-                temperature=self.temperature, max_tokens=self.max_tokens,
-                response_format={"type": "json_object"},
-            )
-        except Exception:
-            resp = await client.chat.completions.create(
-                model=model, messages=messages,
-                temperature=self.temperature, max_tokens=self.max_tokens,
-            )
-        return _parse_json_response(resp.choices[0].message.content)
-
-    # Upstage (Solar)
-    async def _call_upstage(self, prompt, system_prompt, temperature, model_tier) -> str:
-        return await self._call_openai_compatible(
-            prompt, system_prompt, temperature, model_tier,
-            base_url=self.upstage_base_url, api_key=self.upstage_api_key,
-        )
-
-    async def _call_upstage_structured(self, prompt, schema, system_prompt) -> dict[str, Any]:
-        return await self._call_openai_compatible_structured(
-            prompt, schema, system_prompt,
-            base_url=self.upstage_base_url, api_key=self.upstage_api_key,
-        )
-
-    # Gemini (Google) — OpenAI 호환 엔드포인트
-    async def _call_gemini(self, prompt, system_prompt, temperature, model_tier) -> str:
-        return await self._call_openai_compatible(
-            prompt, system_prompt, temperature, model_tier,
-            base_url=self.gemini_base_url, api_key=self.gemini_api_key,
-        )
-
-    async def _call_gemini_structured(self, prompt, schema, system_prompt) -> dict[str, Any]:
-        return await self._call_openai_compatible_structured(
-            prompt, schema, system_prompt,
-            base_url=self.gemini_base_url, api_key=self.gemini_api_key,
         )
 
 
